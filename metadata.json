@@ -1,0 +1,5 @@
+{
+  "name": "Neon Tactics 3D",
+  "description": "A 3D turn-based PvP strategy game with local simulation capabilities.",
+  "requestFramePermissions": []
+}

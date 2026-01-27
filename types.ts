@@ -1,0 +1,259 @@
+
+import { ThreeElements } from '@react-three/fiber';
+import React from 'react';
+
+export enum PlayerId {
+  ONE = 'P1',
+  TWO = 'P2',
+  NEUTRAL = 'NEUTRAL'
+}
+
+export enum CardCategory {
+  UNIT = 'UNIT',
+  ACTION = 'ACTION'
+}
+
+export enum AppStatus {
+  MENU = 'MENU',       // Initial load, empty board
+  CHARACTER_SELECTION = 'CHARACTER_SELECTION', // Choosing avatar/perks
+  MAP_SELECTION = 'MAP_SELECTION', // New menu for choosing map
+  PLAYING = 'PLAYING', // Active game
+  PAUSED = 'PAUSED',   // In-game menu
+  GAME_OVER = 'GAME_OVER',
+  TALENT_SELECTION = 'TALENT_SELECTION', // New state for choosing level-up rewards
+  SHOP = 'SHOP',        // Purchasing units
+  CARD_CATALOGUE = 'CARD_CATALOGUE' // Viewing all cards
+}
+
+export enum UnitType {
+  // Units
+  SOLDIER = 'SOLDIER',
+  HEAVY = 'HEAVY',   // Big Bulky Soldier
+  MEDIC = 'MEDIC',   // Support Unit
+  BOX = 'BOX',       // Scout
+  CONE = 'CONE',     // Assassin
+  SUICIDE_DRONE = 'SUICIDE_DRONE', // Kamikaze Unit
+  LIGHT_TANK = 'LIGHT_TANK', // 1x1 Tank
+  HEAVY_TANK = 'HEAVY_TANK', // 2x2 Tank
+  
+  // Buildings / Immobile
+  TITAN = 'TITAN',   
+  SERVER = 'SERVER',
+  RESIDENTIAL = 'RESIDENTIAL', // Sector Block
+  SPIKE = 'SPIKE',             // Neural Spike
+  WALL = 'WALL',               // Energy Wall
+  TOWER = 'TOWER',             // 3 Story Tower
+  CHARGING_STATION = 'CHARGING_STATION', // Energy Restorer
+  PORTAL = 'PORTAL',           // Indestructible Warp Gate (2x2)
+
+  // Actions
+  SYSTEM_FREEZE = 'SYSTEM_FREEZE',
+  ION_CANNON = 'ION_CANNON'
+}
+
+export interface Position {
+  x: number;
+  z: number;
+}
+
+export interface UnitStats {
+  hp: number;
+  maxHp: number;
+  energy: number;     // Current Energy (Mana)
+  maxEnergy: number;  // Max Energy
+  attack: number;
+  range: number;
+  movement: number;
+  size: number; // 1 for 1x1, 2 for 2x2
+  blocksLos: boolean; // Does this unit block Line of Sight?
+  maxAttacks: number; // Number of attacks per turn (default 1)
+}
+
+export interface Effect {
+  id: string;
+  name: string;
+  description: string;
+  icon: string; // Identifier for icon rendering
+  duration: number; // Current rounds remaining
+  maxDuration: number; // Starting duration
+  sourceId?: string;
+}
+
+export interface Talent {
+  id: string;
+  name: string;
+  description: string;
+  icon: string; // Emoji or visual placeholder
+  color: string;
+}
+
+export interface CharacterPerk {
+    level: number; // 0, 10, 25, 50, 100
+    description: string;
+    unlocksUnits?: UnitType[]; // Units added to shop
+}
+
+export interface Character {
+    id: string;
+    name: string;
+    gender: 'MALE' | 'FEMALE' | 'UNKNOWN';
+    description: string;
+    perks: CharacterPerk[];
+    color: string;
+}
+
+export interface UnitStatus {
+  isDying?: boolean; 
+  isTeleporting?: boolean; 
+  isExploding?: boolean; 
+  attackTargetId?: string | null;     // Transient: For current animation frame
+  autoAttackTargetId?: string | null; // Persistent: For "Nemesis" logic
+  
+  // Turn Management
+  stepsTaken: number;
+  attacksUsed: number;
+}
+
+export interface Unit {
+  id: string;
+  playerId: PlayerId;
+  position: Position;
+  type: UnitType;
+  color: string;
+  level: number; 
+  rotation: number; 
+  stats: UnitStats;
+  status: UnitStatus;
+  effects: Effect[];
+  movePath: Position[]; 
+}
+
+export interface Card {
+  id: string;
+  category: CardCategory;
+  type: UnitType;
+  name: string;
+  baseStats?: Partial<UnitStats>; // Optional for Actions
+  description?: string;
+  cost: number;
+}
+
+export interface LogEntry {
+  id: string;
+  timestamp: string;
+  message: string;
+  playerId?: PlayerId;
+}
+
+export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN';
+
+export type InteractionMode = 'NORMAL' | 'WALL_PLACEMENT' | 'ABILITY_SUMMON' | 'ABILITY_TELEPORT' | 'ABILITY_FREEZE' | 'ABILITY_HEAL' | 'ION_CANNON_TARGETING' | 'TERRAIN_EDIT';
+
+export interface InteractionState {
+  mode: InteractionMode;
+  sourceUnitId?: string; // For summon/abilities
+  unitType?: UnitType; // For summon/wall
+  remaining?: number;
+  lastPos?: Position; // For wall adjacency
+  playerId?: PlayerId;
+  terrainTool?: TerrainTool; // For map editor
+}
+
+export interface TerrainData {
+  type: 'NORMAL' | 'RAMP' | 'PLATFORM';
+  elevation: number; // 0 is ground, 1 is one step up, etc.
+  rotation: number; // 0, 1, 2, 3 (Multiples of 90 degrees)
+  landingZone?: PlayerId; // If set, only this player can deploy here
+}
+
+export interface ShopItem {
+    id: string;
+    type: UnitType;
+    cost: number;
+    purchaseRound?: number;
+}
+
+export interface GameState {
+  appStatus: AppStatus;
+  mapId: 'EMPTY' | 'MAP_1'; // Identifies the current map
+  lightMode: 'DARK' | 'LIGHT';
+  units: Unit[];
+  revealedTiles: string[];
+  terrain: Record<string, TerrainData>; // Key "x,z"
+  currentTurn: PlayerId;
+  winner: PlayerId | null;
+  roundNumber: number;
+  decks: { [key in PlayerId]: Card[] };
+  selectedCardId: string | null;
+  selectedUnitId: string | null;
+  previewPath: Position[];
+  // Message log for actions
+  systemMessage: string | null;
+  actionLog: LogEntry[];
+  interactionState: InteractionState;
+  
+  // Player Level Effects
+  playerEffects: { [key in PlayerId]: Effect[] };
+  
+  // Character & Talent System
+  playerCharacters: { [key in PlayerId]: string | null }; // Character ID
+  unlockedUnits: { [key in PlayerId]: UnitType[] }; // Pool of units available in shop
+  playerTalents: { [key in PlayerId]: Talent[] };
+  talentChoices: Talent[]; // The two choices currently presented
+  
+  // Economy & Shop
+  credits: { [key in PlayerId]: number };
+  shopStock: { [key in PlayerId]: ShopItem[] }; // Items available to buy per player
+  pendingOrders: { [key in PlayerId]: ShopItem[] }; // Items bought but waiting for delivery
+  nextDeliveryRound: number; // 10, 25, 50, 100
+  shopAvailable: boolean;
+  deliveryHappened: boolean; // Flag for visual feedback
+
+  // Developer Mode Flag
+  isDevMode: boolean;
+}
+
+export type GameEvent = 'PLACE_UNIT' | 'GAME_RESET' | 'SELECT_CARD' | 'SELECT_UNIT';
+
+export interface PlacePayload {
+  playerId: PlayerId;
+  position: Position;
+  cardId: string;
+}
+
+// Augmentation to support R3F elements in JSX
+declare global {
+  namespace JSX {
+    interface IntrinsicElements {
+      group: any;
+      mesh: any;
+      scene: any;
+      planeGeometry: any;
+      meshStandardMaterial: any;
+      lineSegments: any;
+      edgesGeometry: any;
+      lineBasicMaterial: any;
+      meshBasicMaterial: any;
+      boxGeometry: any;
+      cylinderGeometry: any;
+      sphereGeometry: any;
+      coneGeometry: any;
+      torusGeometry: any;
+      icosahedronGeometry: any;
+      ringGeometry: any;
+      dodecahedronGeometry: any;
+      gridHelper: any;
+      ambientLight: any;
+      pointLight: any;
+      spotLight: any;
+      fog: any;
+      color: any;
+      perspectiveCamera: any;
+      octahedronGeometry: any;
+      bufferGeometry: any;
+      lineDashedMaterial: any;
+      circleGeometry: any;
+      primitive: any;
+    }
+  }
+}
