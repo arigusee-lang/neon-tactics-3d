@@ -39,24 +39,56 @@ let gameState = {
   // ... initial state
 };
 
+// Lobby management
+const lobbies = {}; // { roomId: { players: [socketId], customMap: '...' } }
+
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
-  // Send initial state
-  socket.emit('init', gameState);
+  // 1. Create Lobby
+  socket.on('create_lobby', () => {
+    const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
+    lobbies[roomId] = {
+      players: [socket.id],
+      gameState: null
+    };
+    socket.join(roomId);
+    socket.emit('lobby_created', roomId);
+    console.log(`Lobby created: ${roomId} by ${socket.id}`);
+  });
 
-  socket.on('move', (payload) => {
-    // 1. Validate move
-    // 2. Update server state
-    // 3. Broadcast to all clients
-    console.log(`Player ${socket.id} moved`, payload);
+  // 2. Join Lobby
+  socket.on('join_lobby', (roomId) => {
+    const lobby = lobbies[roomId];
+    if (lobby && lobby.players.length < 2) {
+      lobby.players.push(socket.id);
+      socket.join(roomId);
 
-    // Broadcast back for now
-    io.emit('state_update', payload);
+      // Notify both players that game is ready
+      io.to(roomId).emit('game_start', {
+        roomId,
+        players: lobby.players
+      });
+      console.log(`Player ${socket.id} joined lobby ${roomId}`);
+    } else {
+      socket.emit('error_message', 'Lobby not found or full');
+    }
+  });
+
+  // 3. Game Actions Relay
+  // We simply relay the action to the OTHER player in the room.
+  socket.on('game_action', (payload) => {
+    // payload should contain { roomId, action, data }
+    if (payload.roomId) {
+      socket.to(payload.roomId).emit('game_action', payload);
+      // console.log(`Action forwarded in ${payload.roomId}:`, payload.action);
+    }
   });
 
   socket.on('disconnect', () => {
-    console.log('User disconnected');
+    console.log(`User disconnected: ${socket.id}`);
+    // Ideally cleanup empty lobbies or notify opponent
+    // For now, simplicity first
   });
 });
 

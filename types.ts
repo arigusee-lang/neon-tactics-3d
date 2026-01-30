@@ -35,9 +35,9 @@ export enum UnitType {
   SUICIDE_DRONE = 'SUICIDE_DRONE', // Kamikaze Unit
   LIGHT_TANK = 'LIGHT_TANK', // 1x1 Tank
   HEAVY_TANK = 'HEAVY_TANK', // 2x2 Tank
-  
+
   // Buildings / Immobile
-  TITAN = 'TITAN',   
+  TITAN = 'TITAN',
   SERVER = 'SERVER',
   RESIDENTIAL = 'RESIDENTIAL', // Sector Block
   SPIKE = 'SPIKE',             // Neural Spike
@@ -88,27 +88,27 @@ export interface Talent {
 }
 
 export interface CharacterPerk {
-    level: number; // 0, 10, 25, 50, 100
-    description: string;
-    unlocksUnits?: UnitType[]; // Units added to shop
+  level: number; // 0, 10, 25, 50, 100
+  description: string;
+  unlocksUnits?: UnitType[]; // Units added to shop
 }
 
 export interface Character {
-    id: string;
-    name: string;
-    gender: 'MALE' | 'FEMALE' | 'UNKNOWN';
-    description: string;
-    perks: CharacterPerk[];
-    color: string;
+  id: string;
+  name: string;
+  gender: 'MALE' | 'FEMALE' | 'UNKNOWN';
+  description: string;
+  perks: CharacterPerk[];
+  color: string;
 }
 
 export interface UnitStatus {
-  isDying?: boolean; 
-  isTeleporting?: boolean; 
-  isExploding?: boolean; 
+  isDying?: boolean;
+  isTeleporting?: boolean;
+  isExploding?: boolean;
   attackTargetId?: string | null;     // Transient: For current animation frame
   autoAttackTargetId?: string | null; // Persistent: For "Nemesis" logic
-  
+
   // Turn Management
   stepsTaken: number;
   attacksUsed: number;
@@ -120,12 +120,12 @@ export interface Unit {
   position: Position;
   type: UnitType;
   color: string;
-  level: number; 
-  rotation: number; 
+  level: number;
+  rotation: number;
   stats: UnitStats;
   status: UnitStatus;
   effects: Effect[];
-  movePath: Position[]; 
+  movePath: Position[];
 }
 
 export interface Card {
@@ -167,10 +167,10 @@ export interface TerrainData {
 }
 
 export interface ShopItem {
-    id: string;
-    type: UnitType;
-    cost: number;
-    purchaseRound?: number;
+  id: string;
+  type: UnitType;
+  cost: number;
+  purchaseRound?: number;
 }
 
 export interface GameState {
@@ -191,16 +191,16 @@ export interface GameState {
   systemMessage: string | null;
   actionLog: LogEntry[];
   interactionState: InteractionState;
-  
+
   // Player Level Effects
   playerEffects: { [key in PlayerId]: Effect[] };
-  
+
   // Character & Talent System
   playerCharacters: { [key in PlayerId]: string | null }; // Character ID
   unlockedUnits: { [key in PlayerId]: UnitType[] }; // Pool of units available in shop
   playerTalents: { [key in PlayerId]: Talent[] };
   talentChoices: Talent[]; // The two choices currently presented
-  
+
   // Economy & Shop
   credits: { [key in PlayerId]: number };
   shopStock: { [key in PlayerId]: ShopItem[] }; // Items available to buy per player
@@ -208,6 +208,11 @@ export interface GameState {
   nextDeliveryRound: number; // 10, 25, 50, 100
   shopAvailable: boolean;
   deliveryHappened: boolean; // Flag for visual feedback
+
+  // Multiplayer
+  isMultiplayer: boolean;
+  roomId: string | null;
+  myPlayerId: PlayerId | null; // The player ID that THIS client controls
 
   // Developer Mode Flag
   isDevMode: boolean;
