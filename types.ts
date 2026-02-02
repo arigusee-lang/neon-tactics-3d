@@ -35,6 +35,7 @@ export enum UnitType {
   SUICIDE_DRONE = 'SUICIDE_DRONE', // Kamikaze Unit
   LIGHT_TANK = 'LIGHT_TANK', // 1x1 Tank
   HEAVY_TANK = 'HEAVY_TANK', // 2x2 Tank
+  SNIPER = 'SNIPER', // Long-range precision unit
 
   // Buildings / Immobile
   TITAN = 'TITAN',

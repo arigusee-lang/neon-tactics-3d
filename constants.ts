@@ -1,10 +1,10 @@
 
 import { UnitType, CardCategory, Character } from './types';
 
-export const INITIAL_FIELD_SIZE = 10; 
+export const INITIAL_FIELD_SIZE = 10;
 export const BOARD_SIZE = 40; // High limit for the "infinite" feel
 export const TILE_SIZE = 1.0;
-export const TILE_SPACING = 0.1; 
+export const TILE_SPACING = 0.1;
 export const BOARD_OFFSET = (BOARD_SIZE * (TILE_SIZE + TILE_SPACING)) / 2 - (TILE_SIZE + TILE_SPACING) / 2;
 export const ELEVATION_HEIGHT = 0.5; // Visual height per elevation level (Matches approx 30 deg slope)
 export const INITIAL_CREDITS = 500;
@@ -25,7 +25,7 @@ export const COLORS = {
   PIPE_BORDER: '#374151',
   HEALTH_BAR_BG: '#222222',
   PATH_HIGHLIGHT: '#ffff00',
-  FROZEN_OVERLAY: '#00ffff' 
+  FROZEN_OVERLAY: '#00ffff'
 };
 
 export const BUILDING_TYPES = [
@@ -40,109 +40,116 @@ export const BUILDING_TYPES = [
 ];
 
 export const CHARACTERS: Character[] = [
-    {
-        id: 'SURA',
-        name: 'Sura Octavia-7',
-        gender: 'FEMALE',
-        description: 'A rogue bio-engineer from the upper sector. Specializes in field sustain and nanotechnology.',
-        color: '#00ff00', 
-        perks: [
-            { level: 0, description: 'Unlock access to MEDIC units in the logistics network.', unlocksUnits: [UnitType.MEDIC] },
-            { level: 10, description: 'TBD: Enhanced Repair' },
-            { level: 25, description: 'TBD: Bio-Grenades' },
-            { level: 50, description: 'TBD: Mass Revive' },
-            { level: 100, description: 'TBD: Immortality Field' }
-        ]
-    },
-    {
-        id: 'MORDECAI',
-        name: 'Mordecai Iron-Lung',
-        gender: 'MALE',
-        description: 'A veteran of the resource wars. Believes in overwhelming firepower and heavy armor.',
-        color: '#00ff00',
-        perks: [
-            { level: 0, description: 'Unlock access to RAPTOR and MAMMOTH TANKS.', unlocksUnits: [UnitType.LIGHT_TANK, UnitType.HEAVY_TANK] },
-            { level: 10, description: 'TBD: Reinforced Plating' },
-            { level: 25, description: 'TBD: Artillery Support' },
-            { level: 50, description: 'TBD: Factory Overclock' },
-            { level: 100, description: 'TBD: Nuclear Option' }
-        ]
-    }
+  {
+    id: 'NYX',
+    name: 'Nyx',
+    gender: 'FEMALE',
+    description: 'Rogue bio-hacker from the upper sectors. Master of nanotech and field sustain.',
+    color: '#00ff00',
+    perks: [
+      { level: 0, description: 'Unlock access to MEDIC units in the logistics network.', unlocksUnits: [UnitType.MEDIC] },
+      { level: 10, description: 'TBD: Enhanced Repair' },
+      { level: 25, description: 'TBD: Bio-Grenades' },
+      { level: 50, description: 'TBD: Mass Revive' },
+      { level: 100, description: 'TBD: Immortality Field' }
+    ]
+  },
+  {
+    id: 'GRIFF',
+    name: 'Griff',
+    gender: 'MALE',
+    description: 'Hardened war vet. Believes in firepower, armor, and more firepower.',
+    color: '#00ff00',
+    perks: [
+      { level: 0, description: 'Unlock access to RAPTOR and MAMMOTH TANKS.', unlocksUnits: [UnitType.LIGHT_TANK, UnitType.HEAVY_TANK] },
+      { level: 10, description: 'TBD: Reinforced Plating' },
+      { level: 25, description: 'TBD: Artillery Support' },
+      { level: 50, description: 'TBD: Factory Overclock' },
+      { level: 100, description: 'TBD: Nuclear Option' }
+    ]
+  }
 ];
 
-export const CARD_CONFIG: Partial<Record<UnitType, { 
-    category: CardCategory,
-    name: string, 
-    description: string, 
-    cost: number,
-    baseStats?: { hp: number, maxEnergy: number, attack: number, range: number, movement: number, size: number, blocksLos: boolean, maxAttacks?: number } 
+export const CARD_CONFIG: Partial<Record<UnitType, {
+  category: CardCategory,
+  name: string,
+  description: string,
+  cost: number,
+  baseStats?: { hp: number, maxEnergy: number, attack: number, range: number, movement: number, size: number, blocksLos: boolean, maxAttacks?: number }
 }>> = {
-  [UnitType.SOLDIER]: { 
+  [UnitType.SOLDIER]: {
     category: CardCategory.UNIT,
-    name: 'Cyber Marine', 
+    name: 'Cyber Marine',
     description: 'Versatile infantry. Ability: Teleport.',
     cost: 50,
     baseStats: { hp: 100, maxEnergy: 100, attack: 25, range: 3, movement: 4, size: 1, blocksLos: false }
   },
-  [UnitType.HEAVY]: { 
+  [UnitType.HEAVY]: {
     category: CardCategory.UNIT,
-    name: 'Dreadnought', 
+    name: 'Dreadnought',
     description: 'Heavily armored shock trooper. Ability: Suicide Protocol.',
     cost: 150,
     baseStats: { hp: 200, maxEnergy: 0, attack: 40, range: 2, movement: 3, size: 1, blocksLos: false }
   },
-  [UnitType.MEDIC]: { 
+  [UnitType.MEDIC]: {
     category: CardCategory.UNIT,
-    name: 'Field Medic', 
+    name: 'Field Medic',
     description: 'Support Unit. Ability: Nano-Repair.',
     cost: 75,
     baseStats: { hp: 80, maxEnergy: 100, attack: 10, range: 2, movement: 4, size: 1, blocksLos: false }
   },
-  [UnitType.LIGHT_TANK]: { 
+  [UnitType.LIGHT_TANK]: {
     category: CardCategory.UNIT,
-    name: 'Raptor Tank', 
+    name: 'Raptor Tank',
     description: 'Fast assault vehicle.',
     cost: 200,
     baseStats: { hp: 180, maxEnergy: 0, attack: 45, range: 3, movement: 2, size: 1, blocksLos: true }
   },
-  [UnitType.HEAVY_TANK]: { 
+  [UnitType.HEAVY_TANK]: {
     category: CardCategory.UNIT,
-    name: 'Mammoth Tank', 
+    name: 'Mammoth Tank',
     description: 'Heavy siege armor. Dual cannons.',
     cost: 350,
     baseStats: { hp: 450, maxEnergy: 0, attack: 80, range: 4, movement: 5, size: 2, blocksLos: true }
   },
-  [UnitType.BOX]: { 
+  [UnitType.SNIPER]: {
     category: CardCategory.UNIT,
-    name: 'Scout Drone', 
+    name: 'Ghost Operative',
+    description: 'Long-range precision. Passive: Ignores cover.',
+    cost: 125,
+    baseStats: { hp: 60, maxEnergy: 0, attack: 55, range: 6, movement: 3, size: 1, blocksLos: false }
+  },
+  [UnitType.BOX]: {
+    category: CardCategory.UNIT,
+    name: 'Scout Drone',
     description: 'Fast recon.',
     cost: 25,
     baseStats: { hp: 80, maxEnergy: 0, attack: 15, range: 1, movement: 6, size: 1, blocksLos: false }
   },
-  [UnitType.SUICIDE_DRONE]: { 
+  [UnitType.SUICIDE_DRONE]: {
     category: CardCategory.UNIT,
-    name: 'Tick', 
+    name: 'Tick',
     description: 'Explosive payload. Ability: Detonate.',
     cost: 40,
     baseStats: { hp: 40, maxEnergy: 0, attack: 0, range: 0, movement: 6, size: 1, blocksLos: false }
   },
-  [UnitType.CONE]: { 
+  [UnitType.CONE]: {
     category: CardCategory.UNIT,
-    name: 'Apex Blade', 
+    name: 'Apex Blade',
     description: 'Melee assassin. Passive: Double Strike (Attacks twice). Ability: Summon Drones.',
     cost: 100,
     baseStats: { hp: 80, maxEnergy: 50, attack: 50, range: 1, movement: 5, size: 1, blocksLos: false, maxAttacks: 2 }
   },
-  [UnitType.TITAN]: { 
+  [UnitType.TITAN]: {
     category: CardCategory.UNIT,
-    name: 'Titan Turret', 
+    name: 'Titan Turret',
     description: 'Stationary defense. Passive: Splash Damage.',
     cost: 400,
     baseStats: { hp: 500, maxEnergy: 0, attack: 70, range: 4, movement: 0, size: 2, blocksLos: true }
   },
-  [UnitType.SERVER]: { 
+  [UnitType.SERVER]: {
     category: CardCategory.UNIT,
-    name: 'Data Monolith', 
+    name: 'Data Monolith',
     description: 'Data structure.',
     cost: 100,
     baseStats: { hp: 300, maxEnergy: 0, attack: 10, range: 2, movement: 0, size: 1, blocksLos: true }
