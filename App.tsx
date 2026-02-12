@@ -12,7 +12,7 @@ import ShopModal from './components/ShopModal';
 import CardCatalogue from './components/CardCatalogue';
 import { gameService } from './services/gameService';
 import { GameState, PlayerId, AppStatus, Effect, UnitType, Talent } from './types';
-import { COLORS } from './constants';
+import { COLORS, CHARACTERS } from './constants';
 import { groupCards } from './utils/cardUtils';
 
 // Simple Effect Icon Component
@@ -33,23 +33,117 @@ const EffectIcon: React.FC<{ effect: Effect, alignRight?: boolean }> = ({ effect
     );
 };
 
-// Talent Tooltip List Component
-const TalentListTooltip: React.FC<{ talents: Talent[], alignRight?: boolean }> = ({ talents, alignRight }) => {
-    if (talents.length === 0) return null;
+// Player Info Tooltip Component
+const PlayerTooltip: React.FC<{
+    characterId: string | null;
+    talents: Talent[];
+    actions: any[];
+    alignRight?: boolean;
+}> = ({ characterId, talents, actions, alignRight }) => {
+    const character = CHARACTERS.find(c => c.id === characterId);
+
+    if (!character && talents.length === 0 && actions.length === 0) return null;
+
     return (
-        <div className={`absolute top-full mt-2 ${alignRight ? 'right-0' : 'left-0'} w-56 bg-black/95 border border-yellow-600/50 rounded p-2 z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-xl backdrop-blur-md`}>
-            <div className="text-[10px] font-bold text-yellow-500 uppercase mb-2 border-b border-yellow-800/50 pb-1">Acquired Talents</div>
-            <div className="flex flex-col gap-2">
-                {talents.map((t, i) => (
-                    <div key={i} className="flex gap-2">
-                        <div className="text-lg">{t.icon}</div>
+        <div className={`absolute top-full mt-2 ${alignRight ? 'right-0' : 'left-0'} w-64 bg-black/95 border border-green-500/50 rounded p-3 z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-[0_0_20px_rgba(0,255,0,0.2)] backdrop-blur-md`}>
+
+            {/* Character Info */}
+            {character && (
+                <div className="mb-3 border-b border-green-900/50 pb-2">
+                    <div className="text-[10px] text-green-500/70 font-bold uppercase tracking-wider mb-1">Current Character</div>
+                    <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded bg-green-900/30 border border-green-500/30 flex items-center justify-center text-lg shadow-inner">
+                            {character.gender === 'FEMALE' ? '👩‍🎤' : '👨‍🎤'}
+                        </div>
                         <div>
-                            <div className="text-[10px] font-bold text-white leading-none mb-0.5">{t.name}</div>
-                            <div className="text-[9px] text-gray-400 leading-tight">{t.description}</div>
+                            <div className="text-sm font-bold text-white leading-none mb-1" style={{ color: character.color }}>{character.name}</div>
+                            <div className="text-[9px] text-gray-400 leading-tight">{character.description}</div>
                         </div>
                     </div>
-                ))}
-            </div>
+                </div>
+            )}
+
+            {/* Active Skills (Actions) */}
+            {actions && actions.length > 0 && (
+                <div className="mb-3 border-b border-green-900/50 pb-2">
+                    <div className="text-[10px] text-purple-400 font-bold uppercase tracking-wider mb-1">Unlocked Skills</div>
+                    <div className="flex flex-col gap-1.5">
+                        {actions.map((action, i) => (
+                            <div key={i} className="flex gap-2 items-center bg-purple-900/10 p-1 rounded border border-purple-500/20">
+                                <div className="text-base min-w-[1.25rem] text-center">{action.icon}</div>
+                                <div>
+                                    <div className="text-[10px] font-bold text-purple-300 leading-none mb-0.5">{action.name}</div>
+                                    <div className="text-[8px] text-gray-400 leading-tight">{action.description}</div>
+                                    <div className="text-[8px] text-purple-500/70 font-mono mt-0.5">COOLDOWN: {action.cooldown}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* Acquired Perks (Talents) */}
+            {talents && talents.length > 0 && (
+                <div>
+                    <div className="text-[10px] text-yellow-500 font-bold uppercase tracking-wider mb-1">Acquired Perks</div>
+                    <div className="flex flex-col gap-1.5">
+                        {talents.map((t, i) => (
+                            <div key={i} className="flex gap-2 items-center bg-yellow-900/10 p-1 rounded border border-yellow-500/20">
+                                <div className="text-base min-w-[1.25rem] text-center">{t.icon}</div>
+                                <div>
+                                    <div className="text-[10px] font-bold text-yellow-200 leading-none mb-0.5">{t.name}</div>
+                                    <div className="text-[8px] text-gray-400 leading-tight">{t.description}</div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+        </div>
+    );
+};
+
+// Character Action Bar Component
+const CharacterActionBar: React.FC<{ actions: any[], playerId: PlayerId, currentTurn: PlayerId }> = ({ actions, playerId, currentTurn }) => {
+    if (!actions || actions.length === 0) return null;
+
+    return (
+        <div className="flex gap-2 mb-2 pointer-events-auto justify-center">
+            {actions.map(action => {
+                const isReady = action.currentCooldown === 0;
+                const isMyTurn = playerId === currentTurn;
+                const canUse = isReady && isMyTurn;
+
+                return (
+                    <button
+                        key={action.id}
+                        onClick={() => gameService.triggerCharacterAction(action.id)}
+                        disabled={!canUse}
+                        className={`
+                            relative w-10 h-10 rounded border flex items-center justify-center text-xl transition-all group
+                            ${canUse
+                                ? 'bg-black/60 border-purple-500 text-purple-400 hover:bg-purple-900/40 hover:scale-110 shadow-[0_0_10px_rgba(168,85,247,0.4)]'
+                                : 'bg-black/40 border-gray-800 text-gray-600 cursor-not-allowed grayscale'
+                            }
+                        `}
+                    >
+                        {action.icon}
+
+                        {!isReady && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/60 rounded font-mono text-xs font-bold text-white">
+                                {action.currentCooldown}
+                            </div>
+                        )}
+
+                        {/* Tooltip */}
+                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-48 bg-black/95 border border-purple-500/50 rounded p-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50">
+                            <div className="text-[10px] font-bold text-purple-400 uppercase mb-1">{action.name}</div>
+                            <div className="text-[9px] text-gray-400 leading-tight">{action.description}</div>
+                            <div className="text-[9px] text-gray-500 mt-1 font-mono">COOLDOWN: {action.cooldown} TURNS</div>
+                        </div>
+                    </button>
+                );
+            })}
         </div>
     );
 };
@@ -154,6 +248,7 @@ const App: React.FC = () => {
                 appStatus={gameState.appStatus}
                 lightMode={gameState.lightMode}
                 mapId={gameState.mapId}
+                collectibles={gameState.collectibles}
             />
 
             <MainMenu
@@ -165,7 +260,9 @@ const App: React.FC = () => {
 
             {/* Character Selection Modal */}
             {gameState.appStatus === AppStatus.CHARACTER_SELECTION && (
-                <CharacterSelectionModal />
+                <CharacterSelectionModal
+                    playerCharacters={gameState.playerCharacters}
+                />
             )}
 
             {/* Talent Selection Modal Overlay */}
@@ -204,40 +301,107 @@ const App: React.FC = () => {
                         {/* HUD Top Bar */}
                         <div className="flex items-center gap-4 w-full justify-center">
 
-                            {/* Player 1 Effects */}
-                            <div className="flex gap-1 justify-end min-w-[80px] pointer-events-auto">
-                                {gameState.playerEffects[PlayerId.ONE].map(e => (
-                                    <EffectIcon key={e.id} effect={e} alignRight />
-                                ))}
-                            </div>
+                            {gameState.isDevMode ? (
+                                <div className="bg-transparent border border-green-900 px-6 py-2 rounded-full shadow-[0_0_15px_rgba(0,255,0,0.2)] flex items-center gap-6 backdrop-blur-sm pointer-events-auto">
+                                    {/* Level Counter (Left) */}
+                                    <div className="flex flex-col items-center justify-center px-4 border-r border-slate-700/50">
+                                        <div className="text-[8px] text-green-500/70 font-bold uppercase tracking-wider leading-none mb-0.5">LEVEL</div>
+                                        <div className="text-lg font-mono font-bold text-white leading-none">{gameState.roundNumber.toString().padStart(2, '0')}</div>
+                                    </div>
 
-                            <div className="bg-transparent border border-green-900 px-6 py-2 rounded-full shadow-[0_0_15px_rgba(0,255,0,0.2)] flex items-center gap-6 backdrop-blur-sm pointer-events-auto">
+                                    {/* Player List (Right) */}
+                                    <div className="flex items-center gap-6">
+                                        {/* Player 1 */}
+                                        <div
+                                            onClick={() => gameService.debugSetTurn(PlayerId.ONE)}
+                                            className={`relative group text-sm font-bold tracking-widest transition-colors cursor-pointer ${gameState.currentTurn === PlayerId.ONE ? 'text-cyan-400 drop-shadow-[0_0_5px_cyan]' : 'text-slate-600 hover:text-slate-400'}`}
+                                        >
+                                            PLAYER 1
+                                            <PlayerTooltip
+                                                characterId={gameState.playerCharacters[PlayerId.ONE]}
+                                                talents={gameState.playerTalents[PlayerId.ONE]}
+                                                actions={gameState.characterActions[PlayerId.ONE]}
+                                                alignRight={false}
+                                            />
+                                        </div>
 
-                                {/* Player 1 Label + Talent Tooltip */}
-                                <div className={`relative group text-sm font-bold tracking-widest transition-colors cursor-help ${gameState.currentTurn === PlayerId.ONE ? 'text-cyan-400 drop-shadow-[0_0_5px_cyan]' : 'text-slate-600'}`}>
-                                    PLAYER 1
-                                    <TalentListTooltip talents={gameState.playerTalents[PlayerId.ONE]} alignRight={false} />
+                                        {/* Player 2 */}
+                                        <div
+                                            onClick={() => gameService.debugSetTurn(PlayerId.TWO)}
+                                            className={`relative group text-sm font-bold tracking-widest transition-colors cursor-pointer ${gameState.currentTurn === PlayerId.TWO ? 'text-pink-400 drop-shadow-[0_0_5px_magenta]' : 'text-slate-600 hover:text-slate-400'}`}
+                                        >
+                                            PLAYER 2
+                                            <PlayerTooltip
+                                                characterId={gameState.playerCharacters[PlayerId.TWO]}
+                                                talents={gameState.playerTalents[PlayerId.TWO]}
+                                                actions={gameState.characterActions[PlayerId.TWO]}
+                                                alignRight={false}
+                                            />
+                                        </div>
+
+                                        {/* Neutral */}
+                                        <div
+                                            onClick={() => gameService.debugSetTurn(PlayerId.NEUTRAL)}
+                                            className={`relative group text-sm font-bold tracking-widest transition-colors cursor-pointer ${gameState.currentTurn === PlayerId.NEUTRAL ? 'text-gray-300 drop-shadow-[0_0_5px_gray]' : 'text-slate-600 hover:text-slate-400'}`}
+                                        >
+                                            NEUTRAL
+                                            <PlayerTooltip
+                                                characterId={gameState.playerCharacters[PlayerId.NEUTRAL]}
+                                                talents={gameState.playerTalents[PlayerId.NEUTRAL]}
+                                                actions={gameState.characterActions[PlayerId.NEUTRAL]}
+                                                alignRight={true}
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
+                            ) : (
+                                <>
+                                    {/* Player 1 Effects */}
+                                    <div className="flex gap-1 justify-end min-w-[80px] pointer-events-auto">
+                                        {gameState.playerEffects[PlayerId.ONE].map(e => (
+                                            <EffectIcon key={e.id} effect={e} alignRight />
+                                        ))}
+                                    </div>
 
-                                {/* Level Counter */}
-                                <div className="flex flex-col items-center justify-center px-4 border-l border-r border-slate-700/50">
-                                    <div className="text-[8px] text-green-500/70 font-bold uppercase tracking-wider leading-none mb-0.5">LEVEL</div>
-                                    <div className="text-lg font-mono font-bold text-white leading-none">{gameState.roundNumber.toString().padStart(2, '0')}</div>
-                                </div>
+                                    <div className="bg-transparent border border-green-900 px-6 py-2 rounded-full shadow-[0_0_15px_rgba(0,255,0,0.2)] flex items-center gap-6 backdrop-blur-sm pointer-events-auto">
 
-                                {/* Player 2 Label + Talent Tooltip */}
-                                <div className={`relative group text-sm font-bold tracking-widest transition-colors cursor-help ${gameState.currentTurn === PlayerId.TWO ? 'text-pink-400 drop-shadow-[0_0_5px_magenta]' : 'text-slate-600'}`}>
-                                    PLAYER 2
-                                    <TalentListTooltip talents={gameState.playerTalents[PlayerId.TWO]} alignRight={true} />
-                                </div>
-                            </div>
+                                        {/* Player 1 Label + Talent Tooltip */}
+                                        <div className={`relative group text-sm font-bold tracking-widest transition-colors cursor-help ${gameState.currentTurn === PlayerId.ONE ? 'text-cyan-400 drop-shadow-[0_0_5px_cyan]' : 'text-slate-600'}`}>
+                                            PLAYER 1
+                                            <PlayerTooltip
+                                                characterId={gameState.playerCharacters[PlayerId.ONE]}
+                                                talents={gameState.playerTalents[PlayerId.ONE]}
+                                                actions={gameState.characterActions[PlayerId.ONE]}
+                                                alignRight={false}
+                                            />
+                                        </div>
 
-                            {/* Player 2 Effects */}
-                            <div className="flex gap-1 justify-start min-w-[80px] pointer-events-auto">
-                                {gameState.playerEffects[PlayerId.TWO].map(e => (
-                                    <EffectIcon key={e.id} effect={e} />
-                                ))}
-                            </div>
+                                        {/* Level Counter */}
+                                        <div className="flex flex-col items-center justify-center px-4 border-l border-r border-slate-700/50">
+                                            <div className="text-[8px] text-green-500/70 font-bold uppercase tracking-wider leading-none mb-0.5">LEVEL</div>
+                                            <div className="text-lg font-mono font-bold text-white leading-none">{gameState.roundNumber.toString().padStart(2, '0')}</div>
+                                        </div>
+
+                                        {/* Player 2 Label + Talent Tooltip */}
+                                        <div className={`relative group text-sm font-bold tracking-widest transition-colors cursor-help ${gameState.currentTurn === PlayerId.TWO ? 'text-pink-400 drop-shadow-[0_0_5px_magenta]' : 'text-slate-600'}`}>
+                                            PLAYER 2
+                                            <PlayerTooltip
+                                                characterId={gameState.playerCharacters[PlayerId.TWO]}
+                                                talents={gameState.playerTalents[PlayerId.TWO]}
+                                                actions={gameState.characterActions[PlayerId.TWO]}
+                                                alignRight={true}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    {/* Player 2 Effects */}
+                                    <div className="flex gap-1 justify-start min-w-[80px] pointer-events-auto">
+                                        {gameState.playerEffects[PlayerId.TWO].map(e => (
+                                            <EffectIcon key={e.id} effect={e} />
+                                        ))}
+                                    </div>
+                                </>
+                            )}
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -288,7 +452,14 @@ const App: React.FC = () => {
                     </div>
 
                     <div className="absolute bottom-6 left-0 right-0 z-10 flex justify-center px-4 pointer-events-none">
-                        <div className="w-full max-w-screen-xl flex justify-center items-center gap-4 pointer-events-auto">
+                        <div className="w-full max-w-screen-xl flex flex-col items-center gap-1 pointer-events-auto">
+                            {/* Character Actions */}
+                            <CharacterActionBar
+                                actions={gameState.characterActions[gameState.currentTurn]}
+                                playerId={gameState.currentTurn}
+                                currentTurn={gameState.currentTurn}
+                            />
+
                             <Deck
                                 cards={currentPlayerDeck}
                                 selectedId={gameState.selectedCardId}
@@ -300,7 +471,7 @@ const App: React.FC = () => {
                         </div>
                     </div>
 
-                    <UnitControlPanel unit={selectedUnit} isDevMode={gameState.isDevMode} />
+                    <UnitControlPanel unit={selectedUnit} isDevMode={gameState.isDevMode} currentRound={gameState.roundNumber} characterId={selectedUnit ? gameState.playerCharacters[selectedUnit.playerId] : null} />
 
                     <div className="absolute top-16 left-4 w-72 flex flex-col gap-2 pointer-events-auto max-h-[calc(100vh-10rem)] z-10">
                         {/* Action Log Panel */}

@@ -19,25 +19,29 @@ interface ShopModalProps {
     onClose: () => void;
 }
 
-const ShopModal: React.FC<ShopModalProps> = ({ 
-    availableStock, 
-    boughtItems, 
-    credits, 
-    nextDeliveryRound, 
+const ShopModal: React.FC<ShopModalProps> = ({
+    availableStock,
+    boughtItems,
+    credits,
+    nextDeliveryRound,
     currentRound,
     onBuy,
     onRefund,
     onReroll,
-    onClose 
+    onClose
 }) => {
-    const [selectedType, setSelectedType] = useState<UnitType | null>(null);
+    const [selectedKey, setSelectedKey] = useState<string | null>(null);
+
+    // Helper to generate unique keys for grouping
+    const getGroupKey = (item: ShopItem) => `${item.type}__${item.deliveryTurns}`;
 
     // Group items logic
     const stockGroups = useMemo(() => {
         const groups: Record<string, ShopItem[]> = {};
         availableStock.forEach(item => {
-            if (!groups[item.type]) groups[item.type] = [];
-            groups[item.type].push(item);
+            const key = getGroupKey(item);
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(item);
         });
         return groups;
     }, [availableStock]);
@@ -45,67 +49,68 @@ const ShopModal: React.FC<ShopModalProps> = ({
     const boughtGroups = useMemo(() => {
         const groups: Record<string, ShopItem[]> = {};
         boughtItems.forEach(item => {
-            if (!groups[item.type]) groups[item.type] = [];
-            groups[item.type].push(item);
+            const key = getGroupKey(item);
+            if (!groups[key]) groups[key] = [];
+            groups[key].push(item);
         });
         return groups;
     }, [boughtItems]);
 
     // Select first available item on load if nothing selected
     React.useEffect(() => {
-        if (!selectedType) {
-            const firstStock = Object.keys(stockGroups)[0] as UnitType;
-            if (firstStock) setSelectedType(firstStock);
+        if (!selectedKey) {
+            const firstStock = Object.keys(stockGroups)[0];
+            if (firstStock) setSelectedKey(firstStock);
             else {
-                const firstBought = Object.keys(boughtGroups)[0] as UnitType;
-                if (firstBought) setSelectedType(firstBought);
+                const firstBought = Object.keys(boughtGroups)[0];
+                if (firstBought) setSelectedKey(firstBought);
             }
         }
-    }, [stockGroups, boughtGroups, selectedType]);
+    }, [stockGroups, boughtGroups, selectedKey]);
 
     // Actual Detailed Icons for Grid
     const getIcon = (type: UnitType, color: string) => {
-         const p = { width: "100%", height: "100%", fill: "none", stroke: color, strokeWidth: "2", vectorEffect: "non-scaling-stroke" as const };
-         switch (type) {
-            case UnitType.SOLDIER: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="6" r="4"/><path d="M6 22V14C6 11 12 11 12 11V22"/></svg>;
-            case UnitType.HEAVY: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" /><rect x="8" y="8" width="8" height="8" fill="currentColor" fillOpacity="0.2"/></svg>;
+        const p = { width: "100%", height: "100%", fill: "none", stroke: color, strokeWidth: "2", vectorEffect: "non-scaling-stroke" as const };
+        switch (type) {
+            case UnitType.SOLDIER: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="6" r="4" /><path d="M6 22V14C6 11 12 11 12 11V22" /></svg>;
+            case UnitType.HEAVY: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" /><rect x="8" y="8" width="8" height="8" fill="currentColor" fillOpacity="0.2" /></svg>;
             case UnitType.MEDIC: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2V22 M2 12H22" strokeWidth="4" /><rect x="6" y="6" width="12" height="12" stroke="none" fill="currentColor" fillOpacity="0.1" /></svg>;
-            case UnitType.LIGHT_TANK: return <svg viewBox="0 0 24 24" {...p}><path d="M4 14H20M2 18H22M6 10H18L16 6H8L6 10Z"/><rect x="4" y="14" width="16" height="6" fill="currentColor" fillOpacity="0.2"/></svg>;
-            case UnitType.HEAVY_TANK: return <svg viewBox="0 0 24 24" {...p}><path d="M2 16H22M4 12H20L18 4H6L4 12Z" /><rect x="2" y="16" width="20" height="6" fill="currentColor" fillOpacity="0.2"/><line x1="8" y1="12" x2="8" y2="4" strokeWidth="3"/><line x1="16" y1="12" x2="16" y2="4" strokeWidth="3"/></svg>;
-            case UnitType.BOX: return <svg viewBox="0 0 24 24" {...p}><rect x="8" y="8" width="8" height="8"/><path d="M2 12H8 M16 22H22"/></svg>;
-            case UnitType.SUICIDE_DRONE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="6"/><path d="M12 6V2 M12 22V18 M6 12H2 M22 12H18 M16 16L20 20 M4 4L8 8 M20 4L16 8 M8 16L4 20"/></svg>;
-            case UnitType.TITAN: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="8" width="16" height="12"/><path d="M12 2V8"/></svg>;
-            case UnitType.RESIDENTIAL: return <svg viewBox="0 0 24 24" {...p}><rect x="6" y="2" width="12" height="20"/><path d="M6 7H18 M6 12H18 M6 17H18"/></svg>;
-            case UnitType.SPIKE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L15 22L12 18L9 22L12 2Z"/></svg>;
-            case UnitType.SERVER: return <svg viewBox="0 0 24 24" {...p}><rect x="8" y="4" width="8" height="16"/><line x1="10" y1="8" x2="14" y2="8" /><line x1="10" y1="12" x2="14" y2="12" /></svg>;
-            case UnitType.SYSTEM_FREEZE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeDasharray="2 2"/><path d="M12 4V20 M4 12H20"/></svg>;
-            case UnitType.CONE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L4 20H20L12 2Z"/></svg>;
-            case UnitType.WALL: return <svg viewBox="0 0 24 24" {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 6V18 M18 6V18 M2 12H22"/></svg>;
+            case UnitType.LIGHT_TANK: return <svg viewBox="0 0 24 24" {...p}><path d="M4 14H20M2 18H22M6 10H18L16 6H8L6 10Z" /><rect x="4" y="14" width="16" height="6" fill="currentColor" fillOpacity="0.2" /></svg>;
+            case UnitType.HEAVY_TANK: return <svg viewBox="0 0 24 24" {...p}><path d="M2 16H22M4 12H20L18 4H6L4 12Z" /><rect x="2" y="16" width="20" height="6" fill="currentColor" fillOpacity="0.2" /><line x1="8" y1="12" x2="8" y2="4" strokeWidth="3" /><line x1="16" y1="12" x2="16" y2="4" strokeWidth="3" /></svg>;
+            case UnitType.BOX: return <svg viewBox="0 0 24 24" {...p}><rect x="8" y="8" width="8" height="8" /><path d="M2 12H8 M16 22H22" /></svg>;
+            case UnitType.SUICIDE_DRONE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="6" /><path d="M12 6V2 M12 22V18 M6 12H2 M22 12H18 M16 16L20 20 M4 4L8 8 M20 4L16 8 M8 16L4 20" /></svg>;
+            case UnitType.TITAN: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="8" width="16" height="12" /><path d="M12 2V8" /></svg>;
+            case UnitType.SPIKE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L15 22L12 18L9 22L12 2Z" /></svg>;
+            case UnitType.SYSTEM_FREEZE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeDasharray="2 2" /><path d="M12 4V20 M4 12H20" /></svg>;
+            case UnitType.CONE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L4 20H20L12 2Z" /></svg>;
+            case UnitType.WALL: return <svg viewBox="0 0 24 24" {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 6V18 M18 6V18 M2 12H22" /></svg>;
             case UnitType.TOWER: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L6 22H18L12 2Z" /><line x1="12" y1="2" x2="12" y2="22" /><circle cx="12" cy="8" r="2" /></svg>;
             case UnitType.CHARGING_STATION: return <svg viewBox="0 0 24 24" {...p}><path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" /><rect x="4" y="20" width="16" height="2" fill="currentColor" /></svg>;
             case UnitType.ION_CANNON: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2V6 M12 18V22 M2 12H6 M18 12H22" /><path d="M19.07 4.93L16.24 7.76 M7.76 16.24L4.93 19.07" /><path d="M4.93 4.93L7.76 7.76 M16.24 16.24L19.07 19.07" /></svg>;
             case UnitType.PORTAL: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeWidth="3" /><circle cx="12" cy="12" r="2" fill="currentColor" /></svg>;
+            case UnitType.SNIPER: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="10" strokeWidth="1" opacity="0.5" /><line x1="12" y1="2" x2="12" y2="7" /><line x1="12" y1="17" x2="12" y2="22" /><line x1="2" y1="12" x2="7" y2="12" /><line x1="17" y1="12" x2="22" y2="12" /><circle cx="12" cy="12" r="2" fill="currentColor" /></svg>;
             default: return <div className="w-4 h-4 bg-current" />;
-         }
+        }
     };
 
-    const renderGridItem = (type: string, items: ShopItem[], isStock: boolean) => {
+    const renderGridItem = (groupKey: string, items: ShopItem[], isStock: boolean) => {
         const item = items[0];
         const config = CARD_CONFIG[item.type as UnitType];
         if (!config) return null;
 
         const count = items.length;
-        const isSelected = selectedType === item.type;
+        const isSelected = selectedKey === groupKey;
         const canAfford = credits >= item.cost;
-        
+        const isInstant = item.deliveryTurns === 0;
+
         // 3) Visual Highlight for Card Types
         const isAction = config.category === CardCategory.ACTION;
-        
+
         // Base styling
         let borderColor = 'border-gray-700';
         let bgColor = 'bg-black/60';
         let hoverClass = 'hover:border-gray-500 hover:bg-gray-800/60';
-        
+
         if (isSelected) {
             borderColor = isAction ? 'border-purple-400' : (isStock ? 'border-green-400' : 'border-blue-400');
             bgColor = isAction ? 'bg-purple-900/40' : (isStock ? 'bg-green-900/40' : 'bg-blue-900/40');
@@ -117,18 +122,50 @@ const ShopModal: React.FC<ShopModalProps> = ({
             else hoverClass = 'hover:border-blue-500/50 hover:bg-blue-900/20';
         }
 
+        // Instant Delivery Highlight
+        if (isStock && isInstant) {
+            borderColor = 'border-yellow-400';
+            bgColor = 'bg-yellow-900/20';
+            if (isSelected) {
+                borderColor = 'border-yellow-300';
+                bgColor = 'bg-yellow-800/60';
+            }
+        }
+
         const iconColor = isSelected ? '#fff' : (isAction ? '#a855f7' : (isStock ? (canAfford ? COLORS.P1 : '#555') : COLORS.P2));
 
         return (
-            <div 
-                key={type}
-                onClick={() => setSelectedType(item.type as UnitType)}
+            <div
+                key={groupKey}
+                onClick={() => setSelectedKey(groupKey)}
                 className={`
                     relative flex flex-col items-center justify-between p-2 rounded-lg border cursor-pointer transition-all duration-200
                     h-24 w-full ${borderColor} ${bgColor} ${hoverClass}
                     ${isSelected ? 'shadow-[0_0_15px_rgba(0,0,0,0.5)]' : ''}
+                    ${isStock && isInstant ? 'shadow-[0_0_10px_rgba(255,200,0,0.3)] animate-pulse' : ''}
                 `}
             >
+                {/* Instant Delivery Badge */}
+                {isStock && isInstant && (
+                    <div className="absolute -top-2 -right-2 bg-yellow-500 text-black text-[8px] font-black px-1.5 py-0.5 rounded shadow-lg z-10 animate-bounce">
+                        INSTANT!
+                    </div>
+                )}
+
+                {/* Pending Delivery Timer */}
+                {!isStock && (
+                    <div className="absolute top-1 right-1 bg-blue-900/80 border border-blue-500 text-blue-200 text-[8px] font-mono px-1 rounded">
+                        T-{item.deliveryTurns}
+                    </div>
+                )}
+
+                {/* Stock Delivery Timer (Preview) */}
+                {isStock && !isInstant && isSelected && (
+                    <div className="absolute top-1 right-1 bg-gray-900/80 border border-gray-600 text-gray-400 text-[8px] font-mono px-1 rounded">
+                        {item.deliveryTurns}t
+                    </div>
+                )}
+
                 <div className="w-8 h-8 opacity-90 mt-1">
                     {getIcon(item.type as UnitType, iconColor)}
                 </div>
@@ -141,10 +178,10 @@ const ShopModal: React.FC<ShopModalProps> = ({
                         ${item.cost}
                     </div>
                 </div>
-                
+
                 {/* 2) Count Badge - Only if > 1 */}
                 {count > 1 && (
-                    <div className={`absolute top-1 right-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${isStock ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'}`}>
+                    <div className={`absolute top-1 left-1 text-[9px] font-bold px-1.5 py-0.5 rounded-full ${isStock ? 'bg-green-600 text-white' : 'bg-blue-600 text-white'}`}>
                         x{count}
                     </div>
                 )}
@@ -152,19 +189,21 @@ const ShopModal: React.FC<ShopModalProps> = ({
         );
     };
 
+    const selectedStock = selectedKey ? (stockGroups[selectedKey] || []) : [];
+    const selectedBought = selectedKey ? (boughtGroups[selectedKey] || []) : [];
+    const selectedItem = selectedStock[0] || selectedBought[0];
+    const selectedType = selectedItem?.type || null;
     const selectedConfig = selectedType ? CARD_CONFIG[selectedType] : null;
-    const selectedStock = selectedType ? (stockGroups[selectedType] || []) : [];
-    const selectedBought = selectedType ? (boughtGroups[selectedType] || []) : [];
-    
+
     // 1) Sell Logic
-    // Find items of this type that were bought THIS round
+    // Find items of this group that were bought THIS round
     const refundableItems = selectedBought.filter(item => item.purchaseRound === currentRound);
     const canRefund = refundableItems.length > 0;
 
     return (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="flex w-[90vw] max-w-5xl h-[80vh] border border-green-500/30 bg-black/80 rounded-2xl shadow-[0_0_50px_rgba(0,0,0,0.8)] overflow-hidden backdrop-blur-xl">
-                
+
                 {/* LEFT PANEL: GRID */}
                 <div className="flex-1 flex flex-col min-w-0 border-r border-gray-800/50">
                     {/* Header */}
@@ -176,7 +215,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
                             <div className="flex items-center gap-3 text-[9px] font-mono text-green-400/60 mt-1">
                                 <span>CYCLE: {currentRound}</span>
                                 <span>::</span>
-                                <span>NEXT DROP: {nextDeliveryRound}</span>
+                                <span>NEXT RESTOCK: {nextDeliveryRound}</span>
                             </div>
                         </div>
                         <div className="text-right">
@@ -202,7 +241,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                     className={`
                                         flex items-center gap-2 px-3 py-1 rounded border text-[9px] font-bold transition-all
                                         ${credits >= 50 && availableStock.length > 0
-                                            ? 'bg-yellow-900/20 border-yellow-600/50 text-yellow-500 hover:bg-yellow-900/40 hover:text-yellow-200' 
+                                            ? 'bg-yellow-900/20 border-yellow-600/50 text-yellow-500 hover:bg-yellow-900/40 hover:text-yellow-200'
                                             : 'bg-transparent border-gray-800 text-gray-700 cursor-not-allowed'}
                                     `}
                                     title="Refresh available stock (Costs $50)"
@@ -211,14 +250,14 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                     <span>REROLL STOCK ($50)</span>
                                 </button>
                             </div>
-                            
+
                             {Object.keys(stockGroups).length === 0 ? (
                                 <div className="text-[10px] text-gray-600 font-mono italic border border-dashed border-gray-800 p-4 rounded text-center">
                                     NO STOCK AVAILABLE
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-4 lg:grid-cols-5 gap-3">
-                                    {Object.entries(stockGroups).map(([type, items]) => renderGridItem(type, items as ShopItem[], true))}
+                                    {Object.entries(stockGroups).map(([key, items]) => renderGridItem(key, items as ShopItem[], true))}
                                 </div>
                             )}
                         </div>
@@ -235,7 +274,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                 </div>
                             ) : (
                                 <div className="grid grid-cols-4 lg:grid-cols-5 gap-3">
-                                    {Object.entries(boughtGroups).map(([type, items]) => renderGridItem(type, items as ShopItem[], false))}
+                                    {Object.entries(boughtGroups).map(([key, items]) => renderGridItem(key, items as ShopItem[], false))}
                                 </div>
                             )}
                         </div>
@@ -245,7 +284,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
                 {/* RIGHT PANEL: DETAILS */}
                 <div className="w-80 flex flex-col bg-black/40 backdrop-blur-md relative">
                     {/* Close Button */}
-                    <button 
+                    <button
                         onClick={onClose}
                         className="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full border border-gray-700 bg-black/60 text-gray-400 hover:text-white hover:border-red-500 transition-colors"
                     >
@@ -261,12 +300,12 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                         <ambientLight intensity={0.5} />
                                         <spotLight position={[5, 5, 5]} intensity={2} castShadow />
                                         <pointLight position={[-5, 5, -5]} intensity={1} color={COLORS.P1} />
-                                        
+
                                         <Stage intensity={0.5} environment="city" adjustCamera={false}>
                                             <UnitPreview type={selectedType} color={COLORS.P1} />
                                         </Stage>
-                                        
-                                        <OrbitControls autoRotate autoRotateSpeed={2} enableZoom={false} enablePan={false} minPolarAngle={0} maxPolarAngle={Math.PI/2} />
+
+                                        <OrbitControls autoRotate autoRotateSpeed={2} enableZoom={false} enablePan={false} minPolarAngle={0} maxPolarAngle={Math.PI / 2} />
                                     </Canvas>
                                 ) : (
                                     // Action Fallback View
@@ -289,7 +328,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                 <div className={`text-[10px] font-mono mb-4 ${selectedConfig.category === CardCategory.ACTION ? 'text-purple-400' : 'text-green-400'}`}>
                                     {selectedConfig.category} CLASS
                                 </div>
-                                
+
                                 <p className="text-xs text-gray-400 leading-relaxed mb-6 border-l-2 border-gray-700 pl-3">
                                     {selectedConfig.description}
                                 </p>
@@ -332,8 +371,8 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                             disabled={selectedStock.length === 0 || credits < selectedConfig.cost}
                                             className={`
                                                 flex flex-col items-center justify-center py-2 rounded border transition-all
-                                                ${selectedStock.length > 0 && credits >= selectedConfig.cost 
-                                                    ? 'bg-green-900/60 hover:bg-green-800/80 border-green-600 text-green-100 shadow-lg shadow-green-900/20' 
+                                                ${selectedStock.length > 0 && credits >= selectedConfig.cost
+                                                    ? 'bg-green-900/60 hover:bg-green-800/80 border-green-600 text-green-100 shadow-lg shadow-green-900/20'
                                                     : 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed opacity-50'}
                                             `}
                                         >
@@ -347,8 +386,8 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                                 disabled={!canRefund}
                                                 className={`
                                                     flex flex-col items-center justify-center py-2 rounded border transition-all
-                                                    ${canRefund 
-                                                        ? 'bg-red-900/30 hover:bg-red-800/50 border-red-800 text-red-300 hover:text-white' 
+                                                    ${canRefund
+                                                        ? 'bg-red-900/30 hover:bg-red-800/50 border-red-800 text-red-300 hover:text-white'
                                                         : 'bg-gray-900 border-gray-800 text-gray-600 cursor-not-allowed'}
                                                 `}
                                             >
@@ -373,7 +412,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
                     )}
                 </div>
             </div>
-            
+
             <style>{`
                 .custom-scrollbar::-webkit-scrollbar {
                     width: 4px;

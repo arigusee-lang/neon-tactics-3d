@@ -19,6 +19,7 @@ import ChargingStationModel from './ChargingStationModel';
 import PortalModel from './PortalModel';
 import ApexBladeModel from './ApexBladeModel';
 import SniperModel from './SniperModel';
+import HackerModel from './HackerModel';
 import { gameService } from '../services/gameService';
 
 interface UnitProps {
@@ -261,6 +262,86 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
     );
 };
 
+// Mind Control Arc Effect (Dynamic)
+const DynamicMindControlLink: React.FC<{ start: Vector3, targetId: string }> = ({ start, targetId }) => {
+    const { scene } = useThree();
+    const lineRef = useRef<any>(null); // Using any because Line from drei has complex types or refs
+    const startMeshRef = useRef<THREE.Mesh>(null);
+    const endMeshRef = useRef<THREE.Mesh>(null);
+
+    // We need to look up terrain data for height similar to Unit component
+    // But accessing gameService state directly in loop is simplest for now
+
+    useFrame(() => {
+        const units = gameService['state'].units;
+        const target = units.find(u => u.id === targetId);
+
+        if (target && lineRef.current) {
+            // Calculate Target Position
+            const size = target.stats.size || 1;
+            const sizeOffset = ((size - 1) * (TILE_SIZE + TILE_SPACING)) / 2;
+            const tx = (target.position.x * (TILE_SIZE + TILE_SPACING)) - BOARD_OFFSET + sizeOffset;
+            const tz = (target.position.z * (TILE_SIZE + TILE_SPACING)) - BOARD_OFFSET + sizeOffset;
+
+            // Simple height approximation or look up terrain
+            // Since we don't have easy access to getUnitBaseHeight helper here without prop drill
+            // We'll read terrain from service directly
+            const terrainData = (gameService as any).state.terrain;
+            const key = `${Math.floor(target.position.x)},${Math.floor(target.position.z)}`;
+            const terrain = terrainData[key];
+            const terrainHeight = (terrain?.elevation || 0) * ELEVATION_HEIGHT;
+            let rampOffset = terrain?.type === 'RAMP' ? 0.25 : 0;
+            const th = terrainHeight + rampOffset + 0.5;
+
+            const endPos = new Vector3(tx, th, tz);
+
+            // Update Line Points
+            // Drei Line accepts points as prop. Efficient update might require imperative ref usage if supported,
+            // or just re-render is fine for <Line> if optimized. 
+            // However, Drei Line usually updates geometry when points change.
+            // But we are in useFrame. We can't setState inside useFrame without triggering re-renders every frame.
+            // We should use a native THREE.Line or update geometry attribute directly.
+            // BUT, for simplicity with curve:
+
+            const curve = new THREE.QuadraticBezierCurve3(
+                start,
+                start.clone().lerp(endPos, 0.5).add(new Vector3(0, 4.0, 0)),
+                endPos
+            );
+            const points = curve.getPoints(20);
+
+            // For Drei Line, we might need to update the geometry
+            if (lineRef.current.geometry) {
+                lineRef.current.geometry.setFromPoints(points);
+            }
+
+            if (endMeshRef.current) endMeshRef.current.position.copy(endPos);
+        }
+    });
+
+    return createPortal(
+        <group>
+            {/* We use a native LineLoop or similar because updating Drei Line props is slow? 
+                Actually, let's just use a native mesh for the line to allow direct geometry updates 
+            */}
+            <line ref={lineRef}>
+                <bufferGeometry />
+                <lineBasicMaterial color="#00ff00" linewidth={2} />
+            </line>
+
+            <mesh position={start} ref={startMeshRef}>
+                <sphereGeometry args={[0.2, 8, 8]} />
+                <meshBasicMaterial color="#00ff00" wireframe />
+            </mesh>
+            <mesh ref={endMeshRef}>
+                <sphereGeometry args={[0.3, 8, 8]} />
+                <meshBasicMaterial color="#00ff00" wireframe />
+            </mesh>
+        </group>,
+        scene
+    );
+};
+
 // --- MAIN UNIT COMPONENT ---
 
 const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
@@ -272,6 +353,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
     const [isMoving, setIsMoving] = useState(false);
 
     const [attackTargetPos, setAttackTargetPos] = useState<Vector3 | null>(null);
+    const [mindControlTargetPos, setMindControlTargetPos] = useState<Vector3 | null>(null);
     const attackStartRef = useRef(0);
 
     const processingStep = useRef(false);
@@ -284,6 +366,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
     const isExploding = data.status.isExploding || false;
 
     const isFrozen = data.effects.some(e => e.name === 'CRYO STASIS');
+    const hasShield = data.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
     const hasEnergy = data.stats.maxEnergy > 0;
     const isIndestructible = data.type === EUnitType.PORTAL;
 
@@ -300,7 +383,11 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
         }
 
         let unitFloat = 0.5;
-        if (data.type === EUnitType.LIGHT_TANK || data.type === EUnitType.HEAVY_TANK) {
+        if (data.type === EUnitType.SOLDIER || data.type === EUnitType.HACKER) {
+            unitFloat = 0.255;
+        } else if (data.type === EUnitType.SNIPER) {
+            unitFloat = 0.24;
+        } else if (data.type === EUnitType.LIGHT_TANK || data.type === EUnitType.HEAVY_TANK) {
             unitFloat = 0.05;
         }
         if (data.stats.movement === 0 && !isTargetCalc) {
@@ -345,6 +432,28 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             setAttackTargetPos(null);
         }
     }, [data.status.attackTargetId]);
+
+    // Track Mind Control Target Position
+    useEffect(() => {
+        if (data.status.mindControlTargetId) {
+            const units = gameService['state'].units;
+            const target = units.find(u => u.id === data.status.mindControlTargetId);
+            if (target) {
+                const tx = (target.position.x * (TILE_SIZE + TILE_SPACING)) - BOARD_OFFSET + sizeOffset;
+                const tz = (target.position.z * (TILE_SIZE + TILE_SPACING)) - BOARD_OFFSET + sizeOffset;
+                // Get height
+                const key = `${target.position.x},${target.position.z}`;
+                const terrain = terrainData[key];
+                const terrainHeight = (terrain?.elevation || 0) * ELEVATION_HEIGHT;
+                let rampOffset = terrain?.type === 'RAMP' ? 0.25 : 0;
+                const th = terrainHeight + rampOffset + 0.5;
+
+                setMindControlTargetPos(new Vector3(tx, th, tz));
+            }
+        } else {
+            setMindControlTargetPos(null);
+        }
+    }, [data.status.mindControlTargetId, data.position]); // Re-calc if hacker moves too (though he likely won't move while channeling)
 
 
     useEffect(() => {
@@ -437,7 +546,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
 
     const renderGeometry = () => {
         switch (data.type) {
-            case EUnitType.SOLDIER: return <SoldierModel color={playerColor} isMoving={isMoving} isDying={isDying} isTeleporting={isTeleporting} />;
+            case EUnitType.SOLDIER: return <SoldierModel color={playerColor} isMoving={isMoving} isDying={isDying} isTeleporting={isTeleporting} isAttacking={!!data.status.attackTargetId} />;
             case EUnitType.HEAVY: return <HeavyTrooperModel color={playerColor} isMoving={isMoving} isDying={isDying} />;
             case EUnitType.MEDIC: return <MedicModel color={playerColor} isMoving={isMoving} isDying={isDying} />;
             case EUnitType.LIGHT_TANK: return <LightTankModel color={playerColor} isMoving={isMoving} isDying={isDying} />;
@@ -449,8 +558,10 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             case EUnitType.TITAN: return <TitanModel color={playerColor} isDying={isDying} />;
             case EUnitType.SUICIDE_DRONE: return <SuicideDroneModel color={playerColor} isDying={isDying} isExploding={isExploding} />;
             case EUnitType.CONE: return <ApexBladeModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;
+            case EUnitType.CONE: return <ApexBladeModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;
             case EUnitType.SNIPER: return <SniperModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;
-            // ... (Keeping rest of cases like BOX, SERVER, RESIDENTIAL, SPIKE as they were)
+            case EUnitType.HACKER: return <HackerModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} isMindControlling={!!data.status.mindControlTargetId} />;
+
             case EUnitType.BOX:
                 return (
                     <group ref={internalRef}>
@@ -493,74 +604,6 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
                             <boxGeometry args={[0.1, 0.1, 0.1]} />
                             {renderMatrixMat(0.5)}
                         </mesh>
-                    </group>
-                );
-
-            case EUnitType.SERVER:
-                return (
-                    <group>
-                        <mesh position={[0, 0.8, 0]} castShadow>
-                            <boxGeometry args={[0.7, 1.6, 0.7]} />
-                            {renderMatrixMat(0.95, "#050505")}
-                        </mesh>
-                        <mesh position={[0.4, 0.8, 0]}>
-                            <boxGeometry args={[0.1, 1.4, 0.5]} />
-                            <meshStandardMaterial color="#222" />
-                        </mesh>
-                        <mesh position={[-0.4, 0.8, 0]}>
-                            <boxGeometry args={[0.1, 1.4, 0.5]} />
-                            <meshStandardMaterial color="#222" />
-                        </mesh>
-                        <mesh position={[0, 1.0, 0.36]}>
-                            <planeGeometry args={[0.5, 0.3]} />
-                            <meshBasicMaterial color={playerColor} opacity={0.3} transparent />
-                        </mesh>
-                        {[0.4, 0.8, 1.2].map((y, i) => (
-                            <mesh key={i} position={[0, y, 0]}>
-                                <boxGeometry args={[0.72, 0.02, 0.72]} />
-                                <meshBasicMaterial color={playerColor} toneMapped={false} />
-                            </mesh>
-                        ))}
-                        <group position={[0, 2.0, 0]}>
-                            <mesh position={[0.3, 0, 0]}>
-                                <boxGeometry args={[0.1, 0.1, 0.1]} />
-                                <meshBasicMaterial color={playerColor} wireframe />
-                            </mesh>
-                            <mesh position={[-0.2, 0.2, -0.2]}>
-                                <boxGeometry args={[0.08, 0.08, 0.08]} />
-                                <meshBasicMaterial color={playerColor} wireframe />
-                            </mesh>
-                        </group>
-                    </group>
-                );
-
-            case EUnitType.RESIDENTIAL:
-                return (
-                    <group>
-                        <mesh position={[0, 0.75, 0]}>
-                            <boxGeometry args={[1.2, 1.5, 1.2]} />
-                            {renderMatrixMat(0.9, "#1a1a1a")}
-                        </mesh>
-                        <mesh position={[0.5, 0.4, 0.5]}>
-                            <boxGeometry args={[0.6, 0.8, 0.6]} />
-                            {renderMatrixMat(0.9, "#222")}
-                        </mesh>
-                        <mesh position={[0, 1.55, 0]}>
-                            <boxGeometry args={[0.8, 0.1, 0.8]} />
-                            <meshStandardMaterial color="#888888" />
-                        </mesh>
-                        {[0.2, 0.6, 1.0, 1.3].map((y, i) => (
-                            <group key={i} position={[0, y, 0.61]}>
-                                <mesh position={[-0.3, 0, 0]}>
-                                    <planeGeometry args={[0.15, 0.1]} />
-                                    <meshBasicMaterial color={playerColor} opacity={0.6} transparent />
-                                </mesh>
-                                <mesh position={[0.3, 0, 0]}>
-                                    <planeGeometry args={[0.15, 0.1]} />
-                                    <meshBasicMaterial color={playerColor} opacity={0.4} transparent />
-                                </mesh>
-                            </group>
-                        ))}
                     </group>
                 );
 
@@ -634,6 +677,10 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
                 {renderGeometry()}
             </group>
 
+            {data.status.mindControlTargetId && (
+                <DynamicMindControlLink start={visualPos.current.clone().add(new Vector3(0, 1.0, 0))} targetId={data.status.mindControlTargetId} />
+            )}
+
             {data.status.attackTargetId && attackTargetPos && (
                 data.type === EUnitType.CONE ? (
                     <MeleeImpact position={attackTargetPos} delay={0.2} color={playerColor} />
@@ -650,6 +697,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             )}
 
             {isFrozen && <mesh position={[0, frozenY, 0]}><boxGeometry args={[size, size, size]} /><meshBasicMaterial color="#00ffff" transparent opacity={0.3} wireframe /></mesh>}
+            {hasShield && <mesh position={[0, frozenY, 0]}><sphereGeometry args={[size * 0.7, 16, 16]} /><meshBasicMaterial color="#fbbf24" transparent opacity={0.3} wireframe /></mesh>}
             {isSelected && !isDying && !isExploding && (
                 <mesh position={[0, ringY, 0]} rotation={[-Math.PI / 2, 0, 0]}>
                     <ringGeometry args={[0.65 * size, 0.75 * size, 32]} />
@@ -690,6 +738,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
                         )}
 
                         {isFrozen && <div className="text-[8px] text-cyan-300 font-bold animate-pulse mt-0.5">SYSTEM FROZEN</div>}
+                        {hasShield && <div className="text-[8px] text-yellow-300 font-bold animate-pulse mt-0.5 px-1 border border-yellow-500 rounded bg-yellow-900/50">SHIELD ACTIVE</div>}
                         {isIndestructible && <div className="text-[8px] text-yellow-300 font-black tracking-widest mt-0.5 drop-shadow-[0_0_5px_yellow]">STABLE</div>}
 
                         {hovered && (

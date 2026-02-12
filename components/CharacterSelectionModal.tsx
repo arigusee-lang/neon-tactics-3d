@@ -30,28 +30,32 @@ const CyberpunkAvatar: React.FC<{ charId: string }> = ({ charId }) => {
 const PerkNode: React.FC<{ level: number, description: string, active: boolean }> = ({ level, description, active }) => (
     <div className={`relative flex items-start gap-3 mb-6 group ${active ? 'opacity-100' : 'opacity-40'}`}>
         {/* Node Circle */}
-        <div className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center font-bold font-mono text-[9px] flex-shrink-0 mt-0.5 border ${level === 0 ? 'bg-green-500 text-black border-green-400' : 'bg-black text-gray-500 border-gray-700'}`}>
+        <div className={`relative z-10 w-6 h-6 rounded-full flex items-center justify-center font-bold font-mono text-[9px] flex-shrink-0 mt-0.5 border bg-green-900/50 text-green-400 border-green-500`}>
             {level}
         </div>
 
         {/* Content Box */}
         <div className="flex-1">
-            <div className={`text-[9px] font-bold uppercase tracking-wider leading-none mb-1 ${level === 0 ? 'text-green-400' : 'text-gray-400'}`}>
-                LEVEL {level} {level === 0 ? '' : '[LOCKED]'}
+            <div className={`text-[9px] font-bold uppercase tracking-wider leading-none mb-1 text-green-400`}>
+                LEVEL {level}
             </div>
-            <div className="text-[10px] text-gray-400 font-sans leading-snug">
+            <div className="text-[10px] text-gray-300 font-sans leading-snug">
                 {description}
             </div>
         </div>
 
         {/* Connector Line */}
         {level !== 100 && (
-            <div className="absolute left-[11px] top-7 bottom-[-20px] w-[1px] bg-gray-800 -z-10 group-hover:bg-gray-700" />
+            <div className="absolute left-[11px] top-7 bottom-[-20px] w-[1px] bg-green-900/40 -z-10 group-hover:bg-green-700/50" />
         )}
     </div>
 );
 
-const CharacterSelectionModal: React.FC = () => {
+interface CharacterSelectionModalProps {
+    playerCharacters: Record<PlayerId, string | null>;
+}
+
+const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playerCharacters }) => {
     const [selectionStep, setSelectionStep] = useState<PlayerId>(PlayerId.ONE);
     const [selectedCharId, setSelectedCharId] = useState<string | null>(CHARACTERS[0].id);
 
@@ -101,7 +105,35 @@ const CharacterSelectionModal: React.FC = () => {
                                         }
                                     `}
                                 >
+                                    {/* Selection Highlight (Current User) */}
                                     {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500" />}
+
+                                    {/* Confirmed Selection Frame (P1) */}
+                                    {playerCharacters[PlayerId.ONE] === char.id && (
+                                        <div
+                                            className="absolute inset-0 border-2 pointer-events-none z-20"
+                                            style={{
+                                                borderColor: COLORS.P1,
+                                                boxShadow: `inset 0 0 20px ${COLORS.P1}`
+                                            }}
+                                        >
+                                            <div className="absolute top-0 right-0 text-black text-[9px] font-bold px-1 rounded-bl" style={{ backgroundColor: COLORS.P1 }}>P1</div>
+                                        </div>
+                                    )}
+
+                                    {/* Confirmed Selection Frame (P2) */}
+                                    {playerCharacters[PlayerId.TWO] === char.id && (
+                                        <div
+                                            className="absolute inset-0 border-2 pointer-events-none z-20"
+                                            style={{
+                                                borderColor: COLORS.P2,
+                                                boxShadow: `inset 0 0 20px ${COLORS.P2}`
+                                            }}
+                                        >
+                                            <div className="absolute bottom-0 right-0 text-black text-[9px] font-bold px-1 rounded-tl" style={{ backgroundColor: COLORS.P2 }}>P2</div>
+                                        </div>
+                                    )}
+
                                     <div className="text-xs font-bold uppercase tracking-widest relative z-10">{char.name}</div>
                                     <div className="text-[9px] opacity-50 mt-1 truncate relative z-10">{char.description}</div>
                                 </button>

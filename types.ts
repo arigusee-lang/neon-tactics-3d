@@ -30,6 +30,7 @@ export enum UnitType {
   SOLDIER = 'SOLDIER',
   HEAVY = 'HEAVY',   // Big Bulky Soldier
   MEDIC = 'MEDIC',   // Support Unit
+  HACKER = 'HACKER', // New Hacker Unit
   BOX = 'BOX',       // Scout
   CONE = 'CONE',     // Assassin
   SUICIDE_DRONE = 'SUICIDE_DRONE', // Kamikaze Unit
@@ -39,8 +40,7 @@ export enum UnitType {
 
   // Buildings / Immobile
   TITAN = 'TITAN',
-  SERVER = 'SERVER',
-  RESIDENTIAL = 'RESIDENTIAL', // Sector Block
+
   SPIKE = 'SPIKE',             // Neural Spike
   WALL = 'WALL',               // Energy Wall
   TOWER = 'TOWER',             // 3 Story Tower
@@ -101,6 +101,18 @@ export interface Character {
   description: string;
   perks: CharacterPerk[];
   color: string;
+  actions?: CharacterAction[];
+}
+
+export interface CharacterAction {
+  id: string;
+  name: string;
+  description: string;
+  icon: string | any;
+  cooldown: number;
+  currentCooldown: number;
+  minLevel: number;
+  minRound?: number; // Alternative to level if strictly bound to rounds
 }
 
 export interface UnitStatus {
@@ -109,6 +121,10 @@ export interface UnitStatus {
   isExploding?: boolean;
   attackTargetId?: string | null;     // Transient: For current animation frame
   autoAttackTargetId?: string | null; // Persistent: For "Nemesis" logic
+
+  // Mind Control Logic
+  mindControlTargetId?: string | null; // ID of the unit being controlled (on Hacker)
+  originalPlayerId?: PlayerId | null;  // Original owner (on Target)
 
   // Turn Management
   stepsTaken: number;
@@ -146,9 +162,9 @@ export interface LogEntry {
   playerId?: PlayerId;
 }
 
-export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN';
+export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN' | 'PLACE_COLLECTIBLE' | 'PLACE_HEALTH' | 'PLACE_ENERGY';
 
-export type InteractionMode = 'NORMAL' | 'WALL_PLACEMENT' | 'ABILITY_SUMMON' | 'ABILITY_TELEPORT' | 'ABILITY_FREEZE' | 'ABILITY_HEAL' | 'ION_CANNON_TARGETING' | 'TERRAIN_EDIT';
+export type InteractionMode = 'NORMAL' | 'WALL_PLACEMENT' | 'ABILITY_SUMMON' | 'ABILITY_TELEPORT' | 'ABILITY_FREEZE' | 'ABILITY_HEAL' | 'ABILITY_RESTORE_ENERGY' | 'ABILITY_MIND_CONTROL' | 'ION_CANNON_TARGETING' | 'TERRAIN_EDIT';
 
 export interface InteractionState {
   mode: InteractionMode;
@@ -172,13 +188,23 @@ export interface ShopItem {
   type: UnitType;
   cost: number;
   purchaseRound?: number;
+  deliveryTurns: number; // 0 for instant, 1-3 otherwise
+  isInstant?: boolean;
+}
+
+export interface Collectible {
+  id: string;
+  type: 'MONEY_PRIZE' | 'HEALTH_PACK' | 'ENERGY_CELL';
+  value: number;
+  position: Position;
 }
 
 export interface GameState {
   appStatus: AppStatus;
-  mapId: 'EMPTY' | 'MAP_1'; // Identifies the current map
+  mapId: string; // Identifies the current map
   lightMode: 'DARK' | 'LIGHT';
   units: Unit[];
+  collectibles: Collectible[];
   revealedTiles: string[];
   terrain: Record<string, TerrainData>; // Key "x,z"
   currentTurn: PlayerId;
@@ -200,6 +226,7 @@ export interface GameState {
   playerCharacters: { [key in PlayerId]: string | null }; // Character ID
   unlockedUnits: { [key in PlayerId]: UnitType[] }; // Pool of units available in shop
   playerTalents: { [key in PlayerId]: Talent[] };
+  characterActions: { [key in PlayerId]: CharacterAction[] };
   talentChoices: Talent[]; // The two choices currently presented
 
   // Economy & Shop
@@ -217,6 +244,7 @@ export interface GameState {
 
   // Developer Mode Flag
   isDevMode: boolean;
+  availableMaps: string[];
 }
 
 export type GameEvent = 'PLACE_UNIT' | 'GAME_RESET' | 'SELECT_CARD' | 'SELECT_UNIT';

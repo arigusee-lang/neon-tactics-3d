@@ -1,5 +1,5 @@
 
-import { UnitType, CardCategory, Character } from './types';
+import { UnitType, CardCategory, Character, UnitStats } from './types';
 
 export const INITIAL_FIELD_SIZE = 10;
 export const BOARD_SIZE = 40; // High limit for the "infinite" feel
@@ -17,21 +17,21 @@ export const COLORS = {
   P2_HOVER: '#ff99cc',
   BG: '#050505',
   GRID_LINE: '#003300', // Dark Green
-  TILE_BODY: '#0a0a0a',
-  TILE_EDGE: '#00ff00', // Matrix Green
-  TILE_HOVER: '#ccffcc',
-  HIGHLIGHT: '#ffffff',
-  PIPE_BG: '#111827',
-  PIPE_BORDER: '#374151',
-  HEALTH_BAR_BG: '#222222',
-  PATH_HIGHLIGHT: '#ffff00',
-  FROZEN_OVERLAY: '#00ffff'
+  TILE_BODY: '#000000',
+  TILE_TOP: '#111111',
+  OBSTACLE: '#666666',
+  HIGHLIGHT_MOVE: 'rgba(0, 255, 255, 0.3)',
+  HIGHLIGHT_ATTACK: 'rgba(255, 0, 0, 0.3)',
+  PATH: 'rgba(255, 255, 0, 0.5)',
+  // Added missing colors to fix rendering
+  TILE_EDGE: '#00ff00', // Neon green for visibility (opacity handled in Tile.tsx)
+  HIGHLIGHT: '#00ccff', // Hover highlight
+  TILE_HOVER: 'rgba(0, 204, 255, 0.1)',
+  PATH_HIGHLIGHT: '#ffff00'
 };
 
 export const BUILDING_TYPES = [
   UnitType.TITAN,
-  UnitType.SERVER,
-  UnitType.RESIDENTIAL,
   UnitType.SPIKE,
   UnitType.WALL,
   UnitType.TOWER,
@@ -44,95 +44,123 @@ export const CHARACTERS: Character[] = [
     id: 'NYX',
     name: 'Nyx',
     gender: 'FEMALE',
-    description: 'Rogue bio-hacker from the upper sectors. Master of nanotech and field sustain.',
+    description: 'Battle-hardened veteran of the sector wars. Heavily augmented and more machine than human.',
     color: '#00ff00',
     perks: [
       { level: 0, description: 'Unlock access to MEDIC units in the logistics network.', unlocksUnits: [UnitType.MEDIC] },
-      { level: 10, description: 'TBD: Enhanced Repair' },
-      { level: 25, description: 'TBD: Bio-Grenades' },
-      { level: 50, description: 'TBD: Mass Revive' },
+      { level: 10, description: 'Enhanced Repair: Medics can repair buildings and heal +Level amount.' },
+      { level: 25, description: 'Restore Energy: Medics can restore 50 Energy to a target unit.' },
+      { level: 50, description: 'Immortality Shield: Temporary invulnerability (Cooldown: 25 turns).' },
       { level: 100, description: 'TBD: Immortality Field' }
+    ],
+    actions: [
+      {
+        id: 'NYX_SHIELD',
+        name: 'Immortality Shield',
+        description: 'All non-building units become invulnerable for 2 turns.',
+        icon: '🛡️',
+        cooldown: 25,
+        currentCooldown: 0,
+        minLevel: 50
+      }
     ]
   },
   {
     id: 'GRIFF',
     name: 'Griff',
     gender: 'MALE',
-    description: 'Hardened war vet. Believes in firepower, armor, and more firepower.',
-    color: '#00ff00',
+    description: 'Heavy weapons specialist. Ex-mercenary with a penchant for high-explosive ordnance.',
+    color: '#ff3300',
     perks: [
       { level: 0, description: 'Unlock access to RAPTOR and MAMMOTH TANKS.', unlocksUnits: [UnitType.LIGHT_TANK, UnitType.HEAVY_TANK] },
-      { level: 10, description: 'TBD: Reinforced Plating' },
+      { level: 10, description: 'Reinforced Plating: Tanks deal +Level damage.' },
       { level: 25, description: 'TBD: Artillery Support' },
       { level: 50, description: 'TBD: Factory Overclock' },
       { level: 100, description: 'TBD: Nuclear Option' }
     ]
+  },
+  {
+    id: 'CYPHER',
+    name: 'Cypher',
+    gender: 'UNKNOWN',
+    description: 'Enigmatic AI construct. Specializes in electronic warfare and drone control.',
+    color: '#00ffff',
+    perks: [
+      { level: 0, description: 'Unlock access to HACKER units.', unlocksUnits: [UnitType.HACKER] },
+      { level: 10, description: 'TBD: Signal Boost' },
+      { level: 25, description: 'TBD: Botnet' },
+      { level: 50, description: 'TBD: System Override' },
+      { level: 100, description: 'TBD: Singularity' }
+    ]
   }
 ];
 
-export const CARD_CONFIG: Partial<Record<UnitType, {
-  category: CardCategory,
-  name: string,
-  description: string,
-  cost: number,
-  baseStats?: { hp: number, maxEnergy: number, attack: number, range: number, movement: number, size: number, blocksLos: boolean, maxAttacks?: number }
-}>> = {
+export const CARD_CONFIG: Record<string, { category: CardCategory, name: string, description: string, cost: number, baseStats?: Partial<UnitStats> }> = {
   [UnitType.SOLDIER]: {
     category: CardCategory.UNIT,
     name: 'Cyber Marine',
-    description: 'Versatile infantry. Ability: Teleport.',
+    description: 'Standard infantry. Ranged attack. Ability: Teleport.',
     cost: 50,
-    baseStats: { hp: 100, maxEnergy: 100, attack: 25, range: 3, movement: 4, size: 1, blocksLos: false }
+    baseStats: { hp: 100, maxEnergy: 50, attack: 25, range: 3, movement: 4, size: 1, blocksLos: false }
   },
   [UnitType.HEAVY]: {
     category: CardCategory.UNIT,
     name: 'Dreadnought',
-    description: 'Heavily armored shock trooper. Ability: Suicide Protocol.',
+    description: 'Heavy infantry. Area damage. High HP. Ability: Suicide Detonation.',
     cost: 150,
-    baseStats: { hp: 200, maxEnergy: 0, attack: 40, range: 2, movement: 3, size: 1, blocksLos: false }
+    baseStats: { hp: 300, maxEnergy: 0, attack: 40, range: 2, movement: 2, size: 1, blocksLos: true }
   },
   [UnitType.MEDIC]: {
     category: CardCategory.UNIT,
     name: 'Field Medic',
-    description: 'Support Unit. Ability: Nano-Repair.',
+    description: 'Support unit. Heals adjacent allies. Ability: Heal Beam.',
     cost: 75,
-    baseStats: { hp: 80, maxEnergy: 100, attack: 10, range: 2, movement: 4, size: 1, blocksLos: false }
+    baseStats: { hp: 80, maxEnergy: 50, attack: 0, range: 3, movement: 4, size: 1, blocksLos: false }
   },
-  [UnitType.LIGHT_TANK]: {
+  [UnitType.HACKER]: {
     category: CardCategory.UNIT,
-    name: 'Raptor Tank',
-    description: 'Fast assault vehicle.',
-    cost: 200,
-    baseStats: { hp: 180, maxEnergy: 0, attack: 45, range: 3, movement: 2, size: 1, blocksLos: true }
-  },
-  [UnitType.HEAVY_TANK]: {
-    category: CardCategory.UNIT,
-    name: 'Mammoth Tank',
-    description: 'Heavy siege armor. Dual cannons.',
-    cost: 350,
-    baseStats: { hp: 450, maxEnergy: 0, attack: 80, range: 4, movement: 5, size: 2, blocksLos: true }
-  },
-  [UnitType.SNIPER]: {
-    category: CardCategory.UNIT,
-    name: 'Ghost Operative',
-    description: 'Long-range precision. Passive: Ignores cover.',
-    cost: 125,
-    baseStats: { hp: 60, maxEnergy: 0, attack: 55, range: 6, movement: 3, size: 1, blocksLos: false }
+    name: 'Netrunner',
+    description: 'Tech specialist. Can Hack敌 units. Ability: Mind Control.',
+    cost: 120,
+    baseStats: { hp: 60, maxEnergy: 100, attack: 10, range: 3, movement: 5, size: 1, blocksLos: false }
   },
   [UnitType.BOX]: {
     category: CardCategory.UNIT,
     name: 'Scout Drone',
-    description: 'Fast recon.',
-    cost: 25,
-    baseStats: { hp: 80, maxEnergy: 0, attack: 15, range: 1, movement: 6, size: 1, blocksLos: false }
+    description: 'Fast scout. Low combat capability.',
+    cost: 30,
+    baseStats: { hp: 40, maxEnergy: 0, attack: 5, range: 1, movement: 8, size: 1, blocksLos: false }
   },
   [UnitType.SUICIDE_DRONE]: {
     category: CardCategory.UNIT,
     name: 'Tick',
-    description: 'Explosive payload. Ability: Detonate.',
+    description: 'Explosive drone. Detonates on contact. Fast.',
     cost: 40,
-    baseStats: { hp: 40, maxEnergy: 0, attack: 0, range: 0, movement: 6, size: 1, blocksLos: false }
+    baseStats: { hp: 20, maxEnergy: 0, attack: 100, range: 1, movement: 7, size: 1, blocksLos: false }
   },
+  [UnitType.LIGHT_TANK]: {
+    category: CardCategory.UNIT,
+    name: 'Raptor Tank',
+    description: 'Light vehicle. Fast attack. Good against infantry.',
+    cost: 200,
+    baseStats: { hp: 300, maxEnergy: 0, attack: 35, range: 4, movement: 6, size: 1, blocksLos: true }
+  },
+  [UnitType.HEAVY_TANK]: {
+    category: CardCategory.UNIT,
+    name: 'Mammoth Tank',
+    description: 'Heavy vehicle. Massive armor and firepower. Slow. 2x2.',
+    cost: 450,
+    baseStats: { hp: 800, maxEnergy: 0, attack: 80, range: 5, movement: 3, size: 2, blocksLos: true }
+  },
+  [UnitType.SNIPER]: {
+    category: CardCategory.UNIT,
+    name: 'Ghost Sniper',
+    description: 'Elite sniper. Extreme range. Low HP. Ambush tactics.',
+    cost: 120,
+    baseStats: { hp: 60, maxEnergy: 25, attack: 150, range: 8, movement: 3, size: 1, blocksLos: false }
+  },
+
+  // Missing entry for CONE? Adding it based on previous glimpses
   [UnitType.CONE]: {
     category: CardCategory.UNIT,
     name: 'Apex Blade',
@@ -140,6 +168,7 @@ export const CARD_CONFIG: Partial<Record<UnitType, {
     cost: 100,
     baseStats: { hp: 80, maxEnergy: 50, attack: 50, range: 1, movement: 5, size: 1, blocksLos: false, maxAttacks: 2 }
   },
+
   [UnitType.TITAN]: {
     category: CardCategory.UNIT,
     name: 'Titan Turret',
@@ -147,20 +176,7 @@ export const CARD_CONFIG: Partial<Record<UnitType, {
     cost: 400,
     baseStats: { hp: 500, maxEnergy: 0, attack: 70, range: 4, movement: 0, size: 2, blocksLos: true }
   },
-  [UnitType.SERVER]: {
-    category: CardCategory.UNIT,
-    name: 'Data Monolith',
-    description: 'Data structure.',
-    cost: 100,
-    baseStats: { hp: 300, maxEnergy: 0, attack: 10, range: 2, movement: 0, size: 1, blocksLos: true }
-  },
-  [UnitType.RESIDENTIAL]: {
-    category: CardCategory.UNIT,
-    name: 'Sector Block',
-    description: 'Habitation unit with floor detail.',
-    cost: 150,
-    baseStats: { hp: 600, maxEnergy: 0, attack: 0, range: 0, movement: 0, size: 2, blocksLos: true }
-  },
+
   [UnitType.SPIKE]: {
     category: CardCategory.UNIT,
     name: 'Neural Spike',

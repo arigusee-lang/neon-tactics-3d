@@ -24,6 +24,16 @@ export const TALENT_POOL: Talent[] = [
 
 import { io, Socket } from 'socket.io-client';
 
+// Map Loading
+// Note: We use eager loading to get the map content synchronously at startup.
+const mapModules = import.meta.glob('../maps/*.json', { eager: true });
+const loadedMaps: Record<string, any> = {};
+
+Object.keys(mapModules).forEach(path => {
+    const fileName = path.split('/').pop()?.replace('.json', '') || 'Unknown Map';
+    loadedMaps[fileName] = (mapModules[path] as any).default || mapModules[path];
+});
+
 class GameService {
     private state: GameState;
     private listeners: Set<Listener> = new Set();
@@ -131,6 +141,7 @@ class GameService {
                 this.state.terrain = data.terrain;
                 this.state.decks = data.decks;
                 this.state.credits = data.credits;
+                this.state.collectibles = data.collectibles || [];
                 // Merge units? Or overwrite? 
                 // Initial sync should overwrite.
                 this.state.units = data.units.map((u: any) => ({ ...u })); // Deepish copy
@@ -172,6 +183,7 @@ class GameService {
             winner: null,
             roundNumber: 1,
             units: [],
+            collectibles: [],
             revealedTiles: Array.from(this.discovered),
             terrain: {},
             decks: {
@@ -191,6 +203,11 @@ class GameService {
                 [PlayerId.NEUTRAL]: []
             },
             playerTalents: {
+                [PlayerId.ONE]: [],
+                [PlayerId.TWO]: [],
+                [PlayerId.NEUTRAL]: []
+            },
+            characterActions: {
                 [PlayerId.ONE]: [],
                 [PlayerId.TWO]: [],
                 [PlayerId.NEUTRAL]: []
@@ -234,7 +251,40 @@ class GameService {
             roomId: null,
             isMultiplayer: false,
             myPlayerId: null,
+            availableMaps: Object.keys(loadedMaps)
         };
+    }
+
+    public exportMap() {
+        if (!this.state.isDevMode) {
+            this.log("> ACCESS DENIED. DEV MODE REQUIRED.");
+            return;
+        }
+
+        const mapData = {
+            terrain: this.state.terrain,
+            units: this.state.units.map(u => ({
+                id: u.id,
+                playerId: u.playerId,
+                position: u.position,
+                type: u.type,
+                rotation: u.rotation,
+                level: u.level
+            })),
+            collectibles: this.state.collectibles
+        };
+
+        const jsonString = JSON.stringify(mapData, null, 2);
+        const blob = new Blob([jsonString], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = `map_export_${Date.now()}.json`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        this.log("> MAP DATA EXPORTED. CHECK DOWNLOADS FOLDER.");
     }
 
     // --- PUBLIC HELPERS ---
@@ -399,8 +449,27 @@ class GameService {
         newShopStock[playerId] = newShopStock[playerId].filter(s => s.id !== item.id);
 
         const newPendingOrders = { ...this.state.pendingOrders };
-        const boughtItem: ShopItem = { ...item, purchaseRound: this.state.roundNumber };
-        newPendingOrders[playerId] = [...newPendingOrders[playerId], boughtItem];
+
+        if (item.deliveryTurns === 0) {
+            // Instant delivery
+            const config = CARD_CONFIG[item.type]!;
+            const newCard: Card = {
+                id: `${playerId}-card-${Date.now()}-${Math.random()}`,
+                category: config.category!,
+                type: item.type,
+                name: config.name!,
+                description: config.description,
+                baseStats: config.baseStats as any,
+                cost: config.cost!
+            };
+            this.state.decks[playerId] = [...this.state.decks[playerId], newCard];
+            this.log(`> PRIORITY SHIPPING: INSTANT DELIVERY CONFIRMED`, playerId);
+        } else {
+            // Add to pending
+            const boughtItem: ShopItem = { ...item, purchaseRound: this.state.roundNumber };
+            newPendingOrders[playerId] = [...newPendingOrders[playerId], boughtItem];
+            this.log(`> ORDER CONFIRMED: ARRIVAL IN ${item.deliveryTurns} ROUNDS`, playerId);
+        }
 
         this.state = {
             ...this.state,
@@ -504,10 +573,26 @@ class GameService {
 
             if (currentCount < maxPerType) {
                 const cost = CARD_CONFIG[type]?.cost || 100;
+
+                // Delivery Logic
+                const rand = Math.random();
+                let deliveryTurns = 3; // Default
+                let isInstant = false;
+
+                if (rand < 0.01) {
+                    deliveryTurns = 0;
+                    isInstant = true;
+                } else {
+                    // 1, 2, or 3 (Equal probability)
+                    deliveryTurns = Math.floor(Math.random() * 3) + 1;
+                }
+
                 stock.push({
                     id: `shop-item-${Date.now()}-${Math.random()}-${stock.length}`,
                     type,
-                    cost
+                    cost,
+                    deliveryTurns,
+                    isInstant
                 });
                 typeCounts[type] = currentCount + 1;
             }
@@ -516,13 +601,28 @@ class GameService {
     }
 
     private processDeliveries(round: number) {
-        const deliveryRounds = [10, 25, 50, 100];
-        if (!deliveryRounds.includes(round)) return;
-
+        // 1. Process Pending Orders (Decrement & Deliver)
         [PlayerId.ONE, PlayerId.TWO].forEach(pid => {
             const orders = this.state.pendingOrders[pid];
-            if (orders.length > 0) {
-                const newCards = orders.map(item => {
+            if (orders.length === 0) return;
+
+            const remainingOrders: ShopItem[] = [];
+            const deliveredItems: ShopItem[] = [];
+
+            orders.forEach(item => {
+                // Modifying item in place is risky if we share refs, but here we are iterating current state
+                // We should clone to be safe, but straightforward decrement is okay since we re-assign array
+                item.deliveryTurns--;
+
+                if (item.deliveryTurns <= 0) {
+                    deliveredItems.push(item);
+                } else {
+                    remainingOrders.push(item);
+                }
+            });
+
+            if (deliveredItems.length > 0) {
+                const newCards = deliveredItems.map(item => {
                     const config = CARD_CONFIG[item.type]!;
                     return {
                         id: `${pid}-card-${Date.now()}-${Math.random()}`,
@@ -534,24 +634,27 @@ class GameService {
                         cost: config.cost!
                     } as Card;
                 });
-
                 this.state.decks[pid] = [...this.state.decks[pid], ...newCards];
-                this.state.pendingOrders[pid] = [];
                 this.log(`> LOGISTICS DROP RECEIVED: ${newCards.length} UNITS`, pid);
+                this.state.deliveryHappened = true;
             }
+
+            this.state.pendingOrders[pid] = remainingOrders;
         });
 
-        this.state.deliveryHappened = true;
-
-        if (round < 100) {
-            const nextIndex = deliveryRounds.indexOf(round) + 1;
-            const nextRound = deliveryRounds[nextIndex];
-            this.state.nextDeliveryRound = nextRound;
-            this.generateShopStock(nextRound);
-            this.log(`> SHOP RESTOCKED. NEXT DROP: ROUND ${nextRound}`);
-        } else {
-            this.state.shopAvailable = false;
-            this.log(`> SUPPLY LINES SEVERED. SHOP OFFLINE.`);
+        // 2. Handle Restocking / Big Drops (Legacy Rounds)
+        const deliveryRounds = [10, 25, 50, 100];
+        if (deliveryRounds.includes(round)) {
+            if (round < 100) {
+                const nextIndex = deliveryRounds.indexOf(round) + 1;
+                const nextRound = deliveryRounds[nextIndex];
+                this.state.nextDeliveryRound = nextRound;
+                this.generateShopStock(nextRound);
+                this.log(`> SHOP RESTOCKED. NEXT DROP: ROUND ${nextRound}`);
+            } else {
+                this.state.shopAvailable = false;
+                this.log(`> SUPPLY LINES SEVERED. SHOP OFFLINE.`);
+            }
         }
     }
 
@@ -572,55 +675,73 @@ class GameService {
                 this.log(`> UNIT UNLOCK: ${instantPerk.unlocksUnits.join(', ')}`, playerId);
             }
         }
+
+        // Initialize Character Actions
+        if (character.actions) {
+            // Ensure container exists
+            if (!this.state.characterActions) {
+                this.state.characterActions = { [PlayerId.ONE]: [], [PlayerId.TWO]: [], [PlayerId.NEUTRAL]: [] };
+            }
+
+            this.state.characterActions[playerId] = character.actions.map(a => ({
+                ...a,
+                currentCooldown: 0
+            }));
+            this.log(`> ACTIONS INITIALIZED: ${character.actions.map(a => a.name).join(', ')}`, playerId);
+        }
     }
 
     // --- GAME INITIALIZATION ---
 
-    public startGame(mapType: 'EMPTY' | 'MAP_1' = 'EMPTY', isDevMode: boolean = false) {
+    public startGame(mapType: string = 'EMPTY', isDevMode: boolean = false, customSize?: { x: number, y: number }) {
         const deckP1 = isDevMode ? this.generateDevDeck(PlayerId.ONE) : this.generateDeck(PlayerId.ONE);
         const deckP2 = isDevMode ? this.generateDevDeck(PlayerId.TWO) : this.generateDeck(PlayerId.TWO);
+        const deckNeutral = isDevMode ? this.generateDevDeck(PlayerId.NEUTRAL) : [];
 
         this.discovered.clear();
 
         const terrain: Record<string, TerrainData> = {};
         let initialUnits: Unit[] = [];
+        let initialCollectibles: any[] = [];
 
-        const setLandingZone = (x: number, z: number, startZ: number, size: number) => {
+        const setLandingZone = (x: number, z: number, startZ: number, sizeZ: number) => {
             if (z === startZ || z === startZ + 1) return PlayerId.ONE;
-            if (z === startZ + size - 1 || z === startZ + size - 2) return PlayerId.TWO;
+            if (z === startZ + sizeZ - 1 || z === startZ + sizeZ - 2) return PlayerId.TWO;
             return undefined;
         };
 
         if (mapType === 'EMPTY') {
-            const size = 10;
-            const startX = Math.floor((BOARD_SIZE - size) / 2);
-            const startZ = Math.floor((BOARD_SIZE - size) / 2);
+            const sizeX = customSize?.x || 10;
+            const sizeZ = customSize?.y || 10;
+            const startX = Math.floor((BOARD_SIZE - sizeX) / 2);
+            const startZ = Math.floor((BOARD_SIZE - sizeZ) / 2);
 
-            for (let x = startX; x < startX + size; x++) {
-                for (let z = startZ; z < startZ + size; z++) {
+            for (let x = startX; x < startX + sizeX; x++) {
+                for (let z = startZ; z < startZ + sizeZ; z++) {
                     this.discovered.add(`${x},${z}`);
                     terrain[`${x},${z}`] = {
                         type: 'NORMAL',
                         elevation: 0,
                         rotation: 0,
-                        landingZone: setLandingZone(x, z, startZ, size)
+                        landingZone: setLandingZone(x, z, startZ, sizeZ)
                     };
                 }
             }
         } else if (mapType === 'MAP_1') {
-            const size = 12;
-            const startX = Math.floor((BOARD_SIZE - size) / 2);
-            const startZ = Math.floor((BOARD_SIZE - size) / 2);
+            const sizeX = customSize?.x || 12;
+            const sizeZ = customSize?.y || 12;
+            const startX = Math.floor((BOARD_SIZE - sizeX) / 2);
+            const startZ = Math.floor((BOARD_SIZE - sizeZ) / 2);
 
-            for (let x = startX; x < startX + size; x++) {
-                for (let z = startZ; z < startZ + size; z++) {
+            for (let x = startX; x < startX + sizeX; x++) {
+                for (let z = startZ; z < startZ + sizeZ; z++) {
                     this.discovered.add(`${x},${z}`);
 
                     terrain[`${x},${z}`] = {
                         type: 'NORMAL',
                         elevation: 0,
                         rotation: 0,
-                        landingZone: setLandingZone(x, z, startZ, size)
+                        landingZone: setLandingZone(x, z, startZ, sizeZ)
                     };
 
                     if (z === startZ + 8) {
@@ -637,13 +758,50 @@ class GameService {
                 }
             }
 
+            // Only add initial units if they fit within data
             const hillCenterX = startX + 5;
             const hillCenterZ = startZ + 5;
-            initialUnits.push(this.createUnit(UnitType.RESIDENTIAL, { x: hillCenterX, z: hillCenterZ }, PlayerId.NEUTRAL));
-            initialUnits.push(this.createUnit(UnitType.SERVER, { x: startX + 1, z: startZ + 6 }, PlayerId.NEUTRAL));
-            initialUnits.push(this.createUnit(UnitType.WALL, { x: startX + 8, z: startZ + 2 }, PlayerId.NEUTRAL));
-            initialUnits.push(this.createUnit(UnitType.WALL, { x: startX + 9, z: startZ + 2 }, PlayerId.NEUTRAL));
-            initialUnits.push(this.createUnit(UnitType.TOWER, { x: startX + 6, z: startZ + 8 }, PlayerId.NEUTRAL));
+
+
+
+            if (startX + 8 < startX + sizeX && startZ + 2 < startZ + sizeZ)
+                initialUnits.push(this.createUnit(UnitType.WALL, { x: startX + 8, z: startZ + 2 }, PlayerId.NEUTRAL));
+
+            if (startX + 9 < startX + sizeX && startZ + 2 < startZ + sizeZ)
+                initialUnits.push(this.createUnit(UnitType.WALL, { x: startX + 9, z: startZ + 2 }, PlayerId.NEUTRAL));
+
+            if (startX + 6 < startX + sizeX && startZ + 8 < startZ + sizeZ)
+                initialUnits.push(this.createUnit(UnitType.TOWER, { x: startX + 6, z: startZ + 8 }, PlayerId.NEUTRAL));
+        } else if (loadedMaps[mapType]) {
+            // Load from JSON
+            const mapData = loadedMaps[mapType];
+
+            // Terrain
+            if (mapData.terrain) {
+                // Ensure we copy the data structure properly
+                Object.keys(mapData.terrain).forEach(key => {
+                    const t = mapData.terrain[key];
+                    this.discovered.add(key);
+                    terrain[key] = { ...t };
+                });
+            }
+
+            // Units
+            if (mapData.units) {
+                initialUnits = mapData.units.map((u: any) => ({
+                    ...u,
+                    // Re-instantiate stats and status to ensure runtime properties exist
+                    stats: this.createUnit(u.type, u.position, u.playerId).stats, // Get fresh stats based on type
+                    status: { stepsTaken: 0, attacksUsed: 0 },
+                    effects: [],
+                    movePath: []
+                }));
+            }
+
+            // Collectibles
+            if (mapData.collectibles) {
+                initialCollectibles = mapData.collectibles;
+            }
         }
 
         this.applyCharacterPerks(PlayerId.ONE);
@@ -654,13 +812,14 @@ class GameService {
             appStatus: AppStatus.PLAYING,
             mapId: mapType,
             units: initialUnits,
+            collectibles: initialCollectibles,
             revealedTiles: Array.from(this.discovered),
             terrain: terrain,
             roundNumber: 1,
             decks: {
                 [PlayerId.ONE]: deckP1,
                 [PlayerId.TWO]: deckP2,
-                [PlayerId.NEUTRAL]: []
+                [PlayerId.NEUTRAL]: deckNeutral
             },
             selectedCardId: deckP1[0]?.id || null,
             selectedUnitId: null,
@@ -688,6 +847,7 @@ class GameService {
                     terrain: this.state.terrain,
                     decks: this.state.decks,
                     units: this.state.units,
+                    collectibles: this.state.collectibles,
                     credits: this.state.credits
                 });
             }, 500);
@@ -885,6 +1045,36 @@ class GameService {
             return u;
         });
         this.state.units = units;
+
+        // Process Character Action Cooldowns
+        // Process Character Action Cooldowns
+
+        // Lazy Init actions if missing (e.g. hot reload or legacy save)
+        if (!this.state.characterActions) {
+            this.state.characterActions = { [PlayerId.ONE]: [], [PlayerId.TWO]: [], [PlayerId.NEUTRAL]: [] };
+        }
+
+        if (!this.state.characterActions[playerId] || this.state.characterActions[playerId].length === 0) {
+            const charId = this.state.playerCharacters[playerId];
+            const character = CHARACTERS.find(c => c.id === charId);
+            if (character && character.actions) {
+                this.state.characterActions[playerId] = character.actions.map(a => ({
+                    ...a,
+                    currentCooldown: 0
+                }));
+            } else if (!this.state.characterActions[playerId]) {
+                this.state.characterActions[playerId] = [];
+            }
+        }
+
+        const actions = this.state.characterActions[playerId];
+        if (actions && actions.length > 0) {
+            const updatedActions = actions.map(a => ({
+                ...a,
+                currentCooldown: Math.max(0, a.currentCooldown - 1)
+            }));
+            this.state.characterActions[playerId] = updatedActions;
+        }
     }
 
     private processStructures(playerId: PlayerId) {
@@ -1097,6 +1287,48 @@ class GameService {
                 tile.landingZone = PlayerId.TWO;
                 this.log(`> MARKED AS P2 LANDING ZONE`);
             }
+        } else if (terrainTool === 'PLACE_COLLECTIBLE') {
+            const existingIdx = this.state.collectibles.findIndex(c => c.position.x === x && c.position.z === z);
+            if (existingIdx > -1) {
+                this.state.collectibles.splice(existingIdx, 1);
+                this.log(`> COLLECTIBLE REMOVED`);
+            } else {
+                this.state.collectibles.push({
+                    id: `col-${Date.now()}-${Math.random()}`,
+                    type: 'MONEY_PRIZE',
+                    value: 50,
+                    position: { x, z }
+                });
+                this.log(`> COLLECTIBLE PLANTED ($50)`);
+            }
+        } else if (terrainTool === 'PLACE_HEALTH') {
+            const existingIdx = this.state.collectibles.findIndex(c => c.position.x === x && c.position.z === z);
+            if (existingIdx > -1) {
+                this.state.collectibles.splice(existingIdx, 1);
+                this.log(`> COLLECTIBLE REMOVED`);
+            } else {
+                this.state.collectibles.push({
+                    id: `col-${Date.now()}-${Math.random()}`,
+                    type: 'HEALTH_PACK',
+                    value: 75,
+                    position: { x, z }
+                });
+                this.log(`> HEALTH PACK PLANTED (+75 HP)`);
+            }
+        } else if (terrainTool === 'PLACE_ENERGY') {
+            const existingIdx = this.state.collectibles.findIndex(c => c.position.x === x && c.position.z === z);
+            if (existingIdx > -1) {
+                this.state.collectibles.splice(existingIdx, 1);
+                this.log(`> COLLECTIBLE REMOVED`);
+            } else {
+                this.state.collectibles.push({
+                    id: `col-${Date.now()}-${Math.random()}`,
+                    type: 'ENERGY_CELL',
+                    value: 50,
+                    position: { x, z }
+                });
+                this.log(`> ENERGY CELL PLANTED (+50 EN)`);
+            }
         }
 
         this.state.terrain = { ...this.state.terrain };
@@ -1189,6 +1421,61 @@ class GameService {
         this.notify();
     }
 
+    public activateRestoreEnergyAbility(unitId: string) {
+        if (this.state.appStatus !== AppStatus.PLAYING) return;
+        if (this.checkPlayerRestricted(this.state.currentTurn)) return;
+
+        const unit = this.state.units.find(u => u.id === unitId);
+        if (!unit || unit.playerId !== this.state.currentTurn || unit.type !== UnitType.MEDIC) return;
+
+        // Level 25 check handled in UI, but good to double check or assume UI handles it?
+        // Let's check here too for safety
+        const playerChar = this.state.playerCharacters[unit.playerId];
+        if (playerChar !== 'NYX' || this.state.roundNumber < 25) {
+            this.log(`> ACCESS DENIED: PROTOCOL LOCKED`, unit.playerId);
+            return;
+        }
+
+        if (unit.stats.energy < 25) {
+            this.log(`> INSUFFICIENT ENERGY (${unit.stats.energy}/25)`, unit.playerId);
+            return;
+        }
+
+        this.state.interactionState = {
+            mode: 'ABILITY_RESTORE_ENERGY',
+            sourceUnitId: unit.id,
+            playerId: unit.playerId
+        };
+        this.log(`> ENERGY SYPHON READY: SELECT TARGET`, unit.playerId);
+        this.notify();
+    }
+
+    public activateMindControlAbility(unitId: string) {
+        if (this.state.appStatus !== AppStatus.PLAYING) return;
+        if (this.checkPlayerRestricted(this.state.currentTurn)) return;
+
+        const unit = this.state.units.find(u => u.id === unitId);
+        if (!unit || unit.playerId !== this.state.currentTurn || unit.type !== UnitType.HACKER) return;
+
+        if (unit.stats.energy < 50) {
+            this.log(`> INSUFFICIENT ENERGY (${unit.stats.energy}/50)`, unit.playerId);
+            return;
+        }
+
+        if (unit.status.mindControlTargetId) {
+            this.breakMindControl(unit.id);
+            return;
+        }
+
+        this.state.interactionState = {
+            mode: 'ABILITY_MIND_CONTROL',
+            sourceUnitId: unit.id,
+            playerId: unit.playerId
+        };
+        this.log(`> UPLINK ESTABLISHED: SELECT TARGET SYSTEM`, unit.playerId);
+        this.notify();
+    }
+
     public destroyUnit(unitId: string) {
         if (!this.state.isDevMode) return;
 
@@ -1200,6 +1487,8 @@ class GameService {
             this.notify();
         }
     }
+
+
 
     // --- UNIT PLACEMENT LOGIC ---
 
@@ -1243,10 +1532,12 @@ class GameService {
                 });
 
                 this.log(`> GLOBAL SYSTEM FREEZE INITIATED`, playerId);
-                // Consume Card
-                const newDeck = [...deck];
-                newDeck.splice(cardIndex, 1);
-                this.state.decks[playerId] = newDeck;
+                if (!this.state.isDevMode) {
+                    // Consume Card
+                    const newDeck = [...deck];
+                    newDeck.splice(cardIndex, 1);
+                    this.state.decks[playerId] = newDeck;
+                }
                 this.state.selectedCardId = null;
 
                 this.checkWinCondition(); // Check after card consumption
@@ -1276,10 +1567,12 @@ class GameService {
             };
             this.spawnUnit(UnitType.WALL, position, playerId);
 
-            // Consume Card
-            const newDeck = [...deck];
-            newDeck.splice(cardIndex, 1);
-            this.state.decks[playerId] = newDeck;
+            if (!this.state.isDevMode) {
+                // Consume Card
+                const newDeck = [...deck];
+                newDeck.splice(cardIndex, 1);
+                this.state.decks[playerId] = newDeck;
+            }
             this.state.selectedCardId = null;
 
             this.log(`> WALL CONSTRUCTION STARTED`, playerId);
@@ -1291,12 +1584,14 @@ class GameService {
         // Normal Unit Spawn
         this.spawnUnit(card.type, position, playerId);
 
-        // Consume Card
-        const newDeck = [...deck];
-        newDeck.splice(cardIndex, 1);
-        this.state.decks[playerId] = newDeck;
+        if (!this.state.isDevMode) {
+            // Consume Card
+            const newDeck = [...deck];
+            newDeck.splice(cardIndex, 1);
+            this.state.decks[playerId] = newDeck;
 
-        this.state.selectedCardId = null; // Deselect
+            this.state.selectedCardId = null; // Deselect
+        }
         this.log(`> UNIT DEPLOYED: ${card.name}`, playerId);
         this.checkWinCondition(); // Check after spawn (and consumption)
         this.notify();
@@ -1353,6 +1648,24 @@ class GameService {
         if (interactionState.mode === 'ABILITY_HEAL') {
             if (clickedUnit) {
                 this.handleHealTarget(clickedUnit.id);
+            } else {
+                this.log(`> INVALID TARGET`, currentTurn);
+            }
+            return;
+        }
+
+        if (interactionState.mode === 'ABILITY_RESTORE_ENERGY') {
+            if (clickedUnit) {
+                this.handleRestoreEnergyTarget(clickedUnit.id);
+            } else {
+                this.log(`> INVALID TARGET`, currentTurn);
+            }
+            return;
+        }
+
+        if (interactionState.mode === 'ABILITY_MIND_CONTROL') {
+            if (clickedUnit) {
+                this.handleMindControlTarget(clickedUnit.id);
             } else {
                 this.log(`> INVALID TARGET`, currentTurn);
             }
@@ -1439,15 +1752,130 @@ class GameService {
         const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
         if (targetIdx === -1) return;
 
+        const source = this.state.units[sourceIdx];
         const target = this.state.units[targetIdx];
-        const healAmount = 50;
+
+        // BUILDING CHECK
+        const isBuilding = BUILDING_TYPES.includes(target.type);
+        const playerChar = this.state.playerCharacters[source.playerId];
+        const isNyx = playerChar === 'NYX';
+        const round = this.state.roundNumber;
+        const canRepairBuildings = isNyx && round >= 10;
+
+        if (isBuilding && !canRepairBuildings) {
+            this.log(`> TARGET INVALID: CANNOT REPAIR STRUCTURES`, source.playerId);
+            return;
+        }
+
+        // HEAL AMOUNT
+        let healAmount = 50;
+        if (canRepairBuildings) {
+            healAmount += source.level;
+        }
+
         const newHp = Math.min(target.stats.maxHp, target.stats.hp + healAmount);
 
         this.state.units[targetIdx].stats.hp = newHp;
         this.state.units[sourceIdx].stats.energy -= 25;
 
-        this.log(`> REPAIRS COMPLETE: +${healAmount} HP`, this.state.units[sourceIdx].playerId);
+        this.log(`> REPAIRS COMPLETE: +${healAmount} HP`, source.playerId);
         this.finalizeInteraction();
+    }
+
+    public handleRestoreEnergyTarget(targetUnitId: string) {
+        const { sourceUnitId } = this.state.interactionState;
+        const sourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
+        if (sourceIdx === -1) return;
+
+        const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
+        if (targetIdx === -1) return;
+
+        const source = this.state.units[sourceIdx];
+        const target = this.state.units[targetIdx];
+
+        if (target.stats.maxEnergy <= 0) {
+            this.log(`> TARGET INCOMPATIBLE: NO ENERGY CORE`, source.playerId);
+            return;
+        }
+
+        if (target.stats.energy >= target.stats.maxEnergy) {
+            this.log(`> TARGET ENERGY FULL`, source.playerId);
+            return;
+        }
+
+        const restoreAmount = 50;
+        const newEnergy = Math.min(target.stats.maxEnergy, target.stats.energy + restoreAmount);
+
+        this.state.units[targetIdx].stats.energy = newEnergy;
+        this.state.units[sourceIdx].stats.energy -= 25;
+
+        this.log(`> ENERGY TRANSFER COMPLETE: +${restoreAmount} EN`, source.playerId);
+        this.finalizeInteraction();
+    }
+
+    public handleMindControlTarget(targetUnitId: string) {
+        const { sourceUnitId } = this.state.interactionState;
+        const sourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
+        if (sourceIdx === -1) return;
+
+        const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
+        if (targetIdx === -1) return;
+
+        const hacker = this.state.units[sourceIdx];
+        const target = this.state.units[targetIdx];
+
+        if (hacker.playerId === target.playerId) {
+            this.log(`> CANNOT TARGET FRIENDLY UNITS`, hacker.playerId);
+            return;
+        }
+
+        if (target.type === UnitType.TITAN || target.type === UnitType.PORTAL || target.type === UnitType.SPIKE) {
+            this.log(`> TARGET FIREWALL TOO STRONG`, hacker.playerId);
+            return;
+        }
+
+        // Apply Mind Control
+        this.state.units[sourceIdx].stats.energy -= 50;
+        this.state.units[sourceIdx].status.mindControlTargetId = targetUnitId;
+
+        this.state.units[targetIdx].status.originalPlayerId = target.playerId;
+        this.state.units[targetIdx].playerId = hacker.playerId;
+        // Reset target potential actions to avoid weird state (like attacking self immediately if queue)
+        this.state.units[targetIdx].status.attackTargetId = null;
+        this.state.units[targetIdx].status.autoAttackTargetId = null;
+
+        this.log(`> SYSTEM BREACH SUCCESSFUL: CONTROL ASSUMED`, hacker.playerId);
+        this.finalizeInteraction();
+        this.updateFogOfWar();
+    }
+
+    public breakMindControl(hackerId: string) {
+        const hackerIdx = this.state.units.findIndex(u => u.id === hackerId);
+        if (hackerIdx === -1) return;
+
+        const targetId = this.state.units[hackerIdx].status.mindControlTargetId;
+        if (!targetId) return;
+
+        const targetIdx = this.state.units.findIndex(u => u.id === targetId);
+
+        // Clear Hacker Status
+        this.state.units[hackerIdx].status.mindControlTargetId = null;
+
+        if (targetIdx !== -1) {
+            const target = this.state.units[targetIdx];
+            if (target.status.originalPlayerId) {
+                this.state.units[targetIdx].playerId = target.status.originalPlayerId;
+                this.state.units[targetIdx].status.originalPlayerId = null;
+                // Reset target potential actions
+                this.state.units[targetIdx].status.attackTargetId = null;
+                this.state.units[targetIdx].status.autoAttackTargetId = null;
+                this.log(`> CONNECTION LOST: CONTROL REVERTED`, this.state.units[hackerIdx].playerId);
+            }
+        } else {
+            this.log(`> CONNECTION LOST: TARGET OFFLINE`, this.state.units[hackerIdx].playerId);
+        }
+        this.updateFogOfWar();
+        this.notify();
     }
 
     public handleWallChainPlacement(x: number, z: number) {
@@ -1561,14 +1989,14 @@ class GameService {
                 if (x + i >= BOARD_SIZE || z + j >= BOARD_SIZE || x + i < 0 || z + j < 0) return false;
 
                 // Check terrain landing zone
-                if (requiresZone) {
+                if (requiresZone && !this.state.isDevMode) {
                     const tile = this.state.terrain[key];
                     if (!tile || tile.landingZone !== playerId) {
-                        if (requiresZone) return false;
+                        return false;
                     }
                 }
 
-                if (!this.state.revealedTiles.includes(key)) return false;
+                if (!this.state.revealedTiles.includes(key) && !this.state.isDevMode) return false;
             }
         }
         return true;
@@ -1616,7 +2044,7 @@ class GameService {
         const finalStats: UnitStats = {
             hp: stats.hp || 100,
             maxHp: stats.hp || 100,
-            energy: stats.energy || 0,
+            energy: stats.maxEnergy ? Math.floor(stats.maxEnergy / 2) : 0,
             maxEnergy: stats.maxEnergy || 0,
             attack: stats.attack || 0,
             range: stats.range || 0,
@@ -1787,6 +2215,11 @@ class GameService {
             return;
         }
 
+        if (attacker.status.mindControlTargetId) {
+            this.log(`> CANNOT ATTACK WHILE CHANNELING`, attacker.playerId);
+            return;
+        }
+
         if (attacker.status.attacksUsed >= attacker.stats.maxAttacks) {
             this.log(`> WEAPON SYSTEMS COOLDOWN ACTIVE`, attacker.playerId);
             return;
@@ -1848,7 +2281,7 @@ class GameService {
 
         if (attackerIdx === -1) return;
 
-        const updatedUnits = [...this.state.units];
+        let updatedUnits = [...this.state.units];
         const currentStatus = updatedUnits[attackerIdx].status;
         updatedUnits[attackerIdx] = {
             ...updatedUnits[attackerIdx],
@@ -1862,45 +2295,82 @@ class GameService {
         if (targetIdx !== -1) {
             const target = updatedUnits[targetIdx];
             const attacker = updatedUnits[attackerIdx];
-            const damage = attacker.stats.attack;
-            const newHp = Math.max(0, target.stats.hp - damage);
 
-            updatedUnits[targetIdx] = {
-                ...target,
-                stats: { ...target.stats, hp: newHp }
-            };
+            // CHECK INVULNERABILITY
+            const isInvulnerable = target.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
 
-            const remainingAttacks = attacker.stats.maxAttacks - updatedUnits[attackerIdx].status.attacksUsed;
-            this.log(`> ${attacker.type} FIRES ON ${target.type}: -${damage} HP${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+            if (isInvulnerable) {
+                this.log(`> ATTACK DEFLECTED: IMMORTALITY SHIELD`, attacker.playerId);
+            } else {
+                let damage = attacker.stats.attack;
 
-            if (newHp === 0) {
-                this.log(`> TARGET ELIMINATED: ${target.type}`, attacker.playerId);
-                updatedUnits[targetIdx].status.isDying = true;
-                updatedUnits[attackerIdx].status.autoAttackTargetId = null;
-                setTimeout(() => { this.removeUnit(targetId); }, 1500);
+                // Griff Perk: Tanks deal +Level damage (Level 10+)
+                if ((attacker.type === UnitType.LIGHT_TANK || attacker.type === UnitType.HEAVY_TANK) &&
+                    this.state.playerCharacters[attacker.playerId] === 'GRIFF' &&
+                    this.state.roundNumber >= 10) {
+                    damage += attacker.level;
+                }
+                const newHp = Math.max(0, target.stats.hp - damage);
+
+                updatedUnits[targetIdx] = {
+                    ...target,
+                    stats: { ...target.stats, hp: newHp }
+                };
+
+                const remainingAttacks = attacker.stats.maxAttacks - updatedUnits[attackerIdx].status.attacksUsed;
+                this.log(`> ${attacker.type} FIRES ON ${target.type}: -${damage} HP${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+
+                // BREAK MIND CONTROL IF HACKER IS HIT
+                if (target.status.mindControlTargetId) {
+                    const victimId = target.status.mindControlTargetId;
+                    const victimIdx = updatedUnits.findIndex(u => u.id === victimId);
+                    if (victimIdx !== -1 && updatedUnits[victimIdx].status.originalPlayerId) {
+                        updatedUnits[victimIdx] = {
+                            ...updatedUnits[victimIdx],
+                            playerId: updatedUnits[victimIdx].status.originalPlayerId!,
+                            status: { ...updatedUnits[victimIdx].status, originalPlayerId: null }
+                        };
+                        this.log(`> HACKER DISRUPTED: CONNECTION SEVERED`);
+                    }
+                    updatedUnits[targetIdx] = {
+                        ...updatedUnits[targetIdx],
+                        status: { ...updatedUnits[targetIdx].status, mindControlTargetId: null }
+                    };
+                }
+
+                if (newHp === 0) {
+                    this.log(`> TARGET ELIMINATED: ${target.type}`, attacker.playerId);
+                    updatedUnits[targetIdx].status.isDying = true;
+                    updatedUnits[attackerIdx].status.autoAttackTargetId = null;
+                    setTimeout(() => { this.removeUnit(targetId); }, 1500);
+                }
             }
+
+            if (attacker.type === UnitType.TITAN) {
+                this.log(`> SPLASH DAMAGE DETECTED`, attacker.playerId);
+                this.applyAreaDamage(target.position, 1.5, 25, attacker.id, target.id);
+            }
+
         } else {
             updatedUnits[attackerIdx].status.autoAttackTargetId = null;
         }
 
         this.state.units = updatedUnits;
         this.notify();
-
-        const attacker = updatedUnits[attackerIdx];
-        const target = updatedUnits[targetIdx];
-        if (target && attacker.type === UnitType.TITAN) {
-            this.log(`> SPLASH DAMAGE DETECTED`, attacker.playerId);
-            this.applyAreaDamage(target.position, 1.5, 25, attacker.id, target.id);
-        }
     }
 
     private applyAreaDamage(center: Position, radius: number, damage: number, sourceUnitId: string, excludeUnitId?: string) {
         const hitUnits = this.state.units.map(u => {
             if (u.id === sourceUnitId) return u;
             if (excludeUnitId && u.id === excludeUnitId) return u;
+
+            const isInvulnerable = u.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
+            if (isInvulnerable) return u;
+
             const dx = u.position.x - center.x;
             const dz = u.position.z - center.z;
             const dist = Math.sqrt(dx * dx + dz * dz);
+
             if (dist <= radius) {
                 const newHp = Math.max(0, u.stats.hp - damage);
                 this.log(`> BLAST HIT ${u.type}: -${damage} HP`);
@@ -1908,9 +2378,17 @@ class GameService {
             }
             return u;
         });
-        const livingUnits = hitUnits.filter(u => u.id === sourceUnitId || (excludeUnitId && u.id === excludeUnitId) || u.stats.hp > 0);
-        if (livingUnits.length < hitUnits.length) { this.log(`> CONFIRMED KILLS: ${hitUnits.length - livingUnits.length}`); }
-        this.state.units = livingUnits;
+
+        // Trigger deaths for units that died from splash
+        hitUnits.forEach(u => {
+            // If hp is 0 and wasn't before (we can't check before easy here, but check current state units)
+            // Simple check: if hp is 0 and not marked dying.
+            if (u.stats.hp === 0 && !u.status.isDying) {
+                this.removeUnit(u.id);
+            }
+        });
+
+        this.state.units = hitUnits;
         this.checkWinCondition();
     }
 
@@ -1957,10 +2435,22 @@ class GameService {
     }
 
     private removeUnit(unitId: string) {
+        // Check if removing a Hacker with active link
+        const unitToRemove = this.state.units.find(u => u.id === unitId);
+        if (unitToRemove && unitToRemove.status.mindControlTargetId) {
+            this.breakMindControl(unitId);
+        }
+
+        // Check if removing a Mind Controlled Victim
+        // If the victim dies, the Hacker's link should be cleared.
         this.state.units = this.state.units.map(u => {
+            if (u.status.mindControlTargetId === unitId) {
+                return { ...u, status: { ...u.status, mindControlTargetId: null } };
+            }
             if (u.status.autoAttackTargetId === unitId) { return { ...u, status: { ...u.status, autoAttackTargetId: null } }; }
             return u;
         });
+
         this.state.units = this.state.units.filter(u => u.id !== unitId);
         this.updateFogOfWar();
         this.checkWinCondition(); // Check for loss when unit dies
@@ -2029,7 +2519,30 @@ class GameService {
         if (unit.status.stepsTaken >= unit.stats.movement) return;
 
         const stepsToAdd = previewPath.length;
-        const newUnits = [...units];
+        const layout = [...units];
+        // Break mind control if moving
+        if (unit.status.mindControlTargetId) {
+            // We need to break it. 
+            // We can call breakMindControl effectively here on the copy?
+            // Since breakMindControl accesses this.state.units, we should probably call it afterwards?
+            // Or handle it inline for atomic updates.
+
+            const victimId = unit.status.mindControlTargetId;
+            const victimIdx = layout.findIndex(u => u.id === victimId);
+            if (victimIdx !== -1 && layout[victimIdx].status.originalPlayerId) {
+                layout[victimIdx] = {
+                    ...layout[victimIdx],
+                    playerId: layout[victimIdx].status.originalPlayerId!,
+                    status: { ...layout[victimIdx].status, originalPlayerId: null }
+                };
+                this.log(`> HACKER MOVED: CONNECTION LOST`);
+            }
+            // Clear hacker status in the next update object (layout[unitIndex])
+            // But layout[unitIndex] is 'unit' which we modify below.
+            unit.status.mindControlTargetId = null;
+        }
+
+        const newUnits = [...layout];
         newUnits[unitIndex] = { ...unit, movePath: [...previewPath], status: { ...unit.status, stepsTaken: unit.status.stepsTaken + stepsToAdd } };
 
         // Dispatch if local
@@ -2058,8 +2571,110 @@ class GameService {
         const newUnits = [...this.state.units];
         newUnits[unitIndex] = { ...unit, position: nextPos, movePath: remainingPath, rotation: rotation };
         this.state.units = newUnits;
+
+        // Check for Collectibles
+        const colIdx = this.state.collectibles.findIndex(c => c.position.x === nextPos.x && c.position.z === nextPos.z);
+        if (colIdx > -1) {
+            const collectible = this.state.collectibles[colIdx];
+
+            if (collectible.type === 'MONEY_PRIZE') {
+                this.state.credits[unit.playerId] += collectible.value;
+                this.log(`> COLLECTIBLE ACQUIRED: $${collectible.value}`, unit.playerId);
+                this.state.collectibles.splice(colIdx, 1);
+            }
+            else if (collectible.type === 'HEALTH_PACK') {
+                if (unit.stats.hp < unit.stats.maxHp) {
+                    const newHp = Math.min(unit.stats.maxHp, unit.stats.hp + collectible.value);
+                    newUnits[unitIndex] = { ...newUnits[unitIndex], stats: { ...unit.stats, hp: newHp } };
+                    this.log(`> MEDIKIT USED: +${collectible.value} HP`, unit.playerId);
+                    this.state.collectibles.splice(colIdx, 1);
+                    this.state.units = newUnits; // Update ref
+                }
+            }
+            else if (collectible.type === 'ENERGY_CELL') {
+                if (unit.stats.maxEnergy > 0 && unit.stats.energy < unit.stats.maxEnergy) {
+                    const newEnergy = Math.min(unit.stats.maxEnergy, unit.stats.energy + collectible.value);
+                    newUnits[unitIndex] = { ...newUnits[unitIndex], stats: { ...unit.stats, energy: newEnergy } };
+                    this.log(`> ENERGY CELL CONSUMED: +${collectible.value} ENERGY`, unit.playerId);
+                    this.state.collectibles.splice(colIdx, 1);
+                    this.state.units = newUnits;
+                }
+            }
+        }
+
         this.updateFogOfWar();
         this.notify();
+    }
+
+    public triggerCharacterAction(actionId: string) {
+        if (this.state.appStatus !== AppStatus.PLAYING) return;
+        const playerId = this.state.currentTurn;
+        if (this.checkPlayerRestricted(playerId)) return;
+
+        const actions = this.state.characterActions[playerId];
+        if (!actions) return;
+
+        const actionIdx = actions.findIndex(a => a.id === actionId);
+
+        if (actionIdx === -1) return;
+
+        const action = actions[actionIdx];
+
+        if (this.state.roundNumber < action.minLevel) {
+            this.log(`> ACTION LOCKED: REQUIRED LEVEL ${action.minLevel}`, playerId);
+            return;
+        }
+
+        if (action.currentCooldown > 0) {
+            this.log(`> ACTION ON COOLDOWN (${action.currentCooldown} TURNS)`, playerId);
+            return;
+        }
+
+        let actionTriggered = false;
+
+        // Execute Action: NYX_SHIELD
+        if (action.id === 'NYX_SHIELD') {
+            const hasUnits = this.state.units.some(u => u.playerId === playerId && !BUILDING_TYPES.includes(u.type));
+
+            if (!hasUnits) {
+                this.log(`> NO VALID TARGETS FOR SHIELD`, playerId);
+                return;
+            }
+
+            this.state.units = this.state.units.map(u => {
+                if (u.playerId === playerId && !BUILDING_TYPES.includes(u.type)) {
+                    // Remove existing if any to refresh duration
+                    const otherEffects = u.effects.filter(e => e.name !== 'IMMORTALITY_SHIELD');
+                    return {
+                        ...u,
+                        effects: [
+                            ...otherEffects,
+                            {
+                                id: `eff-${u.id}-${Date.now()}`,
+                                name: 'IMMORTALITY_SHIELD',
+                                description: 'Invulnerable to damage',
+                                icon: '🛡️',
+                                duration: 2,
+                                maxDuration: 2
+                            }
+                        ]
+                    };
+                }
+                return u;
+            });
+
+            this.log(`> IMMORTALITY SHIELD ACTIVATED: UNITS PROTECTED`, playerId);
+            actionTriggered = true;
+        }
+
+        if (actionTriggered) {
+            // Set Cooldown
+            const newActions = [...actions];
+            newActions[actionIdx] = { ...action, currentCooldown: action.cooldown };
+            this.state.characterActions[playerId] = newActions;
+
+            this.notify();
+        }
     }
 
     public skipTurn(isRemote: boolean = false) {
@@ -2273,6 +2888,30 @@ class GameService {
         };
 
         finalize();
+    }
+
+    public debugSetTurn(playerId: PlayerId) {
+        if (!this.state.isDevMode) return;
+
+        // Reset units for the new player so they can act
+        const refreshedUnits = this.state.units.map(u => {
+            if (u.playerId === playerId) {
+                return { ...u, status: { ...u.status, stepsTaken: 0, attacksUsed: 0, hasAttacked: false } };
+            }
+            return u;
+        });
+
+        this.state = {
+            ...this.state,
+            units: refreshedUnits,
+            currentTurn: playerId,
+            selectedCardId: this.state.decks[playerId]?.[0]?.id || null,
+            selectedUnitId: null,
+            interactionState: { mode: 'NORMAL' }
+        };
+
+        this.log(`> [DEV] TURN OVERRIDE: ${playerId} ACTIVE`);
+        this.notify();
     }
 
     private endTurn(updatedUnits: Unit[]) {

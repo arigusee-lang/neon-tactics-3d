@@ -2,6 +2,7 @@
 import React, { useState } from 'react';
 import { AppStatus } from '../types';
 import { gameService } from '../services/gameService';
+import { BOARD_SIZE } from '../constants';
 
 interface MainMenuProps {
   status: AppStatus;
@@ -13,6 +14,11 @@ interface MainMenuProps {
 const MainMenu: React.FC<MainMenuProps> = ({ status, onStart, onResume, onRestart }) => {
   const [isDevModeChecked, setIsDevModeChecked] = useState(false);
   const [isMultiplayerMenu, setIsMultiplayerMenu] = useState(false);
+  const [fieldWidth, setFieldWidth] = useState(10);
+  const [fieldDepth, setFieldDepth] = useState(10);
+
+  // Access game state to get available maps (Hack to access state directly via service)
+  const availableMaps = (gameService as any).state?.availableMaps || [];
 
   // Updated to include CHARACTER_SELECTION in the return null check
   if (status === AppStatus.PLAYING || status === AppStatus.CARD_CATALOGUE || status === AppStatus.CHARACTER_SELECTION) return null;
@@ -104,7 +110,7 @@ const MainMenu: React.FC<MainMenuProps> = ({ status, onStart, onResume, onRestar
               <div className="text-center text-sm font-mono text-green-300 mb-2">SELECT BATTLEGROUND</div>
 
               <button
-                onClick={() => gameService.startGame('EMPTY', isDevModeChecked)}
+                onClick={() => gameService.startGame('EMPTY', isDevModeChecked, isDevModeChecked ? { x: fieldWidth, y: fieldDepth } : undefined)}
                 className="group relative px-8 py-3 bg-green-900/40 hover:bg-green-600/20 border border-green-500/50 hover:border-green-400 text-green-400 hover:text-white font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
               >
                 <div className="absolute inset-0 bg-green-400/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
@@ -112,19 +118,56 @@ const MainMenu: React.FC<MainMenuProps> = ({ status, onStart, onResume, onRestar
               </button>
 
               <button
-                onClick={() => gameService.startGame('MAP_1', isDevModeChecked)}
+                onClick={() => gameService.startGame('MAP_1', isDevModeChecked, isDevModeChecked ? { x: fieldWidth, y: fieldDepth } : undefined)}
                 className="group relative px-8 py-3 bg-yellow-900/40 hover:bg-yellow-600/20 border border-yellow-500/50 hover:border-yellow-400 text-yellow-400 hover:text-white font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
               >
                 <div className="absolute inset-0 bg-yellow-400/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
                 Map 1
               </button>
 
+              {/* Dynamic Maps */}
+              {availableMaps.map((mapId: string) => {
+                if (mapId === 'EMPTY' || mapId === 'MAP_1') return null; // Skip hardcoded
+                return (
+                  <button
+                    key={mapId}
+                    onClick={() => gameService.startGame(mapId, isDevModeChecked, isDevModeChecked ? { x: fieldWidth, y: fieldDepth } : undefined)}
+                    className="group relative px-8 py-3 bg-blue-900/40 hover:bg-blue-600/20 border border-blue-500/50 hover:border-blue-400 text-blue-400 hover:text-white font-mono font-bold tracking-widest uppercase transition-all duration-200 overflow-hidden"
+                  >
+                    <div className="absolute inset-0 bg-blue-400/10 translate-y-full group-hover:translate-y-0 transition-transform duration-300"></div>
+                    {mapId}
+                  </button>
+                );
+              })}
+
               {/* Dev Mode Checkbox */}
-              <div className="flex items-center justify-center gap-2 mt-2 cursor-pointer" onClick={() => setIsDevModeChecked(!isDevModeChecked)}>
-                <div className={`w-4 h-4 border border-green-500 flex items-center justify-center ${isDevModeChecked ? 'bg-green-500' : 'bg-transparent'}`}>
-                  {isDevModeChecked && <span className="text-black font-bold text-xs">✓</span>}
+              <div className="flex flex-col gap-2 mt-2 w-full items-center">
+                <div className="flex items-center justify-center gap-2 cursor-pointer" onClick={() => setIsDevModeChecked(!isDevModeChecked)}>
+                  <div className={`w-4 h-4 border border-green-500 flex items-center justify-center ${isDevModeChecked ? 'bg-green-500' : 'bg-transparent'}`}>
+                    {isDevModeChecked && <span className="text-black font-bold text-xs">✓</span>}
+                  </div>
+                  <span className={`text-xs font-mono font-bold uppercase ${isDevModeChecked ? 'text-green-400' : 'text-gray-500'}`}>Dev Mode</span>
                 </div>
-                <span className={`text-xs font-mono font-bold uppercase ${isDevModeChecked ? 'text-green-400' : 'text-gray-500'}`}>Dev Mode</span>
+
+                {isDevModeChecked && (
+                  <div className="flex gap-2 justify-center items-center animate-fadeIn">
+                    <label className="text-[10px] text-gray-500 font-mono">SIZE:</label>
+                    <input
+                      type="number"
+                      value={fieldWidth}
+                      onChange={(e) => setFieldWidth(Math.max(4, Math.min(BOARD_SIZE, parseInt(e.target.value) || 10)))}
+                      className="w-12 bg-black/50 border border-green-500/30 text-green-300 text-center text-xs p-1 outline-none focus:border-green-500"
+                      placeholder="X"
+                    />
+                    <span className="text-gray-500 text-xs self-center">x</span>
+                    <input
+                      type="number"
+                      value={fieldDepth}
+                      onChange={(e) => setFieldDepth(Math.max(4, Math.min(BOARD_SIZE, parseInt(e.target.value) || 10)))}
+                      className="w-12 bg-black/50 border border-green-500/30 text-green-300 text-center text-xs p-1 outline-none focus:border-green-500"
+                      placeholder="Y"
+                    />               </div>
+                )}
               </div>
 
               <button

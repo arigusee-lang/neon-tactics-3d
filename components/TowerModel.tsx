@@ -6,112 +6,167 @@ import * as THREE from 'three';
 import { Edges } from '@react-three/drei';
 
 interface TowerModelProps {
-  color: string;
-  isDying?: boolean;
+    color: string;
+    isDying?: boolean;
 }
 
 const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
-  const groupRef = useRef<Group>(null);
-  
-  // Animation Refs
-  const ringsRef = useRef<Group>(null);
-  const coreRef = useRef<THREE.Mesh>(null);
-  const baseRef = useRef<THREE.Mesh>(null);
-  
-  const matRefs = useRef<MeshStandardMaterial[]>([]);
-  const [deathStartTime, setDeathStartTime] = useState<number | null>(null);
+    const groupRef = useRef<Group>(null);
 
-  const addMatRef = (mat: MeshStandardMaterial) => {
-    if (mat && !matRefs.current.includes(mat)) matRefs.current.push(mat);
-  };
+    // Animation Refs
+    const ringsRef = useRef<Group>(null);
+    const coreRef = useRef<THREE.Mesh>(null);
+    const baseRef = useRef<THREE.Mesh>(null);
 
-  useFrame((state, delta) => {
-    const time = state.clock.elapsedTime;
+    const matRefs = useRef<MeshStandardMaterial[]>([]);
+    const [deathStartTime, setDeathStartTime] = useState<number | null>(null);
 
-    if (isDying) {
-        if (deathStartTime === null) setDeathStartTime(time);
-        const elapsed = time - (deathStartTime || time);
+    const addMatRef = (mat: MeshStandardMaterial) => {
+        if (mat && !matRefs.current.includes(mat)) matRefs.current.push(mat);
+    };
 
-        // Collapse animation: Spire falls over
-        if (groupRef.current) {
-            groupRef.current.rotation.x = Math.min(Math.PI / 2, groupRef.current.rotation.x + delta);
-            groupRef.current.position.y = Math.max(0, groupRef.current.position.y - delta * 2);
+    useFrame((state, delta) => {
+        const time = state.clock.elapsedTime;
+
+        if (isDying) {
+            if (deathStartTime === null) setDeathStartTime(time);
+            const elapsed = time - (deathStartTime || time);
+
+            // Collapse animation: Spire falls over
+            if (groupRef.current) {
+                groupRef.current.rotation.x = Math.min(Math.PI / 2, groupRef.current.rotation.x + delta);
+                groupRef.current.position.y = Math.max(0, groupRef.current.position.y - delta * 2);
+            }
+
+            const opacity = Math.max(0, 1 - elapsed);
+            matRefs.current.forEach(m => {
+                m.opacity = opacity;
+                m.transparent = true;
+                m.emissiveIntensity = 0;
+            });
+
+        } else {
+            // Idle Animation
+
+            // Spin Rings
+            if (ringsRef.current) {
+                ringsRef.current.rotation.y += delta * 0.5;
+                ringsRef.current.position.y = 1.5 + Math.sin(time * 2) * 0.1;
+            }
+
+            // Pulse Core
+            if (coreRef.current) {
+                const pulse = 2 + Math.sin(time * 5) * 1;
+                (coreRef.current.material as MeshStandardMaterial).emissiveIntensity = pulse;
+            }
         }
-        
-        const opacity = Math.max(0, 1 - elapsed);
-        matRefs.current.forEach(m => {
-            m.opacity = opacity;
-            m.transparent = true;
-            m.emissiveIntensity = 0;
-        });
+    });
 
-    } else {
-        // Idle Animation
-        
-        // Spin Rings
-        if (ringsRef.current) {
-            ringsRef.current.rotation.y += delta * 0.5;
-            ringsRef.current.position.y = 1.5 + Math.sin(time * 2) * 0.1;
-        }
+    return (
+        <group ref={groupRef}>
+            {/* === BASE PLATFORM === */}
+            <group position={[0, 0.1, 0]}>
+                <mesh castShadow receiveShadow>
+                    <cylinderGeometry args={[0.4, 0.5, 0.2, 8]} />
+                    <meshStandardMaterial color="#222" metalness={0.8} roughness={0.2} />
+                </mesh>
+                <mesh position={[0, 0.15, 0]}>
+                    <cylinderGeometry args={[0.3, 0.35, 0.1, 8]} />
+                    <meshStandardMaterial color="#111" />
+                    <Edges color={color} threshold={15} scale={1} />
+                </mesh>
+            </group>
 
-        // Pulse Core
-        if (coreRef.current) {
-            const pulse = 2 + Math.sin(time * 5) * 1;
-            (coreRef.current.material as MeshStandardMaterial).emissiveIntensity = pulse;
-        }
-    }
-  });
+            {/* === CENTRAL ENERGY COLUMN === */}
+            <group position={[0, 1.2, 0]}>
+                {/* Inner Glowing Core */}
+                <mesh>
+                    <cylinderGeometry args={[0.08, 0.08, 2.0, 8]} />
+                    <meshStandardMaterial
+                        color={color}
+                        emissive={color}
+                        emissiveIntensity={2}
+                        transparent
+                        opacity={0.8}
+                        roughness={0}
+                    />
+                </mesh>
+                {/* Glass/Shield Casing */}
+                <mesh>
+                    <cylinderGeometry args={[0.15, 0.15, 2.1, 8]} />
+                    <meshStandardMaterial
+                        color="#88ccff"
+                        transparent
+                        opacity={0.3}
+                        roughness={0.1}
+                        metalness={0.9}
+                        side={THREE.DoubleSide}
+                    />
+                </mesh>
+            </group>
 
-  return (
-    <group ref={groupRef}>
-        {/* Base Foundation */}
-        <mesh ref={baseRef} position={[0, 0.2, 0]} castShadow>
-            <cylinderGeometry args={[0.6, 0.7, 0.4, 8]} />
-            <meshStandardMaterial ref={addMatRef} color="#111" roughness={0.7} metalness={0.5} />
-            <Edges color={color} threshold={15} />
-        </mesh>
+            {/* === VERTICAL RAIL SUPPORTS === */}
+            {[0, Math.PI / 2, Math.PI, -Math.PI / 2].map((rot, i) => (
+                <group key={i} rotation={[0, rot, 0]}>
+                    <mesh position={[0.22, 1.2, 0]}>
+                        <boxGeometry args={[0.05, 1.8, 0.05]} />
+                        <meshStandardMaterial color="#333" metalness={0.6} roughness={0.4} />
+                    </mesh>
+                    {/* Connection Nodes */}
+                    {[0.4, 1.2, 2.0].map((y, j) => (
+                        <mesh key={j} position={[0.22, y, 0]}>
+                            <boxGeometry args={[0.08, 0.1, 0.08]} />
+                            <meshStandardMaterial color="#111" />
+                        </mesh>
+                    ))}
+                </group>
+            ))}
 
-        {/* Main Spire Body */}
-        <mesh position={[0, 1.2, 0]} castShadow>
-            <cylinderGeometry args={[0.2, 0.5, 2.0, 6]} />
-            <meshStandardMaterial ref={addMatRef} color="#222" roughness={0.4} metalness={0.8} />
-        </mesh>
+            {/* === ROTATING RINGS === */}
+            <group ref={ringsRef} position={[0, 1.5, 0]}>
+                {/* Upper Ring Segment */}
+                <group position={[0, 0.4, 0]} rotation={[0.2, 0, 0]}>
+                    {[0, Math.PI].map((rot, i) => (
+                        <mesh key={i} rotation={[0, rot, 0]} position={[0, 0, 0.35]}>
+                            <boxGeometry args={[0.4, 0.05, 0.1]} />
+                            <meshStandardMaterial color="#444" metalness={0.8} />
+                            <mesh position={[0, 0, 0.06]}>
+                                <planeGeometry args={[0.3, 0.02]} />
+                                <meshBasicMaterial color={color} side={THREE.DoubleSide} />
+                            </mesh>
+                        </mesh>
+                    ))}
+                </group>
 
-        {/* Floating Energy Rings */}
-        <group ref={ringsRef} position={[0, 1.5, 0]}>
-            {/* Inner Ring */}
-            <mesh rotation={[0.2, 0, 0]}>
-                <torusGeometry args={[0.35, 0.02, 8, 32]} />
-                <meshStandardMaterial ref={addMatRef} color={color} emissive={color} emissiveIntensity={1} />
-            </mesh>
-            {/* Outer Ring */}
-            <mesh rotation={[-0.2, Math.PI/2, 0]}>
-                <torusGeometry args={[0.5, 0.03, 8, 32]} />
-                <meshStandardMaterial ref={addMatRef} color="#444" metalness={0.9} />
-            </mesh>
+                {/* Middle Spinner */}
+                <mesh rotation={[Math.PI / 2, 0, 0]}>
+                    <torusGeometry args={[0.3, 0.02, 4, 24]} />
+                    <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1} />
+                </mesh>
+            </group>
+
+            {/* === EMITTER HEAD === */}
+            <group position={[0, 2.3, 0]}>
+                <mesh ref={coreRef}>
+                    <octahedronGeometry args={[0.2]} />
+                    <meshStandardMaterial
+                        color={color}
+                        emissive={color}
+                        emissiveIntensity={3}
+                        toneMapped={false}
+                    />
+                </mesh>
+                {/* Focusing Lenses */}
+                <mesh rotation={[Math.PI / 2, 0, 0]}>
+                    <ringGeometry args={[0.25, 0.3, 6]} />
+                    <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} />
+                </mesh>
+                <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.1, 0]}>
+                    <ringGeometry args={[0.15, 0.2, 6]} />
+                    <meshBasicMaterial color="#fff" transparent opacity={0.4} side={THREE.DoubleSide} />
+                </mesh>
+            </group>
         </group>
-
-        {/* Crystal Core Top */}
-        <mesh ref={coreRef} position={[0, 2.3, 0]}>
-            <octahedronGeometry args={[0.25]} />
-            <meshStandardMaterial 
-                ref={addMatRef} 
-                color={color} 
-                emissive={color} 
-                emissiveIntensity={2} 
-                transparent
-                opacity={0.9}
-            />
-        </mesh>
-
-        {/* Support Struts */}
-        {[0, Math.PI/2, Math.PI, -Math.PI/2].map((rot, i) => (
-            <mesh key={i} position={[0, 0.5, 0]} rotation={[0, rot, 0]}>
-                <boxGeometry args={[0.1, 0.8, 0.8]} />
-                <meshStandardMaterial ref={addMatRef} color="#151515" />
-            </mesh>
-        ))}
-    </group>
-  );
+    );
 };
 export default TowerModel;

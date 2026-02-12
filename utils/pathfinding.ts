@@ -12,24 +12,28 @@ interface Node {
 }
 
 export const findPath = (
-  start: Position, 
-  end: Position, 
+  start: Position,
+  end: Position,
   obstacles: Set<string>, // "x,z" strings
   revealed: Set<string>,
   terrain: Record<string, TerrainData>,
   unitSize: number = 1
 ): Position[] => {
   const openList: Node[] = [];
+  const openSet: Map<string, Node> = new Map();
   const closedList: Set<string> = new Set();
 
   const startNode: Node = { ...start, f: 0, g: 0, h: 0, parent: null };
   openList.push(startNode);
+  openSet.set(`${startNode.x},${startNode.z}`, startNode);
 
   while (openList.length > 0) {
-    // Sort by lowest F cost
+    // Sort by lowest F cost (Simple robust way, can be optimized with Heap but this is likely fast enough for N<2000)
     openList.sort((a, b) => a.f - b.f);
+
     const currentNode = openList.shift()!;
     const currentKey = `${currentNode.x},${currentNode.z}`;
+    openSet.delete(currentKey);
 
     if (currentNode.x === end.x && currentNode.z === end.z) {
       const path: Position[] = [];
@@ -38,8 +42,7 @@ export const findPath = (
         path.push({ x: curr.x, z: curr.z });
         curr = curr.parent;
       }
-      // Return path from start (excluding start itself) to end
-      return path.reverse().slice(1); 
+      return path.reverse().slice(1);
     }
 
     closedList.add(currentKey);
@@ -56,48 +59,39 @@ export const findPath = (
 
       // 1. Basic Anchor Boundary Check
       if (neighbor.x < 0 || neighbor.x >= BOARD_SIZE || neighbor.z < 0 || neighbor.z >= BOARD_SIZE) continue;
-      
-      // 2. Closed List Check (Optimized to check anchor only)
+
+      // 2. Closed List Check
       if (closedList.has(neighborKey)) continue;
 
       // 3. Footprint Collision Check
-      // We must ensure every tile the unit would occupy at this position is valid and empty
       let isBlocked = false;
-      
-      for(let i = 0; i < unitSize; i++) {
-          for(let j = 0; j < unitSize; j++) {
-              const checkX = neighbor.x + i;
-              const checkZ = neighbor.z + j;
-              const checkKey = `${checkX},${checkZ}`;
 
-              // Check Map Boundaries for footprint
-              if (checkX >= BOARD_SIZE || checkZ >= BOARD_SIZE) {
-                  isBlocked = true;
-                  break;
-              }
+      for (let i = 0; i < unitSize; i++) {
+        for (let j = 0; j < unitSize; j++) {
+          const checkX = neighbor.x + i;
+          const checkZ = neighbor.z + j;
+          const checkKey = `${checkX},${checkZ}`;
 
-              // Check Fog of War (Must be revealed)
-              if (!revealed.has(checkKey)) {
-                  isBlocked = true;
-                  break;
-              }
-
-              // Check Obstacles
-              // Note: We allow the 'end' footprint to be processed if the pathfinder logic requires it,
-              // but in this game, units move to empty tiles. 
-              // We don't skip obstacle check for 'end' because you can't move ONTO an enemy.
-              if (obstacles.has(checkKey)) {
-                  isBlocked = true;
-                  break;
-              }
+          if (checkX >= BOARD_SIZE || checkZ >= BOARD_SIZE) {
+            isBlocked = true;
+            break;
           }
-          if (isBlocked) break;
+          if (!revealed.has(checkKey)) {
+            isBlocked = true;
+            break;
+          }
+          if (obstacles.has(checkKey)) {
+            isBlocked = true;
+            break;
+          }
+        }
+        if (isBlocked) break;
       }
 
       if (isBlocked) continue;
 
       const gScore = currentNode.g + 1;
-      let neighborNode = openList.find(n => n.x === neighbor.x && n.z === neighbor.z);
+      let neighborNode = openSet.get(neighborKey);
 
       if (!neighborNode) {
         neighborNode = {
@@ -110,6 +104,7 @@ export const findPath = (
         };
         neighborNode.f = neighborNode.g + neighborNode.h;
         openList.push(neighborNode);
+        openSet.set(neighborKey, neighborNode);
       } else if (gScore < neighborNode.g) {
         neighborNode.g = gScore;
         neighborNode.f = neighborNode.g + neighborNode.h;
