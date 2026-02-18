@@ -37,6 +37,7 @@ export enum UnitType {
   LIGHT_TANK = 'LIGHT_TANK', // 1x1 Tank
   HEAVY_TANK = 'HEAVY_TANK', // 2x2 Tank
   SNIPER = 'SNIPER', // Long-range precision unit
+  REPAIR_BOT = 'REPAIR_BOT', // Mobile repair unit
 
   // Buildings / Immobile
   TITAN = 'TITAN',
@@ -46,10 +47,13 @@ export enum UnitType {
   TOWER = 'TOWER',             // 3 Story Tower
   CHARGING_STATION = 'CHARGING_STATION', // Energy Restorer
   PORTAL = 'PORTAL',           // Indestructible Warp Gate (2x2)
+  ARC_PORTAL = 'ARC_PORTAL',    // New 3x3 Portal
 
   // Actions
   SYSTEM_FREEZE = 'SYSTEM_FREEZE',
-  ION_CANNON = 'ION_CANNON'
+  ION_CANNON = 'ION_CANNON',
+  FORWARD_BASE = 'FORWARD_BASE',
+  TACTICAL_RETREAT = 'TACTICAL_RETREAT'
 }
 
 export interface Position {
@@ -162,9 +166,9 @@ export interface LogEntry {
   playerId?: PlayerId;
 }
 
-export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN' | 'PLACE_COLLECTIBLE' | 'PLACE_HEALTH' | 'PLACE_ENERGY';
+export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'DELETE' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN' | 'PLACE_COLLECTIBLE' | 'PLACE_HEALTH' | 'PLACE_ENERGY';
 
-export type InteractionMode = 'NORMAL' | 'WALL_PLACEMENT' | 'ABILITY_SUMMON' | 'ABILITY_TELEPORT' | 'ABILITY_FREEZE' | 'ABILITY_HEAL' | 'ABILITY_RESTORE_ENERGY' | 'ABILITY_MIND_CONTROL' | 'ION_CANNON_TARGETING' | 'TERRAIN_EDIT';
+export type InteractionMode = 'NORMAL' | 'WALL_PLACEMENT' | 'ABILITY_SUMMON' | 'ABILITY_TELEPORT' | 'ABILITY_FREEZE' | 'ABILITY_HEAL' | 'ABILITY_RESTORE_ENERGY' | 'ABILITY_MIND_CONTROL' | 'ION_CANNON_TARGETING' | 'FORWARD_BASE_TARGETING' | 'TERRAIN_EDIT';
 
 export interface InteractionState {
   mode: InteractionMode;

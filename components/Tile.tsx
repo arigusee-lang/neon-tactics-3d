@@ -222,35 +222,26 @@ const Tile: React.FC<TileProps> = React.memo(({
     return (
         <group position={[position[0], position[1] + baseHeight, position[2]]}>
             <group rotation={groupRotation}>
-                {/* Tile Body - Transparent Matrix Glass Style */}
+                {/* INVISIBLE HITBOX for robust interaction */}
                 <mesh
-                    position={geometryPosition}
+                    position={[geometryPosition[0], geometryPosition[1], geometryPosition[2]]}
                     rotation={geometryRotation}
                     onPointerOver={handlePointerOver}
                     onPointerOut={handlePointerOut}
                     onClick={handleClick}
                     userData={{ type: 'TILE', x, z }}
-                    receiveShadow
                 >
-                    <planeGeometry args={[planeWidth, planeHeight]} />
-                    <meshStandardMaterial
-                        color={COLORS.TILE_BODY}
-                        transparent={true}
-                        opacity={0.05}
-                        side={THREE.DoubleSide}
-                        roughness={0.8}
-                        metalness={0.2}
-                        envMapIntensity={0}
-                    />
+                    <boxGeometry args={[planeWidth + 0.1, planeHeight + 0.1, 0.1]} /> {/* Slight padding to cover gaps */}
+                    <meshBasicMaterial transparent opacity={0} depthWrite={false} />
                 </mesh>
 
                 {/* Landing Zone Overlay */}
                 {zoneColor && (
-                    <mesh position={[geometryPosition[0], geometryPosition[1] + 0.01, geometryPosition[2]]} rotation={geometryRotation} raycast={() => null}>
+                    <mesh position={[geometryPosition[0], geometryPosition[1] + 0.02, geometryPosition[2]]} rotation={geometryRotation} raycast={() => null}>
                         <planeGeometry args={[planeWidth, planeHeight]} />
                         <meshBasicMaterial
                             color={zoneColor}
-                            opacity={0.15}
+                            opacity={0.12}
                             transparent
                             side={THREE.DoubleSide}
                             depthWrite={false}

@@ -20,6 +20,9 @@ import PortalModel from './PortalModel';
 import ApexBladeModel from './ApexBladeModel';
 import SniperModel from './SniperModel';
 import HackerModel from './HackerModel';
+import ArcPortalModelV2 from './ArcPortalModelV2';
+import RepairBotModel from './RepairBotModel';
+import SpikeModel from './SpikeModel';
 import { gameService } from '../services/gameService';
 
 interface UnitProps {
@@ -101,14 +104,9 @@ const LightningStrike: React.FC<{ target: Vector3, color: string }> = ({ target,
         target.clone().add(new Vector3(0, 10, 0)),
         target.clone()
     ]);
-    const [isVisible, setIsVisible] = useState(false);
+    const [isVisible, setIsVisible] = useState(true);
 
-    useEffect(() => {
-        const t1 = setTimeout(() => {
-            setIsVisible(true);
-        }, 300); // Wait for building glow charge
-        return () => clearTimeout(t1);
-    }, []);
+    // Effect for charge delay removed to ensure visibility
 
     useFrame(() => {
         if (!isVisible) return;
@@ -387,7 +385,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             unitFloat = 0.255;
         } else if (data.type === EUnitType.SNIPER) {
             unitFloat = 0.24;
-        } else if (data.type === EUnitType.LIGHT_TANK || data.type === EUnitType.HEAVY_TANK) {
+        } else if (data.type === EUnitType.LIGHT_TANK || data.type === EUnitType.HEAVY_TANK || data.type === EUnitType.REPAIR_BOT) {
             unitFloat = 0.05;
         }
         if (data.stats.movement === 0 && !isTargetCalc) {
@@ -476,12 +474,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             groupRef.current.lookAt(attackTargetPos.x, groupRef.current.position.y, attackTargetPos.z);
 
             if (data.type === EUnitType.SPIKE && internalRef.current) {
-                internalRef.current.children.forEach((child) => {
-                    if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-                        child.material.emissiveIntensity = 2 + Math.sin(time * 50) * 1;
-                        child.material.emissive = new THREE.Color(playerColor);
-                    }
-                });
+                // Legacy animation logic removed, handled in SpikeModel now via props
             }
         } else {
             if (bodyRef.current) bodyRef.current.rotation.y = 0;
@@ -516,17 +509,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             if (isFrozen) {
                 if (Math.random() > 0.8) groupRef.current.position.x += (Math.random() - 0.5) * 0.03;
             } else if (data.type === EUnitType.SPIKE) {
-                if (internalRef.current) {
-                    internalRef.current.position.y = Math.sin(time * 1.5) * 0.1;
-                    internalRef.current.rotation.y = time * 0.5;
-                    if (!data.status.attackTargetId) {
-                        internalRef.current.children.forEach((child) => {
-                            if (child instanceof THREE.Mesh && child.material instanceof THREE.MeshStandardMaterial) {
-                                child.material.emissiveIntensity = 0;
-                            }
-                        });
-                    }
-                }
+                // Logic moved to SpikeModel
             } else if (data.type === EUnitType.BOX) {
                 groupRef.current.position.y = idlePos.y + 0.3 + Math.sin(time * 4) * 0.1;
                 if (internalRef.current) {
@@ -553,6 +536,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             case EUnitType.HEAVY_TANK: return <HeavyTankModel color={playerColor} isMoving={isMoving} isDying={isDying} />;
             case EUnitType.CHARGING_STATION: return <ChargingStationModel color={playerColor} isDying={isDying} />;
             case EUnitType.PORTAL: return <PortalModel color={playerColor} isDying={isDying} />;
+            case EUnitType.ARC_PORTAL: return <ArcPortalModelV2 color={playerColor} isDying={isDying} />;
             case EUnitType.WALL: return <WallModel color={playerColor} isDying={isDying} />;
             case EUnitType.TOWER: return <TowerModel color={playerColor} isDying={isDying} />;
             case EUnitType.TITAN: return <TitanModel color={playerColor} isDying={isDying} />;
@@ -561,6 +545,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             case EUnitType.CONE: return <ApexBladeModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;
             case EUnitType.SNIPER: return <SniperModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;
             case EUnitType.HACKER: return <HackerModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} isMindControlling={!!data.status.mindControlTargetId} />;
+            case EUnitType.REPAIR_BOT: return <RepairBotModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId || (data.status.attacksUsed > 0 && !data.status.attackTargetId)} />; // attacksUsed check for repair anim? 
 
             case EUnitType.BOX:
                 return (
@@ -607,33 +592,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
                     </group>
                 );
 
-            case EUnitType.SPIKE:
-                return (
-                    <group>
-                        <mesh position={[0, 0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-                            <ringGeometry args={[0.4, 0.6, 6]} />
-                            <meshBasicMaterial color={playerColor} side={THREE.DoubleSide} wireframe />
-                        </mesh>
-                        <group ref={internalRef}>
-                            <mesh position={[0, 0.5, 0]} rotation={[0, 0, Math.PI]}>
-                                <coneGeometry args={[0.3, 0.8, 4]} />
-                                {renderMatrixMat(0.8)}
-                            </mesh>
-                            <mesh position={[0, 1.2, 0]}>
-                                <coneGeometry args={[0.25, 1.0, 4]} />
-                                {renderMatrixMat(0.8)}
-                            </mesh>
-                            <mesh position={[0, 0.8, 0]}>
-                                <octahedronGeometry args={[0.15]} />
-                                <meshBasicMaterial color={playerColor} toneMapped={false} />
-                            </mesh>
-                        </group>
-                        <mesh position={[0, 1.0, 0]} rotation={[0.5, 0, 0]}>
-                            <torusGeometry args={[0.6, 0.02, 4, 24]} />
-                            <meshBasicMaterial color="#555" />
-                        </mesh>
-                    </group>
-                );
+            case EUnitType.SPIKE: return <SpikeModel color={playerColor} isAttacking={!!data.status.attackTargetId} />;
 
             default:
                 return (

@@ -396,6 +396,41 @@ const Board: React.FC<BoardProps> = ({
             highlightColor = '#ff4400'; // Orange-Red for danger
         }
 
+        // --- MODE: FORWARD BASE TARGETING ---
+        else if (interactionState.mode === 'FORWARD_BASE_TARGETING') {
+            isTargetingMode = true;
+            isPlacementMode = true;
+
+            // 2x2 Footprint
+            for (let i = 0; i < 2; i++) {
+                for (let j = 0; j < 2; j++) {
+                    placementFootprint.add(`${x + i},${z + j}`);
+                }
+            }
+
+            // Validity Check
+            let valid = true;
+            // Hacky way to check enemy ID since we don't assume generic 2 player always but PlayerId is enum
+            const enemyId = interactionState.playerId === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
+
+            for (const pKey of placementFootprint) {
+                // Must be revealed
+                if (!revealedSet.has(pKey)) {
+                    valid = false;
+                    break;
+                }
+                // Must not be enemy zone
+                const t = terrainData[pKey];
+                if (t && t.landingZone === enemyId) {
+                    valid = false;
+                    break;
+                }
+            }
+
+            isPlacementValid = valid;
+            highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
+        }
+
         // --- MODE: CARD PLACEMENT (Normal) ---
         else if (selectedCardId && interactionState.mode === 'NORMAL') {
             const card = gameService.getCard(selectedCardId);
@@ -558,6 +593,7 @@ const Board: React.FC<BoardProps> = ({
                 position={[0, -0.05, 0]}
                 material-transparent={true}
                 material-opacity={0.45}
+                raycast={() => null}
             />
 
             {/* Coordinate Tooltip - Adjusted Height */}

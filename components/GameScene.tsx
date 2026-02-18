@@ -47,14 +47,14 @@ const GameScene: React.FC<GameSceneProps> = ({
 
   // Reduced Lighting Intensities for darker, higher contrast look
   const ambientColor = isDark ? '#ffffff' : '#ffebd6';
-  const ambientIntensity = isDark ? 0.2 : 0.8;
+  const ambientIntensity = isDark ? 0.4 : 0.8;
 
   const mainLightColor = isDark ? '#ccddee' : '#ffaa88';
   const mainLightIntensity = isDark ? 1.0 : 2.0; // Reduced from 1.5 to 1.0
   const mainLightPos: [number, number, number] = isDark ? [10, 20, 10] : [30, 15, 10];
 
   const fillLightColor = isDark ? '#00ccff' : '#8800ff';
-  const fillLightIntensity = isDark ? 0.5 : 1.0; // Reduced from 0.8 to 0.5
+  const fillLightIntensity = isDark ? 0.7 : 1.0; // Reduced from 0.8 to 0.5
 
   const controlsRef = useRef<any>(null);
 

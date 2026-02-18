@@ -10,6 +10,7 @@ import Minimap from './components/Minimap';
 import MapEditor from './components/MapEditor';
 import ShopModal from './components/ShopModal';
 import CardCatalogue from './components/CardCatalogue';
+import DebugPointerInfo from './components/DebugPointerInfo';
 import { gameService } from './services/gameService';
 import { GameState, PlayerId, AppStatus, Effect, UnitType, Talent } from './types';
 import { COLORS, CHARACTERS } from './constants';
@@ -104,7 +105,7 @@ const PlayerTooltip: React.FC<{
 };
 
 // Character Action Bar Component
-const CharacterActionBar: React.FC<{ actions: any[], playerId: PlayerId, currentTurn: PlayerId }> = ({ actions, playerId, currentTurn }) => {
+const CharacterActionBar: React.FC<{ actions: any[], playerId: PlayerId, currentTurn: PlayerId, isDevMode: boolean, currentRound: number }> = ({ actions, playerId, currentTurn, isDevMode, currentRound }) => {
     if (!actions || actions.length === 0) return null;
 
     return (
@@ -112,12 +113,18 @@ const CharacterActionBar: React.FC<{ actions: any[], playerId: PlayerId, current
             {actions.map(action => {
                 const isReady = action.currentCooldown === 0;
                 const isMyTurn = playerId === currentTurn;
-                const canUse = isReady && isMyTurn;
+                const isLevelUnlocked = isDevMode || (currentRound >= (action.minLevel || 0));
+                // However, we are in a functional component that might not receive updates unless state is observed.
+                // Assuming props updates.
+                const canUse = isReady && isMyTurn && isLevelUnlocked;
 
                 return (
                     <button
                         key={action.id}
-                        onClick={() => gameService.triggerCharacterAction(action.id)}
+                        onClick={() => {
+                            console.log('Action Clicked:', action.id);
+                            gameService.triggerCharacterAction(action.id);
+                        }}
                         disabled={!canUse}
                         className={`
                             relative w-10 h-10 rounded border flex items-center justify-center text-xl transition-all group
@@ -140,6 +147,7 @@ const CharacterActionBar: React.FC<{ actions: any[], playerId: PlayerId, current
                             <div className="text-[10px] font-bold text-purple-400 uppercase mb-1">{action.name}</div>
                             <div className="text-[9px] text-gray-400 leading-tight">{action.description}</div>
                             <div className="text-[9px] text-gray-500 mt-1 font-mono">COOLDOWN: {action.cooldown} TURNS</div>
+                            {action.minLevel > 0 && <div className="text-[9px] text-red-500 mt-1 font-mono">MIN LEVEL: {action.minLevel}</div>}
                         </div>
                     </button>
                 );
@@ -231,25 +239,28 @@ const App: React.FC = () => {
     if (!gameState) return <div className="text-white">Loading...</div>;
 
     const currentPlayerDeck = gameState.decks[gameState.currentTurn];
-    const playerColor = gameState.currentTurn === PlayerId.ONE ? COLORS.P1 : COLORS.P2;
+    const playerColor = gameState.currentTurn === PlayerId.ONE ? COLORS.P1 : (gameState.currentTurn === PlayerId.TWO ? COLORS.P2 : COLORS.NEUTRAL);
     const selectedUnit = gameState.units.find(u => u.id === gameState.selectedUnitId) || null;
     const isPlaying = gameState.appStatus === AppStatus.PLAYING || gameState.appStatus === AppStatus.TALENT_SELECTION || gameState.appStatus === AppStatus.SHOP;
 
     return (
         <div className="relative w-full h-screen bg-black overflow-hidden font-mono">
+            {gameState.isDevMode && <DebugPointerInfo />}
 
-            <GameScene
-                units={gameState.units}
-                currentTurn={gameState.currentTurn}
-                revealedTiles={gameState.revealedTiles}
-                selectedCardId={gameState.selectedCardId}
-                selectedUnitId={gameState.selectedUnitId}
-                previewPath={gameState.previewPath}
-                appStatus={gameState.appStatus}
-                lightMode={gameState.lightMode}
-                mapId={gameState.mapId}
-                collectibles={gameState.collectibles}
-            />
+            <div className="absolute inset-0 z-0">
+                <GameScene
+                    units={gameState.units}
+                    currentTurn={gameState.currentTurn}
+                    revealedTiles={gameState.revealedTiles}
+                    selectedCardId={gameState.selectedCardId}
+                    selectedUnitId={gameState.selectedUnitId}
+                    previewPath={gameState.previewPath}
+                    appStatus={gameState.appStatus}
+                    lightMode={gameState.lightMode}
+                    mapId={gameState.mapId}
+                    collectibles={gameState.collectibles}
+                />
+            </div>
 
             <MainMenu
                 status={gameState.appStatus}
@@ -297,7 +308,7 @@ const App: React.FC = () => {
 
             {isPlaying && (
                 <>
-                    <div className="absolute top-4 left-1/2 transform -translate-x-1/2 pointer-events-none w-full max-w-2xl flex flex-col items-center gap-2 z-10">
+                    <div className="absolute top-4 left-1/2 transform -translate-x-1/2 pointer-events-none w-full max-w-2xl flex flex-col items-center gap-2 z-20">
                         {/* HUD Top Bar */}
                         <div className="flex items-center gap-4 w-full justify-center">
 
@@ -458,6 +469,8 @@ const App: React.FC = () => {
                                 actions={gameState.characterActions[gameState.currentTurn]}
                                 playerId={gameState.currentTurn}
                                 currentTurn={gameState.currentTurn}
+                                isDevMode={gameState.isDevMode}
+                                currentRound={gameState.roundNumber}
                             />
 
                             <Deck

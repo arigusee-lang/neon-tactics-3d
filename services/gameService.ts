@@ -354,7 +354,7 @@ class GameService {
     }
 
     private getRandomColor(playerId: PlayerId): string {
-        return playerId === PlayerId.ONE ? COLORS.P1 : playerId === PlayerId.TWO ? COLORS.P2 : '#888';
+        return playerId === PlayerId.ONE ? COLORS.P1 : playerId === PlayerId.TWO ? COLORS.P2 : COLORS.NEUTRAL;
     }
 
     // --- WIN CONDITION CHECK ---
@@ -649,8 +649,13 @@ class GameService {
                 const nextIndex = deliveryRounds.indexOf(round) + 1;
                 const nextRound = deliveryRounds[nextIndex];
                 this.state.nextDeliveryRound = nextRound;
+
+                // Supply Injection
+                this.state.credits[PlayerId.ONE] += 500;
+                this.state.credits[PlayerId.TWO] += 500;
+
                 this.generateShopStock(nextRound);
-                this.log(`> SHOP RESTOCKED. NEXT DROP: ROUND ${nextRound}`);
+                this.log(`> SHOP RESTOCKED & +500 CREDITS. NEXT DROP: ROUND ${nextRound}`);
             } else {
                 this.state.shopAvailable = false;
                 this.log(`> SUPPLY LINES SEVERED. SHOP OFFLINE.`);
@@ -775,16 +780,17 @@ class GameService {
         } else if (loadedMaps[mapType]) {
             // Load from JSON
             const mapData = loadedMaps[mapType];
+            this.log(`> LOADING MAP: ${mapType}...`);
 
             // Terrain
             if (mapData.terrain) {
-                // Ensure we copy the data structure properly
                 Object.keys(mapData.terrain).forEach(key => {
                     const t = mapData.terrain[key];
                     this.discovered.add(key);
                     terrain[key] = { ...t };
                 });
             }
+            this.log(`> TERRAIN LOADED: ${Object.keys(terrain).length} TILES`);
 
             // Units
             if (mapData.units) {
@@ -1271,6 +1277,11 @@ class GameService {
             tile.rotation = 0;
             tile.landingZone = undefined;
             this.log(`> TILE FLATTENED`);
+        } else if (terrainTool === 'DELETE') {
+            delete this.state.terrain[key];
+            this.state.revealedTiles = this.state.revealedTiles.filter(k => k !== key);
+            this.discovered.delete(key);
+            this.log(`> TILE DELETED`);
         } else if (terrainTool === 'SET_P1_SPAWN') {
             if (tile.landingZone === PlayerId.ONE) {
                 tile.landingZone = undefined;
@@ -1405,7 +1416,7 @@ class GameService {
         if (this.checkPlayerRestricted(this.state.currentTurn)) return;
 
         const unit = this.state.units.find(u => u.id === unitId);
-        if (!unit || unit.playerId !== this.state.currentTurn || unit.type !== UnitType.MEDIC) return;
+        if (!unit || unit.playerId !== this.state.currentTurn || (unit.type !== UnitType.MEDIC && unit.type !== UnitType.REPAIR_BOT)) return;
 
         if (unit.stats.energy < 25) {
             this.log(`> INSUFFICIENT ENERGY (${unit.stats.energy}/25)`, unit.playerId);
@@ -1488,6 +1499,19 @@ class GameService {
         }
     }
 
+    public rotateUnit(unitId: string) {
+        if (!this.state.isDevMode) return;
+
+        const unitIndex = this.state.units.findIndex(u => u.id === unitId);
+        if (unitIndex !== -1) {
+            const unit = this.state.units[unitIndex];
+            const currentRotation = unit.rotation || 0;
+            this.state.units[unitIndex].rotation = currentRotation + (Math.PI / 2);
+            this.log(`> [DEV] UNIT ROTATED: ${unit.type}`, unit.playerId);
+            this.notify();
+        }
+    }
+
 
 
     // --- UNIT PLACEMENT LOGIC ---
@@ -1520,6 +1544,16 @@ class GameService {
                 };
                 this.log(`> ION CANNON CHARGING... SELECT TARGET`, playerId);
                 this.notify();
+                this.notify();
+                return;
+            }
+            if (card.type === UnitType.FORWARD_BASE) {
+                this.state.interactionState = {
+                    mode: 'FORWARD_BASE_TARGETING',
+                    playerId: playerId,
+                };
+                this.log(`> DEPLOYMENT SCAN: SELECT TARGET ZONE`, playerId);
+                this.notify();
                 return;
             }
             if (card.type === UnitType.SYSTEM_FREEZE) {
@@ -1541,6 +1575,61 @@ class GameService {
                 this.state.selectedCardId = null;
 
                 this.checkWinCondition(); // Check after card consumption
+                this.notify();
+                return;
+            }
+
+            if (card.type === UnitType.TACTICAL_RETREAT) {
+                const targetUnit = this.state.units.find(u =>
+                    position.x >= u.position.x && position.x < u.position.x + u.stats.size &&
+                    position.z >= u.position.z && position.z < u.position.z + u.stats.size
+                );
+
+                if (!targetUnit) {
+                    this.state.systemMessage = "TACTICAL RETREAT: NO UNIT SELECTED";
+                    this.log(`> TACTICAL RETREAT: INVALID TARGET`, playerId);
+                    this.notify();
+                    return;
+                }
+
+                if (targetUnit.playerId !== playerId) {
+                    this.state.systemMessage = "TACTICAL RETREAT: CANNOT TARGET ENEMY";
+                    this.log(`> TACTICAL RETREAT: INVALID TARGET (ENEMY)`, playerId);
+                    this.notify();
+                    return;
+                }
+
+                const retreatPos = this.findNearestRetreatPosition(targetUnit, playerId);
+
+                if (!retreatPos) {
+                    this.state.systemMessage = "TACTICAL RETREAT FAILED: NO DEPLOYMENT ZONE AVAILABLE";
+                    this.log(`> TACTICAL RETREAT FAILED: NO VALID ZONES`, playerId);
+                    this.notify();
+                    return;
+                }
+
+                // Teleport
+                targetUnit.position = retreatPos;
+                targetUnit.movePath = [];
+                targetUnit.status.isTeleporting = true;
+                this.log(`> TACTICAL RETREAT: ${targetUnit.type} RELOCATED TO ${retreatPos.x},${retreatPos.z}`, playerId);
+
+                if (!this.state.isDevMode) {
+                    const newDeck = [...deck];
+                    newDeck.splice(cardIndex, 1);
+                    this.state.decks[playerId] = newDeck;
+                    this.state.selectedCardId = null;
+                }
+
+                setTimeout(() => {
+                    const uIdx = this.state.units.findIndex(u => u.id === targetUnit.id);
+                    if (uIdx > -1) {
+                        this.state.units[uIdx].status.isTeleporting = false;
+                        this.notify();
+                    }
+                }, 500);
+
+                this.checkWinCondition();
                 this.notify();
                 return;
             }
@@ -1628,6 +1717,11 @@ class GameService {
 
         if (interactionState.mode === 'ION_CANNON_TARGETING') {
             this.handleIonCannonStrike(x, z);
+            return;
+        }
+
+        if (interactionState.mode === 'FORWARD_BASE_TARGETING') {
+            this.handleForwardBasePlacement(x, z);
             return;
         }
 
@@ -1722,6 +1816,68 @@ class GameService {
         this.finalizeInteraction();
     }
 
+    private handleForwardBasePlacement(x: number, z: number) {
+        const { playerId } = this.state.interactionState;
+        const enemyId = playerId === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
+
+        // Check if 2x2 area is valid
+        const size = 2;
+        const validTiles: string[] = [];
+
+        for (let i = 0; i < size; i++) {
+            for (let j = 0; j < size; j++) {
+                const key = `${x + i},${z + j}`;
+
+                // Check bounds
+                if (x + i >= BOARD_SIZE || z + j >= BOARD_SIZE || x + i < 0 || z + j < 0) {
+                    this.log(`> DEPLOYMENT FAILED: OUT OF BOUNDS`, playerId);
+                    return;
+                }
+
+                // Check revealed
+                if (!this.state.revealedTiles.includes(key) && !this.state.isDevMode) {
+                    this.log(`> DEPLOYMENT FAILED: SECTOR UNKNOWN`, playerId);
+                    return;
+                }
+
+                // Check enemy landing zone
+                const tile = this.state.terrain[key];
+                if (tile && tile.landingZone === enemyId) {
+                    this.log(`> DEPLOYMENT FAILED: ENEMY TERRITORY`, playerId);
+                    return;
+                }
+
+                validTiles.push(key);
+            }
+        }
+
+        // Apply
+        validTiles.forEach(key => {
+            if (!this.state.terrain[key]) {
+                // Should exist if discovered, but safety
+                this.state.terrain[key] = { type: 'NORMAL', elevation: 0, rotation: 0 };
+            }
+            this.state.terrain[key].landingZone = playerId;
+        });
+
+        if (!this.state.isDevMode) {
+            const deck = this.state.decks[playerId!];
+            const cardId = this.state.selectedCardId;
+            // Consume card
+            const idx = deck.findIndex(c => c.id === cardId);
+            if (idx > -1) {
+                const newDeck = [...deck];
+                newDeck.splice(idx, 1);
+                this.state.decks[playerId!] = newDeck;
+            }
+            this.state.selectedCardId = null;
+        }
+
+        this.log(`> FORWARD BASE ESTABLISHED`, playerId);
+        this.finalizeInteraction();
+        this.notify();
+    }
+
     public handleFreezeTarget(targetUnitId: string) {
         const { sourceUnitId } = this.state.interactionState;
         const sourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
@@ -1759,8 +1915,9 @@ class GameService {
         const isBuilding = BUILDING_TYPES.includes(target.type);
         const playerChar = this.state.playerCharacters[source.playerId];
         const isNyx = playerChar === 'NYX';
+        const isRepairBot = source.type === UnitType.REPAIR_BOT;
         const round = this.state.roundNumber;
-        const canRepairBuildings = isNyx && round >= 10;
+        const canRepairBuildings = (isNyx && round >= 10) || isRepairBot;
 
         if (isBuilding && !canRepairBuildings) {
             this.log(`> TARGET INVALID: CANNOT REPAIR STRUCTURES`, source.playerId);
@@ -1976,6 +2133,31 @@ class GameService {
         this.state.selectedCardId = null;
         this.state.selectedUnitId = null;
         this.notify();
+    }
+
+    private findNearestRetreatPosition(unit: Unit, playerId: PlayerId): Position | null {
+        let bestPos: Position | null = null;
+        let minDist = Infinity;
+        const size = unit.stats.size;
+
+        // Iterate all known terrain tiles
+        Object.keys(this.state.terrain).forEach(key => {
+            const [x, z] = key.split(',').map(Number);
+
+            // Check if this spot is a valid deployment zone AND not occupied
+            // explicitly check isOccupied inside check (handled by isValidPlacement usually)
+            // isValidPlacement(..., true) checks landingZone === playerId
+
+            if (this.isValidPlacement(x, z, size, playerId, true)) {
+                const dist = Math.abs(x - unit.position.x) + Math.abs(z - unit.position.z);
+                if (dist < minDist) {
+                    minDist = dist;
+                    bestPos = { x, z };
+                }
+            }
+        });
+
+        return bestPos;
     }
 
     private isValidPlacement(x: number, z: number, size: number, playerId: PlayerId, requiresZone: boolean): boolean {
@@ -2310,6 +2492,13 @@ class GameService {
                     this.state.roundNumber >= 10) {
                     damage += attacker.level;
                 }
+
+                // Kylo Perk: Apex Blade units gain +Level Attack (Level 10+)
+                if (attacker.type === UnitType.CONE &&
+                    this.state.playerCharacters[attacker.playerId] === 'KYLO' &&
+                    this.state.roundNumber >= 10) {
+                    damage += this.state.roundNumber;
+                }
                 const newHp = Math.max(0, target.stats.hp - damage);
 
                 updatedUnits[targetIdx] = {
@@ -2607,14 +2796,24 @@ class GameService {
     }
 
     public triggerCharacterAction(actionId: string) {
-        if (this.state.appStatus !== AppStatus.PLAYING) return;
+        if (this.state.appStatus !== AppStatus.PLAYING) {
+            console.log("TriggerAction Skipped: Not Playing");
+            return;
+        }
         const playerId = this.state.currentTurn;
-        if (this.checkPlayerRestricted(playerId)) return;
+        if (this.checkPlayerRestricted(playerId)) {
+            console.log("TriggerAction Skipped: Player Restricted");
+            return;
+        }
 
         const actions = this.state.characterActions[playerId];
-        if (!actions) return;
+        if (!actions) {
+            console.log("TriggerAction Failed: No actions found");
+            return;
+        }
 
         const actionIdx = actions.findIndex(a => a.id === actionId);
+        console.log(`Triggering Action: ${actionId} for ${playerId}. Found Index: ${actionIdx}`);
 
         if (actionIdx === -1) return;
 
@@ -2634,6 +2833,7 @@ class GameService {
 
         // Execute Action: NYX_SHIELD
         if (action.id === 'NYX_SHIELD') {
+            console.log("Executing NYX_SHIELD Logic...");
             const hasUnits = this.state.units.some(u => u.playerId === playerId && !BUILDING_TYPES.includes(u.type));
 
             if (!hasUnits) {
@@ -2645,6 +2845,7 @@ class GameService {
                 if (u.playerId === playerId && !BUILDING_TYPES.includes(u.type)) {
                     // Remove existing if any to refresh duration
                     const otherEffects = u.effects.filter(e => e.name !== 'IMMORTALITY_SHIELD');
+                    console.log(`Applying Shield to Unit: ${u.type} (${u.id})`);
                     return {
                         ...u,
                         effects: [
@@ -2835,24 +3036,11 @@ class GameService {
             const nextTurn = this.state.currentTurn === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
             let nextRound = this.state.roundNumber;
 
-            const newCredits = { ...this.state.credits };
-
             if (this.state.currentTurn === PlayerId.TWO) {
                 nextRound++;
                 this.log(`> SIMULATION LEVEL ${nextRound}`);
                 this.state.units = this.state.units.map(u => ({ ...u, level: (u.level || 1) + 1 }));
                 this.processDeliveries(nextRound);
-
-                let income = 0;
-                if (nextRound === 10) income = 500;
-                else if (nextRound === 25) income = 1000;
-                else if (nextRound === 50) income = 1000;
-
-                if (income > 0) {
-                    newCredits[PlayerId.ONE] += income;
-                    newCredits[PlayerId.TWO] += income;
-                    this.log(`> RESOURCE INJECTION: +$${income} CREDITS ALLOCATED`);
-                }
             }
 
             // Reset Units for Next Turn
@@ -2868,7 +3056,6 @@ class GameService {
                 units: refreshedUnits,
                 currentTurn: nextTurn,
                 roundNumber: nextRound,
-                credits: newCredits,
                 selectedCardId: this.state.decks[nextTurn][0]?.id || null,
                 selectedUnitId: null,
                 interactionState: { mode: 'NORMAL' }
@@ -2878,7 +3065,7 @@ class GameService {
                 this.log(`> WARNING: PLAYER ${nextTurn === PlayerId.ONE ? 'P1' : 'P2'} SYSTEMS COMPROMISED`);
             }
 
-            if (nextRound > 0 && nextRound % 5 === 0) {
+            if (nextRound > 0 && nextRound % 10 === 0) {
                 this.triggerTalentSelection(nextTurn);
             } else {
                 this.log(`> TURN ENDED. PLAYER ${nextTurn} ACTIVE.`);

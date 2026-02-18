@@ -19,6 +19,8 @@ import PortalModel from './PortalModel';
 import ApexBladeModel from './ApexBladeModel';
 import SniperModel from './SniperModel';
 import HackerModel from './HackerModel';
+import ArcPortalModel from './ArcPortalModel';
+import SpikeModel from './SpikeModel';
 
 interface UnitPreviewProps {
     type: UnitType;
@@ -48,6 +50,7 @@ const UnitPreview: React.FC<UnitPreviewProps> = ({ type, color }) => {
             case UnitType.TITAN: return <TitanModel color={color} />;
             case UnitType.SUICIDE_DRONE: return <SuicideDroneModel color={color} />;
             case UnitType.PORTAL: return <PortalModel color={color} />;
+            case UnitType.ARC_PORTAL: return <ArcPortalModel color={color} />;
             case UnitType.CONE: return <ApexBladeModel color={color} isMoving={false} />;
             case UnitType.SNIPER: return <SniperModel color={color} isMoving={false} />;
             case UnitType.HACKER: return <HackerModel color={color} isMoving={false} />;
@@ -106,39 +109,7 @@ const UnitPreview: React.FC<UnitPreviewProps> = ({ type, color }) => {
 
 
 
-            case UnitType.SPIKE:
-                return (
-                    <group>
-                        {/* Base Ring */}
-                        <mesh position={[0, 0.1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-                            <ringGeometry args={[0.4, 0.6, 6]} />
-                            <meshBasicMaterial color={color} side={THREE.DoubleSide} wireframe />
-                        </mesh>
-                        {/* Floating Center Pieces */}
-                        <group>
-                            {/* Lower Crystal */}
-                            <mesh position={[0, 0.5, 0]} rotation={[0, 0, Math.PI]}>
-                                <coneGeometry args={[0.3, 0.8, 4]} />
-                                {renderMatrixMat(0.8)}
-                            </mesh>
-                            {/* Upper Crystal */}
-                            <mesh position={[0, 1.2, 0]}>
-                                <coneGeometry args={[0.25, 1.0, 4]} />
-                                {renderMatrixMat(0.8)}
-                            </mesh>
-                            {/* Core Energy */}
-                            <mesh position={[0, 0.8, 0]}>
-                                <octahedronGeometry args={[0.15]} />
-                                <meshBasicMaterial color={color} toneMapped={false} />
-                            </mesh>
-                        </group>
-                        {/* Orbital Rings */}
-                        <mesh position={[0, 1.0, 0]} rotation={[0.5, 0, 0]}>
-                            <torusGeometry args={[0.6, 0.02, 4, 24]} />
-                            <meshBasicMaterial color="#555" />
-                        </mesh>
-                    </group>
-                );
+            case UnitType.SPIKE: return <SpikeModel color={color} />;
 
             // Fallback / Actions
             default:

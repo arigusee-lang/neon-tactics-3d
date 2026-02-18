@@ -182,7 +182,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
     const config = CARD_CONFIG[unit.type];
     const isP1 = unit.playerId === PlayerId.ONE;
     const isNeutral = unit.playerId === PlayerId.NEUTRAL;
-    const mainColor = isP1 ? COLORS.P1 : isNeutral ? '#888888' : COLORS.P2;
+    const mainColor = isP1 ? COLORS.P1 : isNeutral ? COLORS.NEUTRAL : COLORS.P2;
 
     // Calculate HP percentage
     const hpPercent = (unit.stats.hp / unit.stats.maxHp) * 100;
@@ -383,14 +383,16 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                     />
                                 )}
 
-                                {/* MEDIC: HEAL */}
-                                {unit.type === UnitType.MEDIC && (
+                                {/* MEDIC & REPAIR BOT: HEAL */}
+                                {(unit.type === UnitType.MEDIC || unit.type === UnitType.REPAIR_BOT) && (
                                     <>
                                         <AbilityButton
-                                            label="NANO-REPAIR"
+                                            label={unit.type === UnitType.REPAIR_BOT ? "STRUCTURAL REPAIR" : "NANO-REPAIR"}
                                             icon="+"
                                             cost={25}
-                                            description={`Heal friendly unit within 2 tiles for ${50 + (characterId === 'NYX' && (currentRound || 0) >= 10 ? unit.level : 0)} HP.${characterId === 'NYX' && (currentRound || 0) >= 10 ? ' Can repair buildings.' : ''}`}
+                                            description={unit.type === UnitType.REPAIR_BOT
+                                                ? "Repair target unit or building for 50 HP."
+                                                : `Heal friendly unit within 2 tiles for ${50 + (characterId === 'NYX' && (currentRound || 0) >= 10 ? unit.level : 0)} HP.${characterId === 'NYX' && (currentRound || 0) >= 10 ? ' Can repair buildings.' : ''}`}
                                             onClick={() => gameService.activateHealAbility(unit.id)}
                                             disabled={unit.stats.energy < 25}
                                             color="#10b981" // emerald-500
@@ -398,7 +400,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                             onLeave={handleHideTooltip}
                                         />
 
-                                        {characterId === 'NYX' && (currentRound || 0) >= 25 && (
+                                        {characterId === 'NYX' && (currentRound || 0) >= 25 && unit.type === UnitType.MEDIC && (
                                             <AbilityButton
                                                 label="RESTORE ENERGY"
                                                 icon="⚡"
@@ -478,16 +480,28 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
 
                                 {/* DEV MODE: DESTROY */}
                                 {isDevMode && (
-                                    <AbilityButton
-                                        label="DESTROY"
-                                        icon="☠"
-                                        cost={0}
-                                        description="[DEV] Instantly remove unit from simulation."
-                                        onClick={() => gameService.destroyUnit(unit.id)}
-                                        color="#d946ef" // fuchsia-500
-                                        onHover={handleShowTooltip}
-                                        onLeave={handleHideTooltip}
-                                    />
+                                    <>
+                                        <AbilityButton
+                                            label="ROTATE 90°"
+                                            icon="↻"
+                                            cost={0}
+                                            description="[DEV] Rotate unit 90 degrees."
+                                            onClick={() => gameService.rotateUnit(unit.id)}
+                                            color="#facc15" // yellow-400
+                                            onHover={handleShowTooltip}
+                                            onLeave={handleHideTooltip}
+                                        />
+                                        <AbilityButton
+                                            label="DESTROY"
+                                            icon="☠"
+                                            cost={0}
+                                            description="[DEV] Instantly remove unit from simulation."
+                                            onClick={() => gameService.destroyUnit(unit.id)}
+                                            color="#d946ef" // fuchsia-500
+                                            onHover={handleShowTooltip}
+                                            onLeave={handleHideTooltip}
+                                        />
+                                    </>
                                 )}
 
                                 {/* Generic Placeholder if no abilities */}

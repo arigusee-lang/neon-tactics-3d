@@ -73,11 +73,12 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
             case UnitType.MEDIC: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2V22 M2 12H22" strokeWidth="4" /><rect x="6" y="6" width="12" height="12" stroke="none" fill="currentColor" fillOpacity="0.1" /></svg>;
             case UnitType.LIGHT_TANK: return <svg viewBox="0 0 24 24" {...p}><path d="M4 14H20M2 18H22M6 10H18L16 6H8L6 10Z" /><rect x="4" y="14" width="16" height="6" fill="currentColor" fillOpacity="0.2" /></svg>;
             case UnitType.HEAVY_TANK: return <svg viewBox="0 0 24 24" {...p}><path d="M2 16H22M4 12H20L18 4H6L4 12Z" /><rect x="2" y="16" width="20" height="6" fill="currentColor" fillOpacity="0.2" /><line x1="8" y1="12" x2="8" y2="4" strokeWidth="3" /><line x1="16" y1="12" x2="16" y2="4" strokeWidth="3" /></svg>;
-            case UnitType.BOX: return <svg viewBox="0 0 24 24" {...p}><rect x="8" y="8" width="8" height="8" /><path d="M2 12H8 M16 22H22" /></svg>;
+            case UnitType.BOX: return <svg viewBox="0 0 24 24" {...p}><path d="M4 4L20 20M20 4L4 20" /><circle cx="12" cy="12" r="3" /><circle cx="4" cy="4" r="2" /><circle cx="20" cy="4" r="2" /><circle cx="4" cy="20" r="2" /><circle cx="20" cy="20" r="2" /></svg>;
             case UnitType.HACKER: return <svg viewBox="0 0 24 24" {...p}><path d="M4 6h16v10H4z" /><path d="M2 18h20v2H2z" /><path d="M11 14h2" /></svg>;
             case UnitType.SUICIDE_DRONE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="6" /><path d="M12 6V2 M12 22V18 M6 12H2 M22 12H18 M16 16L20 20 M4 4L8 8 M20 4L16 8 M8 16L4 20" /></svg>;
             case UnitType.TITAN: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="8" width="16" height="12" /><path d="M12 2V8" /></svg>;
             case UnitType.SPIKE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L15 22L12 18L9 22L12 2Z" /></svg>;
+            case UnitType.REPAIR_BOT: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="10" width="16" height="8" rx="2" /><circle cx="8" cy="18" r="3" /><circle cx="16" cy="18" r="3" /><path d="M12 10V6 M8 6h8" /></svg>;
 
             case UnitType.SYSTEM_FREEZE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeDasharray="2 2" /><path d="M12 4V20 M4 12H20" /></svg>;
             case UnitType.CONE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L4 20H20L12 2Z" /></svg>;
@@ -85,7 +86,8 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
             case UnitType.TOWER: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L6 22H18L12 2Z" /><line x1="12" y1="2" x2="12" y2="22" /><circle cx="12" cy="8" r="2" /></svg>;
             case UnitType.CHARGING_STATION: return <svg viewBox="0 0 24 24" {...p}><path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" /><rect x="4" y="20" width="16" height="2" fill="currentColor" /></svg>;
             case UnitType.ION_CANNON: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2V6 M12 18V22 M2 12H6 M18 12H22" /><path d="M19.07 4.93L16.24 7.76 M7.76 16.24L4.93 19.07" /><path d="M4.93 4.93L7.76 7.76 M16.24 16.24L19.07 19.07" /></svg>;
-            case UnitType.PORTAL: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeWidth="3" /><circle cx="12" cy="12" r="2" fill="currentColor" /></svg>;
+            case UnitType.PORTAL: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="5" strokeDasharray="2 2" /><circle cx="12" cy="12" r="2" fill={color} stroke="none" /></svg>;
+            case UnitType.ARC_PORTAL: return <svg viewBox="0 0 24 24" {...p}><path d="M5 22V10C5 6.13 8.13 3 12 3C15.87 3 19 6.13 19 10V22" /><path d="M2 22H22" /><path d="M12 7V13" strokeDasharray="2 2" /></svg>;
             case UnitType.SNIPER: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="10" strokeWidth="1" opacity="0.5" /><line x1="12" y1="2" x2="12" y2="7" /><line x1="12" y1="17" x2="12" y2="22" /><line x1="2" y1="12" x2="7" y2="12" /><line x1="17" y1="12" x2="22" y2="12" /><circle cx="12" cy="12" r="2" fill="currentColor" /></svg>;
             default: return <div className="w-4 h-4 bg-current" />;
         }

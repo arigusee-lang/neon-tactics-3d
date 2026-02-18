@@ -15,6 +15,7 @@ export const COLORS = {
   P1_HOVER: '#99ebff',
   P2: '#ff0066', // Neon Pink for P2
   P2_HOVER: '#ff99cc',
+  NEUTRAL: '#808080', // Grey for Neutral Player
   BG: '#050505',
   GRID_LINE: '#003300', // Dark Green
   TILE_BODY: '#000000',
@@ -36,7 +37,8 @@ export const BUILDING_TYPES = [
   UnitType.WALL,
   UnitType.TOWER,
   UnitType.CHARGING_STATION,
-  UnitType.PORTAL
+  UnitType.PORTAL,
+  UnitType.ARC_PORTAL
 ];
 
 export const CHARACTERS: Character[] = [
@@ -91,6 +93,20 @@ export const CHARACTERS: Character[] = [
       { level: 25, description: 'TBD: Botnet' },
       { level: 50, description: 'TBD: System Override' },
       { level: 100, description: 'TBD: Singularity' }
+    ]
+  },
+  {
+    id: 'KYLO',
+    name: 'Kylo',
+    gender: 'MALE',
+    description: 'Ruthless commander. Specializes in aggressive melee tactics.',
+    color: '#DC143C',
+    perks: [
+      { level: 0, description: 'TBD' },
+      { level: 10, description: 'Overclock: Apex Blade units gain +Level Attack.' },
+      { level: 25, description: 'TBD' },
+      { level: 50, description: 'TBD' },
+      { level: 100, description: 'TBD' }
     ]
   }
 ];
@@ -168,6 +184,13 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     cost: 100,
     baseStats: { hp: 80, maxEnergy: 50, attack: 50, range: 1, movement: 5, size: 1, blocksLos: false, maxAttacks: 2 }
   },
+  [UnitType.REPAIR_BOT]: {
+    category: CardCategory.UNIT,
+    name: 'Repair Bot',
+    description: 'Mobile repair unit. Can repair buildings and units.',
+    cost: 100,
+    baseStats: { hp: 120, maxEnergy: 50, attack: 10, range: 1, movement: 4, size: 1, blocksLos: false }
+  },
 
   [UnitType.TITAN]: {
     category: CardCategory.UNIT,
@@ -212,6 +235,13 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     cost: 600,
     baseStats: { hp: 10000, maxEnergy: 0, attack: 0, range: 0, movement: 0, size: 2, blocksLos: true }
   },
+  [UnitType.ARC_PORTAL]: {
+    category: CardCategory.UNIT,
+    name: 'Arc Portal',
+    description: 'Massive gateway to another dimension. 9-Tile Structure.',
+    cost: 900,
+    baseStats: { hp: 15000, maxEnergy: 0, attack: 0, range: 0, movement: 0, size: 3, blocksLos: true }
+  },
   [UnitType.SYSTEM_FREEZE]: {
     category: CardCategory.ACTION,
     name: 'System Freeze',
@@ -223,5 +253,17 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     name: 'Ion Cannon',
     description: 'Orbital Strike: Deals 50 damage to all units in a 3x3 area.',
     cost: 300
+  },
+  [UnitType.FORWARD_BASE]: {
+    category: CardCategory.ACTION,
+    name: 'Forward Base',
+    description: 'Deploy a 2x2 zone of your color in any revealed area (except enemy spawn).',
+    cost: 75
+  },
+  [UnitType.TACTICAL_RETREAT]: {
+    category: CardCategory.ACTION,
+    name: 'Tactical Retreat',
+    description: 'Teleport a friendly unit to the nearest empty deployment zone.',
+    cost: 75
   }
 };

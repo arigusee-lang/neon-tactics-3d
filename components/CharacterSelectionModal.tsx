@@ -7,7 +7,9 @@ import { gameService } from '../services/gameService';
 // Avatar image mapping for each character
 const AVATAR_IMAGES: Record<string, string> = {
     'NYX': '/nyx_avatar.png',
-    'GRIFF': '/griff_avatar.png'
+    'GRIFF': '/griff_avatar.png',
+    'CYPHER': '/cypher_avatar.png',
+    'KYLO': '/kylo_avatar.png'
 };
 
 const CyberpunkAvatar: React.FC<{ charId: string }> = ({ charId }) => {

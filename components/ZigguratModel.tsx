@@ -328,13 +328,13 @@ const DeploymentShipModel = ({ position }: { position: [number, number, number] 
             {/* --- Deployment Beam (Cone of Light) --- */}
             <group position={[0, -2.5, 0]}>
                 {/* The Beam itself */}
-                <mesh position={[0, -6, 0]}>
+                <mesh position={[0, -6, 0]} raycast={() => null}>
                     <cylinderGeometry args={[1.5, 4, 12, 32, 1, true]} />
                     <meshBasicMaterial color={neonGreen} transparent opacity={0.1} side={THREE.DoubleSide} depthWrite={false} />
                 </mesh>
 
                 {/* Inner stronger beam */}
-                <mesh position={[0, -6, 0]}>
+                <mesh position={[0, -6, 0]} raycast={() => null}>
                     <cylinderGeometry args={[0.5, 2, 12, 16, 1, true]} />
                     <meshBasicMaterial color="white" transparent opacity={0.05} side={THREE.DoubleSide} depthWrite={false} />
                 </mesh>
