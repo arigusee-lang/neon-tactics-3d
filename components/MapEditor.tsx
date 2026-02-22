@@ -157,7 +157,7 @@ const MapEditor: React.FC<MapEditorProps> = ({ activeTool }) => {
                         Export Map JSON
                     </button>
                     <div className="text-[9px] text-gray-500 mt-1 text-center font-mono">
-                        Saves map + units to Downloads folder
+                        Saves map size, deletions, terrain, and units
                     </div>
                 </div>
             </div>

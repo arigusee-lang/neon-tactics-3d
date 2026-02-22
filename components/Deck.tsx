@@ -1,8 +1,8 @@
-
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Card, UnitType, CardCategory } from '../types';
-import { CARD_CONFIG } from '../constants';
+import { CARD_CONFIG, MAX_INVENTORY_CAPACITY } from '../constants';
+import CyberMarineIcon from './icons/CyberMarineIcon';
 import { groupCards } from '../utils/cardUtils';
 
 interface DeckProps {
@@ -10,35 +10,25 @@ interface DeckProps {
     selectedId: string | null;
     onSelect: (id: string) => void;
     playerColor: string;
-    isDevMode: boolean;
-    highlight?: boolean;
+    deliveredCardIds?: string[];
 }
 
-const Deck: React.FC<DeckProps> = ({ cards, selectedId, onSelect, playerColor, isDevMode, highlight }) => {
-    const scrollContainerRef = useRef<HTMLDivElement>(null);
-
-    // Tooltip State
+const Deck: React.FC<DeckProps> = ({ cards, selectedId, onSelect, playerColor, deliveredCardIds = [] }) => {
     const [hoveredCard, setHoveredCard] = useState<{ id: string, rect: DOMRect, config: any, isAction: boolean } | null>(null);
-
     const groupedCards = useMemo(() => groupCards(cards), [cards]);
+    const deliveredCardIdSet = useMemo(() => new Set(deliveredCardIds), [deliveredCardIds]);
 
-    const handleScrollBtn = (direction: 'left' | 'right') => {
-        setHoveredCard(null); // Clear tooltip on scroll
-        if (scrollContainerRef.current) {
-            scrollContainerRef.current.scrollBy({ left: direction === 'left' ? -200 : 200, behavior: 'smooth' });
+    const visibleGroups = useMemo(() => {
+        return groupedCards.slice(0, MAX_INVENTORY_CAPACITY);
+    }, [groupedCards]);
+
+    const groupedRows = useMemo(() => {
+        const rows: Card[][][] = [];
+        for (let i = 0; i < visibleGroups.length; i += 10) {
+            rows.push(visibleGroups.slice(i, i + 10));
         }
-    };
-
-    const handleWheel = (e: React.WheelEvent) => {
-        // Stop the event from reaching the Canvas (OrbitControls)
-        e.stopPropagation();
-        setHoveredCard(null); // Clear tooltip on scroll
-
-        if (scrollContainerRef.current) {
-            // Translate vertical scroll to horizontal scroll
-            scrollContainerRef.current.scrollLeft += e.deltaY;
-        }
-    };
+        return rows;
+    }, [visibleGroups]);
 
     const handleMouseEnter = (e: React.MouseEvent, card: Card, config: any, isAction: boolean) => {
         const rect = e.currentTarget.getBoundingClientRect();
@@ -52,7 +42,7 @@ const Deck: React.FC<DeckProps> = ({ cards, selectedId, onSelect, playerColor, i
     const renderIcon = (type: UnitType, color: string) => {
         const p = { width: "100%", height: "100%", fill: "none", stroke: color, strokeWidth: "2", vectorEffect: "non-scaling-stroke" as const };
         switch (type) {
-            case UnitType.SOLDIER: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="6" r="4" /><path d="M6 22V14C6 11 12 11 12 11V22" /></svg>;
+            case UnitType.SOLDIER: return <CyberMarineIcon color={color} />;
             case UnitType.HEAVY: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" /><rect x="8" y="8" width="8" height="8" fill="currentColor" fillOpacity="0.2" /></svg>;
             case UnitType.MEDIC: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2V22 M2 12H22" strokeWidth="4" /><rect x="6" y="6" width="12" height="12" stroke="none" fill="currentColor" fillOpacity="0.1" /></svg>;
             case UnitType.LIGHT_TANK: return <svg viewBox="0 0 24 24" {...p}><path d="M4 14H20M2 18H22M6 10H18L16 6H8L6 10Z" /><rect x="4" y="14" width="16" height="6" fill="currentColor" fillOpacity="0.2" /></svg>;
@@ -62,8 +52,9 @@ const Deck: React.FC<DeckProps> = ({ cards, selectedId, onSelect, playerColor, i
             case UnitType.TITAN: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="8" width="16" height="12" /><path d="M12 2V8" /></svg>;
             case UnitType.SPIKE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L15 22L12 18L9 22L12 2Z" /></svg>;
             case UnitType.REPAIR_BOT: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="10" width="16" height="8" rx="2" /><circle cx="8" cy="18" r="3" /><circle cx="16" cy="18" r="3" /><path d="M12 10V6 M8 6h8" /></svg>;
-
             case UnitType.SYSTEM_FREEZE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeDasharray="2 2" /><path d="M12 4V20 M4 12H20" /></svg>;
+            case UnitType.FORWARD_BASE: return <svg viewBox="0 0 24 24" {...p}><rect x="5" y="5" width="14" height="14" rx="1" /><path d="M12 8V16 M8 12H16" /><path d="M5 2V5H2M22 5H19V2M5 22V19H2M22 19H19V22" /></svg>;
+            case UnitType.TACTICAL_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M9 7L4 12L9 17" /><path d="M4 12H14a6 6 0 1 0 0 12" /></svg>;
             case UnitType.CONE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L4 20H20L12 2Z" /></svg>;
             case UnitType.WALL: return <svg viewBox="0 0 24 24" {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 6V18 M18 6V18 M2 12H22" /></svg>;
             case UnitType.TOWER: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L6 22H18L12 2Z" /><line x1="12" y1="2" x2="12" y2="22" /><circle cx="12" cy="8" r="2" /></svg>;
@@ -78,81 +69,53 @@ const Deck: React.FC<DeckProps> = ({ cards, selectedId, onSelect, playerColor, i
     };
 
     return (
-        <div className="relative w-full max-w-[700px] h-44 flex flex-col items-center pointer-events-auto transition-all duration-300">
-            <div
-                className={`relative w-full h-full bg-transparent border overflow-hidden shadow-[0_0_30px_rgba(0,255,0,0.1)] rounded-xl transition-all duration-500
-            ${highlight ? 'border-yellow-400 shadow-[0_0_50px_rgba(255,200,0,0.5)] animate-pulse' : 'border-green-500/60'}
-        `}
-            >
-                {/* Custom Scroll Buttons */}
-                <button onClick={() => handleScrollBtn('left')} className="absolute left-0 top-0 bottom-0 w-12 sm:w-16 z-20 bg-gradient-to-r from-black/80 to-transparent text-green-500 hover:text-white text-3xl font-mono transition-colors flex items-center justify-center">&lt;</button>
-                <button onClick={() => handleScrollBtn('right')} className="absolute right-0 top-0 bottom-0 w-12 sm:w-16 z-20 bg-gradient-to-l from-black/80 to-transparent text-green-500 hover:text-white text-3xl font-mono transition-colors flex items-center justify-center">&gt;</button>
+        <div className="w-full max-w-[460px] pointer-events-auto">
+            <div className="flex flex-col gap-1">
+                {groupedRows.map((row, rowIndex) => (
+                    <div key={`row-${rowIndex}`} className="flex justify-center gap-1">
+                        {row.map((cardGroup, cardIndex) => {
+                            const representativeCard = cardGroup[0];
+                            const count = cardGroup.length;
+                            const isSelected = cardGroup.some(groupedCard => groupedCard.id === selectedId);
+                            const isRecentlyDelivered = cardGroup.some(groupedCard => deliveredCardIdSet.has(groupedCard.id));
+                            const isAction = representativeCard.category === CardCategory.ACTION;
+                            const config = CARD_CONFIG[representativeCard.type];
+                            const iconColor = isAction ? '#ffffff' : playerColor;
 
-                <div
-                    ref={scrollContainerRef}
-                    onWheel={handleWheel}
-                    className="absolute inset-0 flex items-center gap-4 overflow-x-auto px-12 sm:px-16 no-scrollbar"
-                    style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-                >
-                    {groupedCards.map((group, index) => {
-                        const card = group[0]; // Representative card
-                        const count = group.length;
-                        // Check if ANY card in this group is the selected one
-                        const isSelected = group.some(c => c.id === selectedId);
-                        const isAction = card.category === CardCategory.ACTION;
-                        const config = CARD_CONFIG[card.type];
-
-                        return (
-                            <div key={card.id}
-                                onClick={() => onSelect(card.id)}
-                                onMouseEnter={(e) => handleMouseEnter(e, card, config, isAction)}
-                                onMouseLeave={handleMouseLeave}
-                                className={`relative flex-shrink-0 w-20 h-28 sm:w-24 sm:h-32 flex flex-col items-center justify-center border transition-all duration-300 rounded-lg group ${isSelected ? 'bg-slate-900/40 border-2 scale-105 z-10 shadow-[0_0_15px_rgba(255,255,255,0.2)]' : 'bg-transparent border-green-900/60 hover:border-green-400 hover:bg-green-900/20'}`}
-                                style={{ borderColor: isSelected ? (isAction ? '#fff' : playerColor) : undefined }}>
-
-                                {/* Hotkey Index */}
-                                <div className="absolute top-1 left-1.5 text-[9px] font-bold text-black bg-green-500 px-1.5 py-0 rounded-sm">
-                                    {index + 1}
-                                </div>
-
-                                {/* Quantity Badge */}
-                                {(count > 1 || isDevMode) && (
-                                    <div className={`absolute top-1 right-1.5 text-[9px] font-bold text-white px-1.5 py-0.5 rounded-full shadow-sm border ${isDevMode ? 'bg-purple-600 border-purple-400' : 'bg-red-600 border-red-400'}`}>
-                                        {isDevMode ? '∞' : `x${count}`}
+                            return (
+                                <button
+                                    key={`${representativeCard.id}-${rowIndex}-${cardIndex}`}
+                                    onClick={() => onSelect(representativeCard.id)}
+                                    onMouseEnter={(e) => handleMouseEnter(e, representativeCard, config, isAction)}
+                                    onMouseLeave={handleMouseLeave}
+                                    className="relative w-[42px] h-[42px] rounded-sm p-[3px] flex items-center justify-center transition-transform duration-150 hover:scale-[1.02]"
+                                    style={{
+                                        border: isSelected ? `1px solid ${isAction ? '#ffffff' : playerColor}` : '1px solid transparent',
+                                        boxShadow: isSelected ? `0 0 10px ${isAction ? 'rgba(255,255,255,0.3)' : `${playerColor}55`}` : 'none'
+                                    }}
+                                >
+                                    <div className="w-full h-full flex items-center justify-center scale-105">
+                                        {renderIcon(representativeCard.type, iconColor)}
                                     </div>
-                                )}
-
-                                <div className="w-10 h-10 sm:w-12 sm:h-12 mb-1 sm:mb-2 flex items-center justify-center drop-shadow-[0_0_5px_rgba(0,0,0,0.8)]">
-                                    {renderIcon(card.type, isAction ? '#fff' : playerColor)}
-                                </div>
-
-                                <div className="text-[9px] sm:text-[10px] uppercase font-black text-white text-center px-1 leading-tight tracking-tight drop-shadow-md truncate w-full">
-                                    {config?.name || "UNKNOWN"}
-                                </div>
-
-                                <div className={`text-[8px] font-mono mt-1 uppercase tracking-[0.2em] font-bold drop-shadow-md ${isAction ? 'text-white' : 'text-green-400'}`}>
-                                    {card.category === CardCategory.ACTION ? 'ACT' : 'UNIT'}
-                                </div>
-
-                                {isSelected && (
-                                    <div className="absolute inset-0 border-2 border-green-400 opacity-20 pointer-events-none animate-pulse rounded-lg"></div>
-                                )}
-                            </div>
-                        )
-                    })}
-                </div>
-            </div>
-            <div className="text-[10px] text-green-500/70 tracking-[0.8em] mt-2 uppercase font-bold drop-shadow-md hidden sm:block">
-                {highlight ? <span className="text-yellow-400 animate-pulse font-black">LOGISTICS UPDATE RECEIVED</span> : <span>Tactical Deployment Matrix {isDevMode && <span className="text-purple-400 font-bold ml-2">[DEV MODE]</span>}</span>}
+                                    {isRecentlyDelivered && (
+                                        <div className="pointer-events-none absolute inset-0 rounded-sm border border-yellow-400/90 shadow-[0_0_8px_rgba(250,204,21,0.65)] animate-pulse" />
+                                    )}
+                                    <div className="absolute top-0.5 right-0.5 min-w-[12px] h-3 px-1 rounded bg-black/70 border border-green-600/50 text-[8px] leading-[10px] font-bold text-green-300 flex items-center justify-center">
+                                        {count}
+                                    </div>
+                                </button>
+                            );
+                        })}
+                    </div>
+                ))}
             </div>
 
-            {/* Tooltip Portal */}
             {hoveredCard && createPortal(
                 <div
                     className="fixed z-[9999] w-48 bg-black/95 border border-gray-600 rounded p-2 shadow-[0_0_30px_rgba(0,0,0,0.8)] backdrop-blur-md pointer-events-none transition-opacity duration-200"
                     style={{
                         left: hoveredCard.rect.left + hoveredCard.rect.width / 2,
-                        top: hoveredCard.rect.top - 12, // 12px margin above card
+                        top: hoveredCard.rect.top - 12,
                         transform: 'translate(-50%, -100%)',
                         borderColor: hoveredCard.isAction ? '#fff' : playerColor
                     }}
@@ -185,14 +148,9 @@ const Deck: React.FC<DeckProps> = ({ cards, selectedId, onSelect, playerColor, i
                 </div>,
                 document.body
             )}
-
-            <style>{`
-        .no-scrollbar::-webkit-scrollbar {
-            display: none;
-        }
-      `}</style>
         </div>
     );
 };
 
 export default Deck;
+

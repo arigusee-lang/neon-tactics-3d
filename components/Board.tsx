@@ -4,8 +4,9 @@ import { useFrame } from '@react-three/fiber';
 import { TILE_SIZE, TILE_SPACING, BOARD_OFFSET, COLORS, CARD_CONFIG, ELEVATION_HEIGHT } from '../constants';
 import { gameService } from '../services/gameService';
 import Tile from './Tile';
-import { Unit, PlayerId, Position, CardCategory, InteractionState, TerrainData, Collectible } from '../types';
+import { Unit, PlayerId, Position, CardCategory, InteractionState, TerrainData, Collectible, MapBounds } from '../types';
 import { Html } from '@react-three/drei';
+import { clampTerrainBrushSize, getTerrainBrushFootprint, isBrushEnabledTerrainTool } from '../utils/terrainBrush';
 
 interface BoardProps {
     revealedTiles: string[];
@@ -16,6 +17,7 @@ interface BoardProps {
     previewPath: Position[];
     mapId: string;
     collectibles: Collectible[];
+    mapBounds: MapBounds;
 }
 
 const DollarSignModel: React.FC = () => {
@@ -133,7 +135,8 @@ const Board: React.FC<BoardProps> = ({
     selectedUnitId,
     previewPath,
     mapId,
-    collectibles
+    collectibles,
+    mapBounds
 }) => {
     // Hack to access internal game state for interaction mode via a hook-like pattern 
     const interactionState = (gameService as any).state.interactionState as InteractionState;
@@ -144,21 +147,30 @@ const Board: React.FC<BoardProps> = ({
     // Helper to find currently selected unit object
     const selectedUnit = selectedUnitId ? units.find(u => u.id === selectedUnitId) : null;
 
-    const getUnitAt = (x: number, z: number): Unit | undefined => {
-        return units.find(u => {
+    const unitByCell = React.useMemo(() => {
+        const map = new Map<string, Unit>();
+        units.forEach(u => {
             const size = u.stats.size;
-            const xMatch = x >= u.position.x && x < u.position.x + size;
-            const zMatch = z >= u.position.z && z < u.position.z + size;
-            return xMatch && zMatch;
+            for (let i = 0; i < size; i++) {
+                for (let j = 0; j < size; j++) {
+                    map.set(`${u.position.x + i},${u.position.z + j}`, u);
+                }
+            }
         });
-    };
+        return map;
+    }, [units]);
 
-    const handleTileClick = React.useCallback((x: number, z: number) => {
-        gameService.handleTileClick(x, z);
+    const getUnitAt = React.useCallback((x: number, z: number): Unit | undefined => {
+        return unitByCell.get(`${x},${z}`);
+    }, [unitByCell]);
+
+    const handleTileClick = React.useCallback((x: number, z: number, pointer?: { source: 'TILE'; eventType?: string; button?: number; pointerType?: string; clientX?: number; clientY?: number; }) => {
+        gameService.handleTileClick(x, z, pointer);
     }, []);
 
     const handleTileHover = React.useCallback((x: number, z: number) => {
         setHoveredTile({ x, z });
+        gameService.setDebugHoverTile({ x, z });
 
         // Preview movement only if selecting a unit in NORMAL mode
         // NOTE: We need access to current interactionStateRef and selectedUnitId.
@@ -202,6 +214,7 @@ const Board: React.FC<BoardProps> = ({
     const handleTileHoverEnd = React.useCallback((x: number, z: number) => {
         setHoveredTile((prev) => {
             if (prev && prev.x === x && prev.z === z) {
+                gameService.setDebugHoverTile(null);
                 return null;
             }
             return prev;
@@ -263,6 +276,8 @@ const Board: React.FC<BoardProps> = ({
 
         for (let x = minX; x <= maxX; x++) {
             for (let z = minZ; z <= maxZ; z++) {
+                if (x < mapBounds.originX || x >= mapBounds.originX + mapBounds.width) continue;
+                if (z < mapBounds.originZ || z >= mapBounds.originZ + mapBounds.height) continue;
                 const wx = (x * tileStride) - BOARD_OFFSET;
                 const wz = (z * tileStride) - BOARD_OFFSET;
                 const distSq = Math.pow(wx - worldCX, 2) + Math.pow(wz - worldCZ, 2);
@@ -288,11 +303,22 @@ const Board: React.FC<BoardProps> = ({
         // --- MODE: TERRAIN EDIT ---
         if (interactionState.mode === 'TERRAIN_EDIT') {
             isPlacementMode = true;
-            placementFootprint.add(key);
+            const brushSize = isBrushEnabledTerrainTool(interactionState.terrainTool)
+                ? clampTerrainBrushSize(interactionState.terrainBrushSize ?? 1)
+                : 1;
 
-            // Cannot modify occupied tiles
-            const isValid = !occupiedSet.has(key);
-            isPlacementValid = isValid;
+            const brushFootprint = getTerrainBrushFootprint(x, z, brushSize);
+            let validTiles = 0;
+
+            brushFootprint.forEach((pos) => {
+                const footprintKey = `${pos.x},${pos.z}`;
+                placementFootprint.add(footprintKey);
+                if (!revealedSet.has(footprintKey)) return;
+                if (occupiedSet.has(footprintKey)) return;
+                validTiles++;
+            });
+
+            isPlacementValid = validTiles > 0;
             highlightColor = isPlacementValid ? '#ffaa00' : '#ff0000'; // Orange for terrain tool
         }
 
@@ -460,57 +486,70 @@ const Board: React.FC<BoardProps> = ({
         }
     }
 
-    // Calculate Attack Validity for highlighting (Normal Mode)
-    const getIsAttackable = (x: number, z: number) => {
-        if (!selectedUnitId || interactionState.mode !== 'NORMAL') return false;
-        const selectedUnit = units.find(u => u.id === selectedUnitId);
-        if (!selectedUnit) return false;
+    const attackableSet = React.useMemo(() => {
+        const set = new Set<string>();
+        if (interactionState.mode !== 'NORMAL' || !selectedUnit) return set;
 
-        const targetUnit = getUnitAt(x, z);
-        if (targetUnit && targetUnit.playerId !== selectedUnit.playerId) {
-            const target = targetUnit;
-            const attacker = selectedUnit;
+        const attacker = selectedUnit;
+
+        for (const target of units) {
+            if (target.playerId === attacker.playerId) continue;
 
             // Range Check
-            const dx = Math.max(attacker.position.x - (target.position.x + target.stats.size - 1), target.position.x - (attacker.position.x + attacker.stats.size - 1), 0);
-            const dz = Math.max(attacker.position.z - (target.position.z + target.stats.size - 1), target.position.z - (attacker.position.z + attacker.stats.size - 1), 0);
+            const dx = Math.max(
+                attacker.position.x - (target.position.x + target.stats.size - 1),
+                target.position.x - (attacker.position.x + attacker.stats.size - 1),
+                0
+            );
+            const dz = Math.max(
+                attacker.position.z - (target.position.z + target.stats.size - 1),
+                target.position.z - (attacker.position.z + attacker.stats.size - 1),
+                0
+            );
             const dist = Math.max(dx, dz);
+            if (dist > attacker.stats.range) continue;
 
-            if (dist > selectedUnit.stats.range) return false;
-
-            // LOS Check (Replicated simple check for visual feedback)
+            // LOS Check
             const startX = attacker.position.x + attacker.stats.size / 2;
             const startZ = attacker.position.z + attacker.stats.size / 2;
             const endX = target.position.x + target.stats.size / 2;
             const endZ = target.position.z + target.stats.size / 2;
-
             const rayDx = endX - startX;
             const rayDz = endZ - startZ;
             const rayDist = Math.sqrt(rayDx * rayDx + rayDz * rayDz);
             const steps = Math.ceil(rayDist * 2);
 
+            let isBlocked = false;
             for (let i = 1; i < steps; i++) {
                 const t = i / steps;
                 const cx = startX + rayDx * t;
                 const cz = startZ + rayDz * t;
                 const tx = Math.floor(cx);
                 const tz = Math.floor(cz);
+                const blocker = unitByCell.get(`${tx},${tz}`);
 
-                // Check if this tile is occupied by a blocker
-                const blocker = units.find(u =>
-                    u.stats.blocksLos &&
-                    u.id !== attacker.id && u.id !== target.id &&
-                    tx >= u.position.x && tx < u.position.x + u.stats.size &&
-                    tz >= u.position.z && tz < u.position.z + u.stats.size
-                );
-
-                if (blocker) return false; // LOS Blocked
+                if (blocker && blocker.stats.blocksLos && blocker.id !== attacker.id && blocker.id !== target.id) {
+                    isBlocked = true;
+                    break;
+                }
             }
+            if (isBlocked) continue;
 
-            return true;
+            for (let i = 0; i < target.stats.size; i++) {
+                for (let j = 0; j < target.stats.size; j++) {
+                    set.add(`${target.position.x + i},${target.position.z + j}`);
+                }
+            }
         }
-        return false;
-    };
+
+        return set;
+    }, [interactionState.mode, selectedUnit, units, unitByCell]);
+
+    const tileStride = TILE_SIZE + TILE_SPACING;
+    const gridDivisions = Math.max(1, Math.max(mapBounds.width, mapBounds.height));
+    const gridSize = Math.max(tileStride, tileStride * gridDivisions);
+    const gridCenterX = ((mapBounds.originX + ((mapBounds.width - 1) / 2)) * tileStride) - BOARD_OFFSET;
+    const gridCenterZ = ((mapBounds.originZ + ((mapBounds.height - 1) / 2)) * tileStride) - BOARD_OFFSET;
 
     return (
         <group>
@@ -531,7 +570,7 @@ const Board: React.FC<BoardProps> = ({
 
 
                 const isPath = pathSet.has(key);
-                const isAttackTarget = isOccupied && getIsAttackable(x, z);
+                const isAttackTarget = attackableSet.has(key);
 
                 // Determine if this specific tile is part of the placement footprint
                 const isInFootprint = placementFootprint.has(key);
@@ -589,31 +628,12 @@ const Board: React.FC<BoardProps> = ({
 
             {/* Grid Helper - Lowered slightly */}
             <gridHelper
-                args={[200, 100, COLORS.GRID_LINE, COLORS.GRID_LINE]}
-                position={[0, -0.05, 0]}
+                args={[gridSize, gridDivisions, COLORS.GRID_LINE, COLORS.GRID_LINE]}
+                position={[gridCenterX, -0.05, gridCenterZ]}
                 material-transparent={true}
                 material-opacity={0.45}
                 raycast={() => null}
             />
-
-            {/* Coordinate Tooltip - Adjusted Height */}
-            {hoveredTile && (
-                <Html
-                    position={[
-                        (hoveredTile.x * (TILE_SIZE + TILE_SPACING)) - BOARD_OFFSET,
-                        ((terrainData[`${hoveredTile.x},${hoveredTile.z}`]?.elevation || 0) * ELEVATION_HEIGHT) + 0.5,
-                        (hoveredTile.z * (TILE_SIZE + TILE_SPACING)) - BOARD_OFFSET
-                    ]}
-                    pointerEvents="none"
-                >
-                    <div className="bg-transparent backdrop-blur-sm text-[10px] text-green-400 font-mono px-1.5 py-0.5 border border-green-600/50 rounded whitespace-nowrap -translate-x-1/2 -translate-y-[150%] shadow-[0_0_5px_rgba(0,0,0,0.5)]">
-                        [{hoveredTile.x}, {hoveredTile.z}]
-                    </div>
-                </Html>
-            )}
-
-
-
 
             {/* Collectibles */}
             {collectibles.map(c => {

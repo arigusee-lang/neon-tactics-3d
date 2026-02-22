@@ -1,16 +1,17 @@
 
 import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { Unit, PlayerId, TerrainData } from '../types';
-import { BOARD_SIZE, COLORS, CARD_CONFIG } from '../constants';
+import { Unit, PlayerId, TerrainData, MapBounds } from '../types';
+import { COLORS, CARD_CONFIG } from '../constants';
 
 interface MinimapProps {
     units: Unit[];
     revealedTiles: string[];
     terrain: Record<string, TerrainData>;
+    mapBounds: MapBounds;
 }
 
-const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain }) => {
+const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain, mapBounds }) => {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const [isMinimized, setIsMinimized] = useState(true);
     const [zoom, setZoom] = useState(6); // Pixels per tile
@@ -29,13 +30,16 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain }) => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
         // Calculate dimensions
-        const size = BOARD_SIZE * zoom;
-        canvas.width = size;
-        canvas.height = size;
+        const width = Math.max(1, mapBounds.width);
+        const height = Math.max(1, mapBounds.height);
+        canvas.width = width * zoom;
+        canvas.height = height * zoom;
 
         // Draw Revealed Terrain
         revealedTiles.forEach(key => {
             const [x, z] = key.split(',').map(Number);
+            if (x < mapBounds.originX || x >= mapBounds.originX + mapBounds.width) return;
+            if (z < mapBounds.originZ || z >= mapBounds.originZ + mapBounds.height) return;
             const tileData = terrain[key];
 
             // Color logic for landing zones
@@ -47,7 +51,9 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain }) => {
                 ctx.fillStyle = '#113311'; // Default Dark Green
             }
 
-            ctx.fillRect(x * zoom, z * zoom, zoom, zoom);
+            const drawX = (x - mapBounds.originX) * zoom;
+            const drawZ = (z - mapBounds.originZ) * zoom;
+            ctx.fillRect(drawX, drawZ, zoom, zoom);
         });
 
         // Draw Units
@@ -55,6 +61,11 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain }) => {
             const x = unit.position.x;
             const z = unit.position.z;
             const size = unit.stats.size;
+            const drawX = x - mapBounds.originX;
+            const drawZ = z - mapBounds.originZ;
+
+            if (drawX + size <= 0 || drawZ + size <= 0) return;
+            if (drawX >= mapBounds.width || drawZ >= mapBounds.height) return;
             
             // Determine Color
             let color = '#888888';
@@ -66,10 +77,10 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain }) => {
             
             // Draw unit footprint
             const pad = zoom > 4 ? 1 : 0;
-            ctx.fillRect((x * zoom) + pad, (z * zoom) + pad, (size * zoom) - pad*2, (size * zoom) - pad*2);
+            ctx.fillRect((drawX * zoom) + pad, (drawZ * zoom) + pad, (size * zoom) - pad * 2, (size * zoom) - pad * 2);
         });
 
-    }, [units, revealedTiles, zoom, revealedSet, terrain]);
+    }, [units, revealedTiles, zoom, revealedSet, terrain, mapBounds]);
 
     const handleZoom = (delta: number) => {
         setZoom(prev => Math.max(2, Math.min(12, prev + delta)));
@@ -84,8 +95,8 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain }) => {
         const mouseY = e.clientY - rect.top;
 
         // Convert mouse position to grid coordinates
-        const gridX = Math.floor(mouseX / zoom);
-        const gridZ = Math.floor(mouseY / zoom);
+        const gridX = Math.floor(mouseX / zoom) + mapBounds.originX;
+        const gridZ = Math.floor(mouseY / zoom) + mapBounds.originZ;
 
         // Find if a unit occupies this tile
         // Check standard collision: x <= gridX < x + size

@@ -40,21 +40,23 @@ let gameState = {
 };
 
 // Lobby management
-const lobbies = {}; // { roomId: { players: [socketId], customMap: '...' } }
+const lobbies = {}; // { roomId: { players: [socketId], mapId: string } }
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
 
   // 1. Create Lobby
-  socket.on('create_lobby', () => {
+  socket.on('create_lobby', (payload = {}) => {
+    const mapId = typeof payload?.mapId === 'string' ? payload.mapId : 'MAP_1';
     const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
     lobbies[roomId] = {
       players: [socket.id],
-      gameState: null
+      gameState: null,
+      mapId
     };
     socket.join(roomId);
-    socket.emit('lobby_created', roomId);
-    console.log(`Lobby created: ${roomId} by ${socket.id}`);
+    socket.emit('lobby_created', { roomId, mapId });
+    console.log(`Lobby created: ${roomId} by ${socket.id} | map=${mapId}`);
   });
 
   // 2. Join Lobby
@@ -67,7 +69,8 @@ io.on('connection', (socket) => {
       // Notify both players that game is ready
       io.to(roomId).emit('game_start', {
         roomId,
-        players: lobby.players
+        players: lobby.players,
+        mapId: lobby.mapId || 'MAP_1'
       });
       console.log(`Player ${socket.id} joined lobby ${roomId}`);
     } else {

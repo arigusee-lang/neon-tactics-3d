@@ -1,5 +1,5 @@
 
-import { Position, TerrainData } from '../types';
+import { Position, TerrainData, MapBounds } from '../types';
 import { BOARD_SIZE } from '../constants';
 
 interface Node {
@@ -17,8 +17,18 @@ export const findPath = (
   obstacles: Set<string>, // "x,z" strings
   revealed: Set<string>,
   terrain: Record<string, TerrainData>,
-  unitSize: number = 1
+  unitSize: number = 1,
+  mapBounds?: MapBounds
 ): Position[] => {
+  const bounds = mapBounds || {
+    originX: 0,
+    originZ: 0,
+    width: BOARD_SIZE,
+    height: BOARD_SIZE
+  };
+  const maxX = bounds.originX + bounds.width;
+  const maxZ = bounds.originZ + bounds.height;
+
   const openList: Node[] = [];
   const openSet: Map<string, Node> = new Map();
   const closedList: Set<string> = new Set();
@@ -58,7 +68,7 @@ export const findPath = (
       const neighborKey = `${neighbor.x},${neighbor.z}`;
 
       // 1. Basic Anchor Boundary Check
-      if (neighbor.x < 0 || neighbor.x >= BOARD_SIZE || neighbor.z < 0 || neighbor.z >= BOARD_SIZE) continue;
+      if (neighbor.x < bounds.originX || neighbor.x >= maxX || neighbor.z < bounds.originZ || neighbor.z >= maxZ) continue;
 
       // 2. Closed List Check
       if (closedList.has(neighborKey)) continue;
@@ -72,11 +82,15 @@ export const findPath = (
           const checkZ = neighbor.z + j;
           const checkKey = `${checkX},${checkZ}`;
 
-          if (checkX >= BOARD_SIZE || checkZ >= BOARD_SIZE) {
+          if (checkX < bounds.originX || checkX >= maxX || checkZ < bounds.originZ || checkZ >= maxZ) {
             isBlocked = true;
             break;
           }
           if (!revealed.has(checkKey)) {
+            isBlocked = true;
+            break;
+          }
+          if (!terrain[checkKey]) {
             isBlocked = true;
             break;
           }

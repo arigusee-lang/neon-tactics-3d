@@ -61,6 +61,13 @@ export interface Position {
   z: number;
 }
 
+export interface MapBounds {
+  originX: number;
+  originZ: number;
+  width: number;
+  height: number;
+}
+
 export interface UnitStats {
   hp: number;
   maxHp: number;
@@ -178,6 +185,34 @@ export interface InteractionState {
   lastPos?: Position; // For wall adjacency
   playerId?: PlayerId;
   terrainTool?: TerrainTool; // For map editor
+  terrainBrushSize?: number; // NxN brush size for map editor area tools
+}
+
+export type DebugClickResult = 'INFO' | 'ACTION' | 'REJECT';
+
+export interface DebugPointerMeta {
+  source: 'TILE' | 'UNIT' | 'SYSTEM';
+  eventType?: string;
+  button?: number;
+  pointerType?: string;
+  clientX?: number;
+  clientY?: number;
+}
+
+export interface DebugClickTraceEntry {
+  id: string;
+  timestamp: string;
+  stage: string;
+  result: DebugClickResult;
+  reason: string;
+  mode: InteractionMode;
+  tile?: Position;
+  unitId?: string;
+  selectedUnitId: string | null;
+  selectedCardId: string | null;
+  previewPathLength: number;
+  previewPathEnd: Position | null;
+  pointer?: DebugPointerMeta;
 }
 
 export interface TerrainData {
@@ -211,6 +246,8 @@ export interface GameState {
   collectibles: Collectible[];
   revealedTiles: string[];
   terrain: Record<string, TerrainData>; // Key "x,z"
+  mapBounds: MapBounds;
+  deletedTiles: string[];
   currentTurn: PlayerId;
   winner: PlayerId | null;
   roundNumber: number;
@@ -240,6 +277,7 @@ export interface GameState {
   nextDeliveryRound: number; // 10, 25, 50, 100
   shopAvailable: boolean;
   deliveryHappened: boolean; // Flag for visual feedback
+  recentlyDeliveredCardIds: { [key in PlayerId]: string[] };
 
   // Multiplayer
   isMultiplayer: boolean;
@@ -248,6 +286,12 @@ export interface GameState {
 
   // Developer Mode Flag
   isDevMode: boolean;
+
+  // Developer Diagnostics
+  debugClickTrace: DebugClickTraceEntry[];
+  debugLastDecision: string | null;
+  debugLastHoverTile: Position | null;
+
   availableMaps: string[];
 }
 
@@ -257,6 +301,8 @@ export interface PlacePayload {
   playerId: PlayerId;
   position: Position;
   cardId: string;
+  cardType?: UnitType;
+  unitId?: string;
 }
 
 // Augmentation to support R3F elements in JSX

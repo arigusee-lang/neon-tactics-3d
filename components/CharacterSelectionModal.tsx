@@ -72,7 +72,7 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
             setSelectionStep(PlayerId.TWO);
             setSelectedCharId(CHARACTERS[0].id);
         } else {
-            gameService.enterMapSelection();
+            gameService.finalizeCharacterSelection();
         }
     };
 

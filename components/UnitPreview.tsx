@@ -19,8 +19,9 @@ import PortalModel from './PortalModel';
 import ApexBladeModel from './ApexBladeModel';
 import SniperModel from './SniperModel';
 import HackerModel from './HackerModel';
-import ArcPortalModel from './ArcPortalModel';
+import ArcPortalModelV2 from './ArcPortalModelV2';
 import SpikeModel from './SpikeModel';
+import RepairBotModel from './RepairBotModel';
 
 interface UnitPreviewProps {
     type: UnitType;
@@ -50,10 +51,11 @@ const UnitPreview: React.FC<UnitPreviewProps> = ({ type, color }) => {
             case UnitType.TITAN: return <TitanModel color={color} />;
             case UnitType.SUICIDE_DRONE: return <SuicideDroneModel color={color} />;
             case UnitType.PORTAL: return <PortalModel color={color} />;
-            case UnitType.ARC_PORTAL: return <ArcPortalModel color={color} />;
+            case UnitType.ARC_PORTAL: return <ArcPortalModelV2 color={color} />;
             case UnitType.CONE: return <ApexBladeModel color={color} isMoving={false} />;
             case UnitType.SNIPER: return <SniperModel color={color} isMoving={false} />;
             case UnitType.HACKER: return <HackerModel color={color} isMoving={false} />;
+            case UnitType.REPAIR_BOT: return <RepairBotModel color={color} isMoving={false} />;
 
             case UnitType.BOX: // Scout Drone
                 return (

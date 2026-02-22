@@ -606,7 +606,14 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
 
     const handleClick = (e: ThreeEvent<PointerEvent>) => {
         e.stopPropagation();
-        gameService.handleUnitClick(data.id);
+        gameService.handleUnitClick(data.id, {
+            source: 'UNIT',
+            eventType: e.type,
+            button: e.button,
+            pointerType: e.pointerType,
+            clientX: e.clientX,
+            clientY: e.clientY
+        });
     };
 
     const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {

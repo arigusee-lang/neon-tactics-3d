@@ -11,7 +11,7 @@ interface TileProps {
     z: number;
     position: [number, number, number];
     terrain?: TerrainData;
-    onClick: (x: number, z: number) => void;
+    onClick: (x: number, z: number, pointer?: { source: 'TILE'; eventType?: string; button?: number; pointerType?: string; clientX?: number; clientY?: number; }) => void;
     isOccupied: boolean;
     onHover?: (x: number, z: number) => void;
     onHoverEnd?: (x: number, z: number) => void;
@@ -73,59 +73,12 @@ const AutoAttackBorder: React.FC<{ width: number, height: number }> = ({ width, 
     );
 };
 
-const CyberpunkPathMarker = React.memo(({ width, height }: { width: number, height: number }) => {
-    const groupRef = useRef<THREE.Group>(null);
-    // Random offset for animation phase to de-sync tiles
-    const phaseOffset = useMemo(() => Math.random() * Math.PI * 2, []);
-
-    useFrame((state, delta) => {
-        if (groupRef.current) {
-            const time = state.clock.elapsedTime;
-
-            // Pulse scale slightly
-            const scale = 1 + Math.sin(time * 3 + phaseOffset) * 0.05;
-            groupRef.current.scale.set(scale, scale, 1);
-
-            // Rotate the inner wireframe (if we add one, or rotate the whole group on Z)
-            // groupRef.current.rotation.z = Math.sin(time * 0.5 + phaseOffset) * 0.1;
-        }
-    });
-
-    return (
-        <group ref={groupRef}>
-            {/* Base Glow Plate */}
-            <mesh position={[0, 0, 0]} raycast={() => null}>
-                <planeGeometry args={[width * 0.7, height * 0.7]} />
-                <meshBasicMaterial
-                    color={COLORS.PATH_HIGHLIGHT}
-                    opacity={0.15}
-                    transparent
-                    side={THREE.DoubleSide}
-                    depthWrite={false}
-                />
-            </mesh>
-
-            {/* Corner Brackets / Tech Edges */}
-            {/* We can use a ring or a specific SVG path, but let's use a simple wireframe square for "Matrix" wireframe look */}
-            <mesh position={[0, 0, 0.01]} raycast={() => null}>
-                <ringGeometry args={[width * 0.3, width * 0.35, 4]} />
-                <meshBasicMaterial color={COLORS.PATH_HIGHLIGHT} opacity={0.6} transparent side={THREE.DoubleSide} />
-            </mesh>
-
-            {/* Center Data Dot */}
-            <mesh position={[0, 0, 0.01]} raycast={() => null}>
-                <circleGeometry args={[width * 0.05, 8]} />
-                <meshBasicMaterial color="#ffffff" opacity={0.9} transparent />
-            </mesh>
-
-            {/* Floating Wireframe Cube (projected 2D essentially, but using lines) */}
-            <lineSegments position={[0, 0, 0.05]} raycast={() => null}>
-                <edgesGeometry args={[new THREE.BoxGeometry(width * 0.4, height * 0.4, width * 0.1)]} />
-                <lineBasicMaterial color={COLORS.PATH_HIGHLIGHT} opacity={0.5} transparent />
-            </lineSegments>
-        </group>
-    );
-}); // End CyberpunkPathMarker
+const RouteDotMarker = React.memo(({ width }: { width: number }) => (
+    <mesh position={[0, 0, 0.02]} raycast={() => null}>
+        <circleGeometry args={[width * 0.06, 12]} />
+        <meshBasicMaterial color="#ffffff" opacity={0.95} transparent toneMapped={false} />
+    </mesh>
+)); // End RouteDotMarker
 
 const Tile: React.FC<TileProps> = React.memo(({
     x, z, position, terrain, onClick, isOccupied, onHover, onHoverEnd,
@@ -138,7 +91,14 @@ const Tile: React.FC<TileProps> = React.memo(({
 
     const handleClick = (e: ThreeEvent<PointerEvent>) => {
         e.stopPropagation();
-        onClick(x, z);
+        onClick(x, z, {
+            source: 'TILE',
+            eventType: e.type,
+            button: e.button,
+            pointerType: e.pointerType,
+            clientX: e.clientX,
+            clientY: e.clientY
+        });
     };
 
     const handlePointerOver = (e: ThreeEvent<PointerEvent>) => {
@@ -288,10 +248,10 @@ const Tile: React.FC<TileProps> = React.memo(({
                     </mesh>
                 )}
 
-                {/* Path Highlight (Yellow Squares) */}
+                {/* Path Highlight (White Dot) */}
                 {isPath && (
                     <group position={[geometryPosition[0], geometryPosition[1] + 0.05, geometryPosition[2]]} rotation={geometryRotation}>
-                        <CyberpunkPathMarker width={planeWidth} height={planeHeight} />
+                        <RouteDotMarker width={planeWidth} />
                     </group>
                 )}
             </group>

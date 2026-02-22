@@ -15,6 +15,7 @@ import { gameService } from './services/gameService';
 import { GameState, PlayerId, AppStatus, Effect, UnitType, Talent } from './types';
 import { COLORS, CHARACTERS } from './constants';
 import { groupCards } from './utils/cardUtils';
+import { clampTerrainBrushSize, isBrushEnabledTerrainTool } from './utils/terrainBrush';
 
 // Simple Effect Icon Component
 const EffectIcon: React.FC<{ effect: Effect, alignRight?: boolean }> = ({ effect, alignRight }) => {
@@ -160,12 +161,18 @@ const App: React.FC = () => {
     const [gameState, setGameState] = useState<GameState | null>(null);
     const [isProtocolMinimized, setIsProtocolMinimized] = useState(true);
     const [isLogMinimized, setIsLogMinimized] = useState(true);
+    const [isDebugPointerVisible, setIsDebugPointerVisible] = useState(true);
     const logEndRef = useRef<HTMLDivElement>(null);
+    const gameStateRef = useRef<GameState | null>(null);
 
     useEffect(() => {
         const unsubscribe = gameService.subscribe(setGameState);
         return () => unsubscribe();
     }, []);
+
+    useEffect(() => {
+        gameStateRef.current = gameState;
+    }, [gameState]);
 
     useEffect(() => {
         if (logEndRef.current) {
@@ -174,8 +181,38 @@ const App: React.FC = () => {
     }, [gameState?.actionLog]);
 
     useEffect(() => {
+        const wheelOptions: AddEventListenerOptions = { passive: false, capture: true };
+        const handleWheel = (e: WheelEvent) => {
+            const state = gameStateRef.current;
+            if (!state) return;
+            if (!e.ctrlKey) return;
+            if (!state.isDevMode) return;
+
+            const { interactionState } = state;
+            if (interactionState.mode !== 'TERRAIN_EDIT') return;
+            if (!isBrushEnabledTerrainTool(interactionState.terrainTool)) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            if (e.deltaY === 0) return;
+            const delta = e.deltaY < 0 ? 1 : -1;
+            gameService.adjustTerrainBrushSize(delta);
+        };
+
+        window.addEventListener('wheel', handleWheel, wheelOptions);
+        return () => window.removeEventListener('wheel', handleWheel, wheelOptions);
+    }, []);
+
+    useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (!gameState) return;
+
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD' && gameState.isDevMode) {
+                e.preventDefault();
+                setIsDebugPointerVisible((prev) => !prev);
+                return;
+            }
 
             const key = parseInt(e.key);
             if (!isNaN(key) && key > 0 && key <= 9 && !e.shiftKey) {
@@ -239,13 +276,19 @@ const App: React.FC = () => {
     if (!gameState) return <div className="text-white">Loading...</div>;
 
     const currentPlayerDeck = gameState.decks[gameState.currentTurn];
+    const controlledPlayerId = gameState.isMultiplayer ? gameState.myPlayerId : gameState.currentTurn;
+    const isLocalTurn = !gameState.isMultiplayer || gameState.myPlayerId === gameState.currentTurn;
     const playerColor = gameState.currentTurn === PlayerId.ONE ? COLORS.P1 : (gameState.currentTurn === PlayerId.TWO ? COLORS.P2 : COLORS.NEUTRAL);
     const selectedUnit = gameState.units.find(u => u.id === gameState.selectedUnitId) || null;
     const isPlaying = gameState.appStatus === AppStatus.PLAYING || gameState.appStatus === AppStatus.TALENT_SELECTION || gameState.appStatus === AppStatus.SHOP;
+    const showInventoryBar = !gameState.isMultiplayer || isLocalTurn;
+    const terrainTool = gameState.interactionState.terrainTool;
+    const terrainBrushSize = clampTerrainBrushSize(gameState.interactionState.terrainBrushSize ?? 1);
+    const terrainImpactText = isBrushEnabledTerrainTool(terrainTool) ? ` | IMPACT ZONE: ${terrainBrushSize}x${terrainBrushSize}` : '';
 
     return (
         <div className="relative w-full h-screen bg-black overflow-hidden font-mono">
-            {gameState.isDevMode && <DebugPointerInfo />}
+            {gameState.isDevMode && isDebugPointerVisible && <DebugPointerInfo gameState={gameState} />}
 
             <div className="absolute inset-0 z-0">
                 <GameScene
@@ -259,14 +302,19 @@ const App: React.FC = () => {
                     lightMode={gameState.lightMode}
                     mapId={gameState.mapId}
                     collectibles={gameState.collectibles}
+                    mapBounds={gameState.mapBounds}
                 />
             </div>
 
             <MainMenu
                 status={gameState.appStatus}
-                onStart={() => gameService.enterCharacterSelection()}
                 onResume={() => gameService.togglePause()}
-                onRestart={() => gameService.restartGame()}
+                onAbortToMenu={() => gameService.restartGame()}
+                onRestartCurrentMap={() => gameService.restartCurrentMap()}
+                availableMaps={gameState.availableMaps}
+                roomId={gameState.roomId}
+                isMultiplayer={gameState.isMultiplayer}
+                isDevMode={gameState.isDevMode}
             />
 
             {/* Character Selection Modal */}
@@ -419,24 +467,30 @@ const App: React.FC = () => {
                             {/* CREDIT DISPLAY (Clickable to Open Shop) */}
                             <button
                                 onClick={() => gameService.openShop()}
-                                disabled={!gameState.shopAvailable}
+                                disabled={!gameState.shopAvailable || !isLocalTurn}
                                 className={`pointer-events-auto bg-black/60 border text-[10px] font-mono font-bold px-3 py-1.5 rounded shadow flex items-center gap-2 transition-all duration-200
-                            ${gameState.shopAvailable
+                            ${gameState.shopAvailable && isLocalTurn
                                         ? 'border-green-500 text-green-400 hover:bg-green-900/40 hover:border-green-400 hover:shadow-[0_0_10px_rgba(0,255,0,0.3)] active:scale-95'
                                         : 'border-gray-800 text-gray-600 cursor-not-allowed opacity-70'}
                         `}
                             >
                                 <span>CREDITS:</span>
-                                <span className={`text-sm ${gameState.shopAvailable ? 'text-white' : 'text-gray-500'}`}>${gameState.credits[gameState.currentTurn]}</span>
-                                {gameState.shopAvailable && <span className="text-[8px] bg-green-900/50 px-1 rounded border border-green-700 text-green-300">SHOP</span>}
+                                <span className={`text-sm ${gameState.shopAvailable && isLocalTurn ? 'text-white' : 'text-gray-500'}`}>${gameState.credits[gameState.currentTurn]}</span>
+                                {gameState.shopAvailable && isLocalTurn && <span className="text-[8px] bg-green-900/50 px-1 rounded border border-green-700 text-green-300">SHOP</span>}
                             </button>
 
-                            <button
-                                onClick={() => gameService.skipTurn()}
-                                className="pointer-events-auto bg-green-900/60 hover:bg-green-700/80 border border-green-500 text-white text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded transition-all shadow-[0_0_10px_rgba(0,255,0,0.3)] hover:shadow-[0_0_20px_rgba(0,255,0,0.6)] active:scale-95"
-                            >
-                                END TURN [SPACE]
-                            </button>
+                            {isLocalTurn ? (
+                                <button
+                                    onClick={() => gameService.skipTurn()}
+                                    className="pointer-events-auto bg-green-900/60 hover:bg-green-700/80 border border-green-500 text-white text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded transition-all shadow-[0_0_10px_rgba(0,255,0,0.3)] hover:shadow-[0_0_20px_rgba(0,255,0,0.6)] active:scale-95"
+                                >
+                                    END TURN [SPACE]
+                                </button>
+                            ) : (
+                                <div className="pointer-events-none bg-gray-900/70 border border-gray-700 text-gray-300 text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded">
+                                    OPPONENT TURN
+                                </div>
+                            )}
                         </div>
 
                         {gameState.interactionState.mode !== 'NORMAL' && (
@@ -448,7 +502,7 @@ const App: React.FC = () => {
                                         : gameState.interactionState.mode === 'ABILITY_FREEZE'
                                             ? `TARGETING CRYO SHOT...`
                                             : gameState.interactionState.mode === 'TERRAIN_EDIT'
-                                                ? `TERRAIN MODIFICATION ACTIVE: ${gameState.interactionState.terrainTool}`
+                                                ? `TERRAIN MODIFICATION ACTIVE: ${gameState.interactionState.terrainTool}${terrainImpactText}`
                                                 : 'SELECT DESTINATION...'
                                 }
                                 [SPACE TO CANCEL]
@@ -462,27 +516,30 @@ const App: React.FC = () => {
                         )}
                     </div>
 
-                    <div className="absolute bottom-6 left-0 right-0 z-10 flex justify-center px-4 pointer-events-none">
-                        <div className="w-full max-w-screen-xl flex flex-col items-center gap-1 pointer-events-auto">
-                            {/* Character Actions */}
-                            <CharacterActionBar
-                                actions={gameState.characterActions[gameState.currentTurn]}
-                                playerId={gameState.currentTurn}
-                                currentTurn={gameState.currentTurn}
-                                isDevMode={gameState.isDevMode}
-                                currentRound={gameState.roundNumber}
-                            />
+                    {showInventoryBar && (
+                        <div className="absolute bottom-6 left-0 right-0 z-10 flex justify-center px-4 pointer-events-none">
+                            <div className="w-full max-w-screen-xl flex flex-col items-center gap-1 pointer-events-none">
+                                {/* Character Actions */}
+                                <CharacterActionBar
+                                    actions={gameState.characterActions[gameState.currentTurn]}
+                                    playerId={controlledPlayerId || gameState.currentTurn}
+                                    currentTurn={gameState.currentTurn}
+                                    isDevMode={gameState.isDevMode}
+                                    currentRound={gameState.roundNumber}
+                                />
 
-                            <Deck
-                                cards={currentPlayerDeck}
-                                selectedId={gameState.selectedCardId}
-                                onSelect={(id) => gameService.selectCard(id)}
-                                playerColor={playerColor}
-                                isDevMode={gameState.isDevMode}
-                                highlight={gameState.deliveryHappened}
-                            />
+                                <Deck
+                                    cards={currentPlayerDeck}
+                                    selectedId={gameState.selectedCardId}
+                                    onSelect={(id) => {
+                                        if (isLocalTurn) gameService.selectCard(id);
+                                    }}
+                                    playerColor={playerColor}
+                                    deliveredCardIds={gameState.recentlyDeliveredCardIds[gameState.currentTurn]}
+                                />
+                            </div>
                         </div>
-                    </div>
+                    )}
 
                     <UnitControlPanel unit={selectedUnit} isDevMode={gameState.isDevMode} currentRound={gameState.roundNumber} characterId={selectedUnit ? gameState.playerCharacters[selectedUnit.playerId] : null} />
 
@@ -581,6 +638,7 @@ const App: React.FC = () => {
                             units={gameState.units}
                             revealedTiles={gameState.revealedTiles}
                             terrain={gameState.terrain}
+                            mapBounds={gameState.mapBounds}
                         />
 
                         {/* Map Editor (Only in Dev Mode) */}

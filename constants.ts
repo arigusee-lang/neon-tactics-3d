@@ -8,6 +8,7 @@ export const TILE_SPACING = 0.1;
 export const BOARD_OFFSET = (BOARD_SIZE * (TILE_SIZE + TILE_SPACING)) / 2 - (TILE_SIZE + TILE_SPACING) / 2;
 export const ELEVATION_HEIGHT = 0.5; // Visual height per elevation level (Matches approx 30 deg slope)
 export const INITIAL_CREDITS = 500;
+export const MAX_INVENTORY_CAPACITY = 30;
 export const INCOME_PER_TURN = 0; // Disabled in favor of milestone injections
 
 export const COLORS = {
@@ -39,6 +40,13 @@ export const BUILDING_TYPES = [
   UnitType.CHARGING_STATION,
   UnitType.PORTAL,
   UnitType.ARC_PORTAL
+];
+
+// Visible in catalogue/dev mode, but excluded from normal shop + initial deck generation.
+export const DEV_ONLY_UNITS: UnitType[] = [
+  UnitType.PORTAL,
+  UnitType.ARC_PORTAL,
+  UnitType.WALL
 ];
 
 export const CHARACTERS: Character[] = [
