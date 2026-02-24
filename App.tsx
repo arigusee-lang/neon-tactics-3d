@@ -282,6 +282,7 @@ const App: React.FC = () => {
     const selectedUnit = gameState.units.find(u => u.id === gameState.selectedUnitId) || null;
     const isPlaying = gameState.appStatus === AppStatus.PLAYING || gameState.appStatus === AppStatus.TALENT_SELECTION || gameState.appStatus === AppStatus.SHOP;
     const showInventoryBar = !gameState.isMultiplayer || isLocalTurn;
+    const showUnitControlPanel = !gameState.isMultiplayer || isLocalTurn;
     const terrainTool = gameState.interactionState.terrainTool;
     const terrainBrushSize = clampTerrainBrushSize(gameState.interactionState.terrainBrushSize ?? 1);
     const terrainImpactText = isBrushEnabledTerrainTool(terrainTool) ? ` | IMPACT ZONE: ${terrainBrushSize}x${terrainBrushSize}` : '';
@@ -325,7 +326,7 @@ const App: React.FC = () => {
             )}
 
             {/* Talent Selection Modal Overlay */}
-            {gameState.appStatus === AppStatus.TALENT_SELECTION && (
+            {gameState.appStatus === AppStatus.TALENT_SELECTION && (!gameState.isMultiplayer || isLocalTurn) && (
                 <TalentSelectionModal
                     choices={gameState.talentChoices}
                     onSelect={(t) => gameService.chooseTalent(t)}
@@ -541,7 +542,9 @@ const App: React.FC = () => {
                         </div>
                     )}
 
-                    <UnitControlPanel unit={selectedUnit} isDevMode={gameState.isDevMode} currentRound={gameState.roundNumber} characterId={selectedUnit ? gameState.playerCharacters[selectedUnit.playerId] : null} />
+                    {showUnitControlPanel && (
+                        <UnitControlPanel unit={selectedUnit} isDevMode={gameState.isDevMode} currentRound={gameState.roundNumber} characterId={selectedUnit ? gameState.playerCharacters[selectedUnit.playerId] : null} />
+                    )}
 
                     <div className="absolute top-16 left-4 w-72 flex flex-col gap-2 pointer-events-auto max-h-[calc(100vh-10rem)] z-10">
                         {/* Action Log Panel */}

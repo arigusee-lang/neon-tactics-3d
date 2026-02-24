@@ -40,7 +40,88 @@ let gameState = {
 };
 
 // Lobby management
-const lobbies = {}; // { roomId: { players: [socketId], mapId: string } }
+const lobbies = {}; // { roomId: { players: [socketId], mapId: string, currentTurn: 'P1'|'P2', started: boolean } }
+
+const PLAYER_ONE = 'P1';
+const PLAYER_TWO = 'P2';
+
+const AUTHORITATIVE_ACTIONS = new Set([
+  'SYNC_STATE',
+  'MOVE',
+  'ATTACK',
+  'SKIP_TURN',
+  'TELEPORT',
+  'PLACE_UNIT',
+  'ION_CANNON_STRIKE',
+  'FORWARD_BASE_PLACE',
+  'FREEZE_TARGET',
+  'HEAL_TARGET',
+  'RESTORE_ENERGY_TARGET',
+  'MIND_CONTROL_TARGET',
+  'MIND_CONTROL_BREAK',
+  'SUMMON_ACTIVATE',
+  'SUMMON_PLACE',
+  'WALL_CHAIN_PLACE',
+  'CHARACTER_ACTION_TRIGGER',
+  'SUICIDE_PROTOCOL',
+  'DRONE_DETONATE',
+  'SHOP_BUY',
+  'SHOP_REFUND',
+  'SHOP_REROLL',
+  'TALENT_SELECTION_START',
+  'TALENT_CHOOSE'
+]);
+
+const TURN_GATED_ACTIONS = new Set([
+  'SYNC_STATE',
+  'MOVE',
+  'ATTACK',
+  'SKIP_TURN',
+  'TELEPORT',
+  'PLACE_UNIT',
+  'ION_CANNON_STRIKE',
+  'FORWARD_BASE_PLACE',
+  'FREEZE_TARGET',
+  'HEAL_TARGET',
+  'RESTORE_ENERGY_TARGET',
+  'MIND_CONTROL_TARGET',
+  'MIND_CONTROL_BREAK',
+  'SUMMON_ACTIVATE',
+  'SUMMON_PLACE',
+  'WALL_CHAIN_PLACE',
+  'CHARACTER_ACTION_TRIGGER',
+  'SUICIDE_PROTOCOL',
+  'DRONE_DETONATE',
+  'SHOP_BUY',
+  'SHOP_REFUND',
+  'SHOP_REROLL',
+  'TALENT_SELECTION_START',
+  'TALENT_CHOOSE'
+]);
+
+const ACTIONS_WITH_EXPLICIT_PLAYER = new Set([
+  'PLACE_UNIT',
+  'ION_CANNON_STRIKE',
+  'FORWARD_BASE_PLACE',
+  'SUICIDE_PROTOCOL',
+  'DRONE_DETONATE',
+  'SHOP_BUY',
+  'SHOP_REFUND',
+  'SHOP_REROLL',
+  'TALENT_SELECTION_START',
+  'TALENT_CHOOSE'
+]);
+
+function getPlayerIdForSocket(lobby, socketId) {
+  const index = lobby.players.indexOf(socketId);
+  if (index === 0) return PLAYER_ONE;
+  if (index === 1) return PLAYER_TWO;
+  return null;
+}
+
+function getNextTurn(currentTurn) {
+  return currentTurn === PLAYER_ONE ? PLAYER_TWO : PLAYER_ONE;
+}
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
@@ -52,7 +133,9 @@ io.on('connection', (socket) => {
     lobbies[roomId] = {
       players: [socket.id],
       gameState: null,
-      mapId
+      mapId,
+      currentTurn: PLAYER_ONE,
+      started: false
     };
     socket.join(roomId);
     socket.emit('lobby_created', { roomId, mapId });
@@ -64,6 +147,8 @@ io.on('connection', (socket) => {
     const lobby = lobbies[roomId];
     if (lobby && lobby.players.length < 2) {
       lobby.players.push(socket.id);
+      lobby.started = true;
+      lobby.currentTurn = PLAYER_ONE;
       socket.join(roomId);
 
       // Notify both players that game is ready
@@ -78,11 +163,78 @@ io.on('connection', (socket) => {
     }
   });
 
+  // 3. Authoritative Command Channel (initial vertical slice)
+  socket.on('authoritative_command_request', (payload = {}) => {
+    const { roomId, action } = payload;
+    let data = payload.data;
+    if (!roomId || typeof action !== 'string') {
+      socket.emit('command_rejected', { action: action || 'UNKNOWN', reason: 'INVALID_PAYLOAD' });
+      return;
+    }
+
+    if (!AUTHORITATIVE_ACTIONS.has(action)) {
+      socket.emit('command_rejected', { action, reason: 'UNSUPPORTED_ACTION' });
+      return;
+    }
+
+    const lobby = lobbies[roomId];
+    if (!lobby) {
+      socket.emit('command_rejected', { action, reason: 'ROOM_NOT_FOUND' });
+      return;
+    }
+
+    if (!lobby.players.includes(socket.id)) {
+      socket.emit('command_rejected', { action, reason: 'NOT_IN_ROOM' });
+      return;
+    }
+
+    if (!lobby.started) {
+      socket.emit('command_rejected', { action, reason: 'GAME_NOT_STARTED' });
+      return;
+    }
+
+    const actorPlayerId = getPlayerIdForSocket(lobby, socket.id);
+    if (!actorPlayerId) {
+      socket.emit('command_rejected', { action, reason: 'PLAYER_ID_UNRESOLVED' });
+      return;
+    }
+
+    if (TURN_GATED_ACTIONS.has(action) && actorPlayerId !== lobby.currentTurn) {
+      socket.emit('command_rejected', { action, reason: 'NOT_YOUR_TURN' });
+      return;
+    }
+
+    if (ACTIONS_WITH_EXPLICIT_PLAYER.has(action)) {
+      const payloadPlayer = data?.playerId;
+      if (payloadPlayer && payloadPlayer !== actorPlayerId) {
+        socket.emit('command_rejected', { action, reason: 'PLAYER_MISMATCH' });
+        return;
+      }
+      data = { ...(data || {}), playerId: actorPlayerId };
+    }
+
+    const turnBefore = lobby.currentTurn;
+    if (action === 'SKIP_TURN') {
+      lobby.currentTurn = getNextTurn(lobby.currentTurn);
+    }
+
+    io.to(roomId).emit('authoritative_command', {
+      action,
+      data,
+      meta: {
+        actorPlayerId,
+        turnBefore,
+        turnAfter: lobby.currentTurn,
+        timestamp: Date.now()
+      }
+    });
+  });
+
   // 3. Game Actions Relay
   // We simply relay the action to the OTHER player in the room.
-  socket.on('game_action', (payload) => {
+  socket.on('game_action', (payload = {}) => {
     // payload should contain { roomId, action, data }
-    if (payload.roomId) {
+    if (payload.roomId && lobbies[payload.roomId] && lobbies[payload.roomId].players.includes(socket.id)) {
       socket.to(payload.roomId).emit('game_action', payload);
       // console.log(`Action forwarded in ${payload.roomId}:`, payload.action);
     }
@@ -90,8 +242,17 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     console.log(`User disconnected: ${socket.id}`);
-    // Ideally cleanup empty lobbies or notify opponent
-    // For now, simplicity first
+    Object.entries(lobbies).forEach(([roomId, lobby]) => {
+      if (!lobby.players.includes(socket.id)) return;
+
+      lobby.players = lobby.players.filter((id) => id !== socket.id);
+      if (lobby.players.length === 0) {
+        delete lobbies[roomId];
+      } else {
+        lobby.started = false;
+        io.to(roomId).emit('error_message', 'Opponent disconnected');
+      }
+    });
   });
 });
 

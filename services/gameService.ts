@@ -52,6 +52,22 @@ interface PendingStartConfig {
     customSize?: { x: number; y: number };
 }
 
+interface RemoteUnitLocator {
+    unitId?: string;
+    playerId?: PlayerId;
+    unitType?: UnitType;
+    position?: Position;
+}
+
+interface ShopSyncPayload {
+    playerId: PlayerId;
+    credits: number;
+    shopStock: ShopItem[];
+    pendingOrders: ShopItem[];
+    deck: Card[];
+    logMessage?: string;
+}
+
 class GameService {
     private state: GameState;
     private listeners: Set<Listener> = new Set();
@@ -61,6 +77,32 @@ class GameService {
     private lastPreviewPathKey: string = '';
     private lastPreviewBlocked = false;
     private pendingStartConfig: PendingStartConfig | null = null;
+    private readonly authoritativeActions = new Set<string>([
+        'SYNC_STATE',
+        'MOVE',
+        'ATTACK',
+        'SKIP_TURN',
+        'TELEPORT',
+        'PLACE_UNIT',
+        'ION_CANNON_STRIKE',
+        'FORWARD_BASE_PLACE',
+        'FREEZE_TARGET',
+        'HEAL_TARGET',
+        'RESTORE_ENERGY_TARGET',
+        'MIND_CONTROL_TARGET',
+        'MIND_CONTROL_BREAK',
+        'SUMMON_ACTIVATE',
+        'SUMMON_PLACE',
+        'WALL_CHAIN_PLACE',
+        'CHARACTER_ACTION_TRIGGER',
+        'SUICIDE_PROTOCOL',
+        'DRONE_DETONATE',
+        'SHOP_BUY',
+        'SHOP_REFUND',
+        'SHOP_REROLL',
+        'TALENT_SELECTION_START',
+        'TALENT_CHOOSE'
+    ]);
 
     constructor() {
         this.state = this.getInitialState();
@@ -264,6 +306,24 @@ class GameService {
             this.handleRemoteAction(payload.action, payload.data);
         });
 
+        this.socket.on('authoritative_command', (payload: { action: string, data: any, meta?: any }) => {
+            console.log('Authoritative Command:', payload);
+            if (
+                payload.action === 'SYNC_STATE' &&
+                payload.meta?.actorPlayerId &&
+                this.state.myPlayerId &&
+                payload.meta.actorPlayerId === this.state.myPlayerId
+            ) {
+                return;
+            }
+            this.handleRemoteAction(payload.action, payload.data);
+        });
+
+        this.socket.on('command_rejected', (payload: { action: string, reason: string }) => {
+            this.log(`> COMMAND REJECTED [${payload.action}]: ${payload.reason}`);
+            this.notify();
+        });
+
         this.socket.on('error_message', (msg: string) => {
             alert(msg);
         });
@@ -283,14 +343,83 @@ class GameService {
         }
     }
 
+    private shouldUseAuthoritativeChannel(action: string): boolean {
+        return this.state.isMultiplayer && this.authoritativeActions.has(action);
+    }
+
     private dispatchAction(action: string, data: any) {
         if (this.state.isMultiplayer && this.socket) {
-            this.socket.emit('game_action', {
-                roomId: this.state.roomId,
-                action,
-                data
-            });
+            if (this.shouldUseAuthoritativeChannel(action)) {
+                this.socket.emit('authoritative_command_request', {
+                    roomId: this.state.roomId,
+                    action,
+                    data
+                });
+            } else {
+                this.socket.emit('game_action', {
+                    roomId: this.state.roomId,
+                    action,
+                    data
+                });
+            }
         }
+    }
+
+    private buildSyncStatePayload() {
+        return {
+            terrain: this.state.terrain,
+            decks: {
+                [PlayerId.ONE]: this.state.decks[PlayerId.ONE].map((card) => this.cloneCardForSync(card)),
+                [PlayerId.TWO]: this.state.decks[PlayerId.TWO].map((card) => this.cloneCardForSync(card)),
+                [PlayerId.NEUTRAL]: this.state.decks[PlayerId.NEUTRAL].map((card) => this.cloneCardForSync(card))
+            },
+            units: this.state.units.map((unit) => ({ ...unit })),
+            collectibles: this.state.collectibles.map((collectible) => ({ ...collectible })),
+            credits: { ...this.state.credits },
+            mapBounds: this.state.mapBounds,
+            deletedTiles: [...this.state.deletedTiles],
+            currentTurn: this.state.currentTurn,
+            roundNumber: this.state.roundNumber,
+            shopStock: {
+                [PlayerId.ONE]: this.state.shopStock[PlayerId.ONE].map((item) => ({ ...item })),
+                [PlayerId.TWO]: this.state.shopStock[PlayerId.TWO].map((item) => ({ ...item })),
+                [PlayerId.NEUTRAL]: this.state.shopStock[PlayerId.NEUTRAL].map((item) => ({ ...item }))
+            },
+            pendingOrders: {
+                [PlayerId.ONE]: this.state.pendingOrders[PlayerId.ONE].map((item) => ({ ...item })),
+                [PlayerId.TWO]: this.state.pendingOrders[PlayerId.TWO].map((item) => ({ ...item })),
+                [PlayerId.NEUTRAL]: this.state.pendingOrders[PlayerId.NEUTRAL].map((item) => ({ ...item }))
+            },
+            nextDeliveryRound: this.state.nextDeliveryRound,
+            shopAvailable: this.state.shopAvailable,
+            recentlyDeliveredCardIds: {
+                [PlayerId.ONE]: [...this.state.recentlyDeliveredCardIds[PlayerId.ONE]],
+                [PlayerId.TWO]: [...this.state.recentlyDeliveredCardIds[PlayerId.TWO]],
+                [PlayerId.NEUTRAL]: [...this.state.recentlyDeliveredCardIds[PlayerId.NEUTRAL]]
+            },
+            playerTalents: {
+                [PlayerId.ONE]: this.state.playerTalents[PlayerId.ONE].map((talent) => ({ ...talent })),
+                [PlayerId.TWO]: this.state.playerTalents[PlayerId.TWO].map((talent) => ({ ...talent })),
+                [PlayerId.NEUTRAL]: this.state.playerTalents[PlayerId.NEUTRAL].map((talent) => ({ ...talent }))
+            },
+            characterActions: {
+                [PlayerId.ONE]: this.state.characterActions[PlayerId.ONE].map((action) => ({ ...action })),
+                [PlayerId.TWO]: this.state.characterActions[PlayerId.TWO].map((action) => ({ ...action })),
+                [PlayerId.NEUTRAL]: this.state.characterActions[PlayerId.NEUTRAL].map((action) => ({ ...action }))
+            },
+            playerCharacters: { ...this.state.playerCharacters },
+            unlockedUnits: {
+                [PlayerId.ONE]: [...this.state.unlockedUnits[PlayerId.ONE]],
+                [PlayerId.TWO]: [...this.state.unlockedUnits[PlayerId.TWO]],
+                [PlayerId.NEUTRAL]: [...this.state.unlockedUnits[PlayerId.NEUTRAL]]
+            },
+            playerEffects: {
+                [PlayerId.ONE]: this.state.playerEffects[PlayerId.ONE].map((effect) => ({ ...effect })),
+                [PlayerId.TWO]: this.state.playerEffects[PlayerId.TWO].map((effect) => ({ ...effect })),
+                [PlayerId.NEUTRAL]: this.state.playerEffects[PlayerId.NEUTRAL].map((effect) => ({ ...effect }))
+            },
+            winner: this.state.winner
+        };
     }
 
     private handleRemoteAction(action: string, data: any) {
@@ -315,12 +444,67 @@ class GameService {
             case 'TELEPORT':
                 this.applyTeleport(data.sourceUnitId, data.x, data.z, true);
                 break;
+            case 'ION_CANNON_STRIKE':
+                this.handleIonCannonStrike(data.x, data.z, true, data.playerId);
+                break;
+            case 'FORWARD_BASE_PLACE':
+                this.handleForwardBasePlacement(data.x, data.z, true, data.playerId);
+                break;
+            case 'FREEZE_TARGET':
+                this.handleFreezeTarget(data.targetUnitId, true, data.sourceUnitId);
+                break;
+            case 'HEAL_TARGET':
+                this.handleHealTarget(data.targetUnitId, true, data.sourceUnitId);
+                break;
+            case 'RESTORE_ENERGY_TARGET':
+                this.handleRestoreEnergyTarget(data.targetUnitId, true, data.sourceUnitId);
+                break;
+            case 'MIND_CONTROL_TARGET':
+                this.handleMindControlTarget(data.targetUnitId, true, data.sourceUnitId);
+                break;
+            case 'MIND_CONTROL_BREAK':
+                this.breakMindControl(data.hackerId);
+                break;
+            case 'SUMMON_ACTIVATE':
+                this.activateSummonAbility(data.unitId, true);
+                break;
+            case 'SUMMON_PLACE':
+                this.handleSummonPlacement(data.x, data.z, true, data.unitId);
+                break;
+            case 'WALL_CHAIN_PLACE':
+                this.handleWallChainPlacement(data.x, data.z, true, data.unitId);
+                break;
+            case 'CHARACTER_ACTION_TRIGGER':
+                this.triggerCharacterAction(data.actionId, true);
+                break;
+            case 'SUICIDE_PROTOCOL':
+                this.triggerSuicide(data.unitId, true, data);
+                break;
+            case 'DRONE_DETONATE':
+                this.triggerDroneExplosion(data.unitId, true, data);
+                break;
             case 'SKIP_TURN':
                 this.skipTurn(true);
                 break;
             case 'PLACE_UNIT':
                 this.emitPlaceUnit(data, true);
                 break;
+            case 'SHOP_BUY':
+            case 'SHOP_REFUND':
+            case 'SHOP_REROLL':
+                this.applyShopSyncPayload(data);
+                break;
+            case 'TALENT_SELECTION_START':
+                this.triggerTalentSelection(data.playerId, true, data.choices);
+                break;
+            case 'TALENT_CHOOSE': {
+                const chosenTalent = this.state.talentChoices.find(t => t.id === data.talentId)
+                    || TALENT_POOL.find(t => t.id === data.talentId);
+                if (chosenTalent) {
+                    this.chooseTalent(chosenTalent, true);
+                }
+                break;
+            }
             case 'SYNC_STATE':
                 // Overwrite critical state parts
                 this.state.terrain = data.terrain;
@@ -336,6 +520,39 @@ class GameService {
                 }
                 if (typeof data.roundNumber === 'number') {
                     this.state.roundNumber = data.roundNumber;
+                }
+                if (data.shopStock) {
+                    this.state.shopStock = data.shopStock;
+                }
+                if (data.pendingOrders) {
+                    this.state.pendingOrders = data.pendingOrders;
+                }
+                if (typeof data.nextDeliveryRound === 'number') {
+                    this.state.nextDeliveryRound = data.nextDeliveryRound;
+                }
+                if (typeof data.shopAvailable === 'boolean') {
+                    this.state.shopAvailable = data.shopAvailable;
+                }
+                if (data.recentlyDeliveredCardIds) {
+                    this.state.recentlyDeliveredCardIds = data.recentlyDeliveredCardIds;
+                }
+                if (data.playerTalents) {
+                    this.state.playerTalents = data.playerTalents;
+                }
+                if (data.characterActions) {
+                    this.state.characterActions = data.characterActions;
+                }
+                if (data.playerCharacters) {
+                    this.state.playerCharacters = data.playerCharacters;
+                }
+                if (data.unlockedUnits) {
+                    this.state.unlockedUnits = data.unlockedUnits;
+                }
+                if (data.playerEffects) {
+                    this.state.playerEffects = data.playerEffects;
+                }
+                if (typeof data.winner !== 'undefined') {
+                    this.state.winner = data.winner;
                 }
                 // Merge units? Or overwrite? 
                 // Initial sync should overwrite.
@@ -685,9 +902,60 @@ class GameService {
         this.notify();
     }
 
+    private cloneCardForSync(card: Card): Card {
+        return {
+            ...card,
+            baseStats: card.baseStats ? { ...card.baseStats } : card.baseStats
+        };
+    }
+
+    private buildShopSyncPayload(
+        playerId: PlayerId,
+        credits: number,
+        shopStock: ShopItem[],
+        pendingOrders: ShopItem[],
+        deck: Card[],
+        logMessage?: string
+    ): ShopSyncPayload {
+        return {
+            playerId,
+            credits,
+            shopStock: shopStock.map((shopItem) => ({ ...shopItem })),
+            pendingOrders: pendingOrders.map((order) => ({ ...order })),
+            deck: deck.map((card) => this.cloneCardForSync(card)),
+            logMessage
+        };
+    }
+
+    private applyShopSyncPayload(payload: ShopSyncPayload) {
+        if (!payload || !payload.playerId) return;
+        const { playerId } = payload;
+
+        this.state = {
+            ...this.state,
+            credits: { ...this.state.credits, [playerId]: payload.credits },
+            shopStock: { ...this.state.shopStock, [playerId]: payload.shopStock.map((shopItem) => ({ ...shopItem })) },
+            pendingOrders: { ...this.state.pendingOrders, [playerId]: payload.pendingOrders.map((order) => ({ ...order })) },
+            decks: { ...this.state.decks, [playerId]: payload.deck.map((card) => this.cloneCardForSync(card)) }
+        };
+
+        if (payload.logMessage) {
+            this.log(payload.logMessage, playerId);
+        }
+        this.notify();
+    }
+
     public buyShopItem(item: ShopItem) {
         const playerId = this.state.currentTurn;
-        if (this.checkPlayerRestricted(playerId)) return;
+        if (this.state.appStatus !== AppStatus.SHOP || this.state.winner) return;
+        if (this.state.isMultiplayer && this.state.myPlayerId !== playerId) return;
+
+        const stockEntryIndex = this.state.shopStock[playerId].findIndex((shopItem) => shopItem.id === item.id);
+        if (stockEntryIndex === -1) {
+            this.log("> STOCK ENTRY NOT FOUND", playerId);
+            return;
+        }
+
         const reservedSlots = this.state.decks[playerId].length + this.state.pendingOrders[playerId].length;
         if (reservedSlots >= MAX_INVENTORY_CAPACITY) {
             this.log(`> INVENTORY FULL (${MAX_INVENTORY_CAPACITY}/${MAX_INVENTORY_CAPACITY})`, playerId);
@@ -699,13 +967,11 @@ class GameService {
             return;
         }
 
-        const newCredits = { ...this.state.credits };
-        newCredits[playerId] -= item.cost;
-
-        const newShopStock = { ...this.state.shopStock };
-        newShopStock[playerId] = newShopStock[playerId].filter(s => s.id !== item.id);
-
-        const newPendingOrders = { ...this.state.pendingOrders };
+        const nextCredits = this.state.credits[playerId] - item.cost;
+        const nextShopStock = this.state.shopStock[playerId].filter(s => s.id !== item.id);
+        let nextPendingOrders = [...this.state.pendingOrders[playerId]];
+        let nextDeck = [...this.state.decks[playerId]];
+        let logMessage = '';
 
         if (item.deliveryTurns === 0) {
             // Instant delivery
@@ -719,59 +985,71 @@ class GameService {
                 baseStats: config.baseStats as any,
                 cost: config.cost!
             };
-            this.state.decks[playerId] = [...this.state.decks[playerId], newCard];
-            this.log(`> PRIORITY SHIPPING: INSTANT DELIVERY CONFIRMED`, playerId);
+            nextDeck = [...nextDeck, newCard];
+            logMessage = `> PRIORITY SHIPPING: INSTANT DELIVERY CONFIRMED`;
         } else {
             // Add to pending
             const boughtItem: ShopItem = { ...item, purchaseRound: this.state.roundNumber };
-            newPendingOrders[playerId] = [...newPendingOrders[playerId], boughtItem];
-            this.log(`> ORDER CONFIRMED: ARRIVAL IN ${item.deliveryTurns} ROUNDS`, playerId);
+            nextPendingOrders = [...nextPendingOrders, boughtItem];
+            logMessage = `> ORDER CONFIRMED: ARRIVAL IN ${item.deliveryTurns} ROUNDS`;
         }
 
-        this.state = {
-            ...this.state,
-            credits: newCredits,
-            shopStock: newShopStock,
-            pendingOrders: newPendingOrders
-        };
+        const payload = this.buildShopSyncPayload(
+            playerId,
+            nextCredits,
+            nextShopStock,
+            nextPendingOrders,
+            nextDeck,
+            logMessage
+        );
 
-        this.notify();
+        if (this.state.isMultiplayer) {
+            this.dispatchAction('SHOP_BUY', payload);
+            return;
+        }
+
+        this.applyShopSyncPayload(payload);
     }
 
     public refundShopItem(item: ShopItem) {
         const playerId = this.state.currentTurn;
-        if (this.checkPlayerRestricted(playerId)) return;
+        if (this.state.appStatus !== AppStatus.SHOP || this.state.winner) return;
+        if (this.state.isMultiplayer && this.state.myPlayerId !== playerId) return;
         const currentOrders = this.state.pendingOrders[playerId];
         const orderIdx = currentOrders.findIndex(i => i.id === item.id);
 
         if (orderIdx > -1) {
-            const newPendingOrders = { ...this.state.pendingOrders };
-            const newPlayerOrders = [...currentOrders];
-            newPlayerOrders.splice(orderIdx, 1);
-            newPendingOrders[playerId] = newPlayerOrders;
+            const refundedOrder = currentOrders[orderIdx];
+            const nextPendingOrders = [...currentOrders];
+            nextPendingOrders.splice(orderIdx, 1);
 
-            const newCredits = { ...this.state.credits };
-            newCredits[playerId] += item.cost;
+            const nextCredits = this.state.credits[playerId] + refundedOrder.cost;
+            const { purchaseRound, ...stockItem } = refundedOrder;
+            const nextShopStock = [...this.state.shopStock[playerId], stockItem as ShopItem];
+            const nextDeck = [...this.state.decks[playerId]];
 
-            const newShopStock = { ...this.state.shopStock };
-            const { purchaseRound, ...stockItem } = item;
-            newShopStock[playerId] = [...newShopStock[playerId], stockItem as ShopItem];
+            const payload = this.buildShopSyncPayload(
+                playerId,
+                nextCredits,
+                nextShopStock,
+                nextPendingOrders,
+                nextDeck,
+                `> ORDER CANCELLED: +$${refundedOrder.cost}`
+            );
 
-            this.state = {
-                ...this.state,
-                credits: newCredits,
-                pendingOrders: newPendingOrders,
-                shopStock: newShopStock
-            };
+            if (this.state.isMultiplayer) {
+                this.dispatchAction('SHOP_REFUND', payload);
+                return;
+            }
 
-            this.log(`> ORDER CANCELLED: +$${item.cost}`);
-            this.notify();
+            this.applyShopSyncPayload(payload);
         }
     }
 
     public rerollShop() {
         const playerId = this.state.currentTurn;
-        if (this.checkPlayerRestricted(playerId)) return;
+        if (this.state.appStatus !== AppStatus.SHOP || this.state.winner) return;
+        if (this.state.isMultiplayer && this.state.myPlayerId !== playerId) return;
         const REROLL_COST = 50;
 
         if (this.state.credits[playerId] < REROLL_COST) {
@@ -785,22 +1063,26 @@ class GameService {
             return;
         }
 
-        const newCredits = { ...this.state.credits };
-        newCredits[playerId] -= REROLL_COST;
+        const nextCredits = this.state.credits[playerId] - REROLL_COST;
+        const nextShopStock = this._generateRandomStock(currentStockCount, playerId);
+        const nextPendingOrders = [...this.state.pendingOrders[playerId]];
+        const nextDeck = [...this.state.decks[playerId]];
 
-        const newStock = this._generateRandomStock(currentStockCount, playerId);
+        const payload = this.buildShopSyncPayload(
+            playerId,
+            nextCredits,
+            nextShopStock,
+            nextPendingOrders,
+            nextDeck,
+            `> LOGISTICS REROUTED: -${REROLL_COST} CREDITS`
+        );
 
-        const newShopStock = { ...this.state.shopStock };
-        newShopStock[playerId] = newStock;
+        if (this.state.isMultiplayer) {
+            this.dispatchAction('SHOP_REROLL', payload);
+            return;
+        }
 
-        this.state = {
-            ...this.state,
-            credits: newCredits,
-            shopStock: newShopStock
-        };
-
-        this.log(`> LOGISTICS REROUTED: -${REROLL_COST} CREDITS`);
-        this.notify();
+        this.applyShopSyncPayload(payload);
     }
 
     private generateShopStock(deliveryRound: number) {
@@ -1167,17 +1449,7 @@ class GameService {
         if (this.state.isMultiplayer && this.state.myPlayerId === PlayerId.ONE) {
             // I am the host, I authorize the state.
             setTimeout(() => {
-                this.dispatchAction('SYNC_STATE', {
-                    terrain: this.state.terrain,
-                    decks: this.state.decks,
-                    units: this.state.units,
-                    collectibles: this.state.collectibles,
-                    credits: this.state.credits,
-                    mapBounds: this.state.mapBounds,
-                    deletedTiles: this.state.deletedTiles,
-                    currentTurn: this.state.currentTurn,
-                    roundNumber: this.state.roundNumber
-                });
+                this.dispatchAction('SYNC_STATE', this.buildSyncStatePayload());
             }, 500);
         }
 
@@ -1853,15 +2125,20 @@ class GameService {
         this.notify();
     }
 
-    public activateSummonAbility(unitId: string) {
+    public activateSummonAbility(unitId: string, isRemote: boolean = false) {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
-        if (this.checkPlayerRestricted(this.state.currentTurn)) return;
+        if (!isRemote && this.checkPlayerRestricted(this.state.currentTurn)) return;
 
         const unit = this.state.units.find(u => u.id === unitId);
         if (!unit || unit.playerId !== this.state.currentTurn || unit.type !== UnitType.CONE) return;
 
         if (unit.stats.energy < 50) {
             this.log(`> INSUFFICIENT ENERGY (${unit.stats.energy}/50)`, unit.playerId);
+            return;
+        }
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('SUMMON_ACTIVATE', { unitId });
             return;
         }
 
@@ -1981,6 +2258,10 @@ class GameService {
         }
 
         if (unit.status.mindControlTargetId) {
+            if (this.state.isMultiplayer) {
+                this.dispatchAction('MIND_CONTROL_BREAK', { hackerId: unit.id });
+                return;
+            }
             this.breakMindControl(unit.id);
             return;
         }
@@ -2027,6 +2308,28 @@ class GameService {
         const { playerId, position, cardId } = payload;
 
         if (!isRemote && this.checkPlayerRestricted(playerId)) return;
+
+        // In multiplayer, local client only sends command and waits for authoritative broadcast.
+        if (!isRemote && this.state.isMultiplayer) {
+            const deck = this.state.decks[playerId];
+            let localCardIndex = deck.findIndex(c => c.id === cardId);
+            if (localCardIndex === -1 && payload.cardType) {
+                localCardIndex = deck.findIndex(c => c.type === payload.cardType);
+            }
+            if (localCardIndex === -1) return;
+
+            const localCard = deck[localCardIndex];
+            const unitId = payload.unitId || (localCard.category === CardCategory.UNIT
+                ? `${playerId}-unit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+                : undefined);
+
+            this.dispatchAction('PLACE_UNIT', {
+                ...payload,
+                cardType: localCard.type,
+                unitId
+            });
+            return;
+        }
 
         // Find card in deck
         const deck = this.state.decks[playerId];
@@ -2365,28 +2668,47 @@ class GameService {
         this.pushDebugTrace('handleTileClick.reject', 'REJECT', 'no action for empty tile', { tile, pointer, notify: true });
     }
 
-    private handleIonCannonStrike(x: number, z: number) {
-        const { playerId } = this.state.interactionState;
-        if (!this.state.isDevMode) {
-            const deck = this.state.decks[playerId!];
-            const cardId = this.state.selectedCardId;
-            // Consume card
-            const idx = deck.findIndex(c => c.id === cardId);
-            if (idx > -1) {
-                const newDeck = [...deck];
-                newDeck.splice(idx, 1);
-                this.state.decks[playerId!] = newDeck;
-            }
-            this.state.selectedCardId = null;
+    private consumeActionCard(playerId: PlayerId, actionType: UnitType, preferredCardId?: string | null) {
+        if (this.state.isDevMode) return;
+
+        const deck = this.state.decks[playerId];
+        let idx = preferredCardId ? deck.findIndex(c => c.id === preferredCardId) : -1;
+        if (idx === -1) {
+            idx = deck.findIndex(c => c.category === CardCategory.ACTION && c.type === actionType);
         }
+        if (idx > -1) {
+            const newDeck = [...deck];
+            newDeck.splice(idx, 1);
+            this.state.decks[playerId] = newDeck;
+        }
+        this.state.selectedCardId = null;
+    }
+
+    private handleIonCannonStrike(x: number, z: number, isRemote: boolean = false, forcedPlayerId?: PlayerId) {
+        const playerId = forcedPlayerId || this.state.interactionState.playerId;
+        if (!playerId) return;
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('ION_CANNON_STRIKE', { x, z, playerId });
+            return;
+        }
+
+        this.consumeActionCard(playerId, UnitType.ION_CANNON, this.state.selectedCardId);
         this.log(`> ORBITAL STRIKE INBOUND AT ${x},${z}`, playerId);
         this.applyAreaDamage({ x, z }, 1.5, 50, 'ORBITAL_STRIKE');
         this.checkWinCondition(); // Check after damage application
         this.finalizeInteraction();
     }
 
-    private handleForwardBasePlacement(x: number, z: number) {
-        const { playerId } = this.state.interactionState;
+    private handleForwardBasePlacement(x: number, z: number, isRemote: boolean = false, forcedPlayerId?: PlayerId) {
+        const playerId = forcedPlayerId || this.state.interactionState.playerId;
+        if (!playerId) return;
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('FORWARD_BASE_PLACE', { x, z, playerId });
+            return;
+        }
+
         const enemyId = playerId === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
 
         // Check if 2x2 area is valid
@@ -2404,7 +2726,7 @@ class GameService {
                 }
 
                 // Check revealed
-                if (!this.state.revealedTiles.includes(key) && !this.state.isDevMode) {
+                if (!isRemote && !this.state.revealedTiles.includes(key) && !this.state.isDevMode) {
                     this.log(`> DEPLOYMENT FAILED: SECTOR UNKNOWN`, playerId);
                     return;
                 }
@@ -2430,31 +2752,27 @@ class GameService {
             this.state.terrain[key].landingZone = playerId;
         });
 
-        if (!this.state.isDevMode) {
-            const deck = this.state.decks[playerId!];
-            const cardId = this.state.selectedCardId;
-            // Consume card
-            const idx = deck.findIndex(c => c.id === cardId);
-            if (idx > -1) {
-                const newDeck = [...deck];
-                newDeck.splice(idx, 1);
-                this.state.decks[playerId!] = newDeck;
-            }
-            this.state.selectedCardId = null;
-        }
+        this.consumeActionCard(playerId, UnitType.FORWARD_BASE, this.state.selectedCardId);
 
         this.log(`> FORWARD BASE ESTABLISHED`, playerId);
         this.finalizeInteraction();
         this.notify();
     }
 
-    public handleFreezeTarget(targetUnitId: string) {
-        const { sourceUnitId } = this.state.interactionState;
+    public handleFreezeTarget(targetUnitId: string, isRemote: boolean = false, sourceUnitIdOverride?: string) {
+        const sourceUnitId = sourceUnitIdOverride || this.state.interactionState.sourceUnitId;
+        if (!sourceUnitId) return;
+
         const sourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
         if (sourceIdx === -1) return;
 
         const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
         if (targetIdx === -1) return;
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('FREEZE_TARGET', { sourceUnitId, targetUnitId });
+            return;
+        }
 
         // Apply Freeze
         this.addUnitEffect(targetUnitId, {
@@ -2470,8 +2788,10 @@ class GameService {
         this.finalizeInteraction();
     }
 
-    public handleHealTarget(targetUnitId: string) {
-        const { sourceUnitId } = this.state.interactionState;
+    public handleHealTarget(targetUnitId: string, isRemote: boolean = false, sourceUnitIdOverride?: string) {
+        const sourceUnitId = sourceUnitIdOverride || this.state.interactionState.sourceUnitId;
+        if (!sourceUnitId) return;
+
         const sourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
         if (sourceIdx === -1) return;
 
@@ -2480,6 +2800,11 @@ class GameService {
 
         const source = this.state.units[sourceIdx];
         const target = this.state.units[targetIdx];
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('HEAL_TARGET', { sourceUnitId, targetUnitId });
+            return;
+        }
 
         // BUILDING CHECK
         const isBuilding = BUILDING_TYPES.includes(target.type);
@@ -2509,8 +2834,10 @@ class GameService {
         this.finalizeInteraction();
     }
 
-    public handleRestoreEnergyTarget(targetUnitId: string) {
-        const { sourceUnitId } = this.state.interactionState;
+    public handleRestoreEnergyTarget(targetUnitId: string, isRemote: boolean = false, sourceUnitIdOverride?: string) {
+        const sourceUnitId = sourceUnitIdOverride || this.state.interactionState.sourceUnitId;
+        if (!sourceUnitId) return;
+
         const sourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
         if (sourceIdx === -1) return;
 
@@ -2519,6 +2846,11 @@ class GameService {
 
         const source = this.state.units[sourceIdx];
         const target = this.state.units[targetIdx];
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('RESTORE_ENERGY_TARGET', { sourceUnitId, targetUnitId });
+            return;
+        }
 
         if (target.stats.maxEnergy <= 0) {
             this.log(`> TARGET INCOMPATIBLE: NO ENERGY CORE`, source.playerId);
@@ -2540,8 +2872,10 @@ class GameService {
         this.finalizeInteraction();
     }
 
-    public handleMindControlTarget(targetUnitId: string) {
-        const { sourceUnitId } = this.state.interactionState;
+    public handleMindControlTarget(targetUnitId: string, isRemote: boolean = false, sourceUnitIdOverride?: string) {
+        const sourceUnitId = sourceUnitIdOverride || this.state.interactionState.sourceUnitId;
+        if (!sourceUnitId) return;
+
         const sourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
         if (sourceIdx === -1) return;
 
@@ -2550,6 +2884,11 @@ class GameService {
 
         const hacker = this.state.units[sourceIdx];
         const target = this.state.units[targetIdx];
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('MIND_CONTROL_TARGET', { sourceUnitId, targetUnitId });
+            return;
+        }
 
         if (hacker.playerId === target.playerId) {
             this.log(`> CANNOT TARGET FRIENDLY UNITS`, hacker.playerId);
@@ -2574,6 +2913,7 @@ class GameService {
         this.log(`> SYSTEM BREACH SUCCESSFUL: CONTROL ASSUMED`, hacker.playerId);
         this.finalizeInteraction();
         this.updateFogOfWar();
+        this.notify();
     }
 
     public breakMindControl(hackerId: string) {
@@ -2605,14 +2945,20 @@ class GameService {
         this.notify();
     }
 
-    public handleWallChainPlacement(x: number, z: number) {
+    public handleWallChainPlacement(x: number, z: number, isRemote: boolean = false, unitIdOverride?: string) {
         const { playerId, lastPos, remaining } = this.state.interactionState;
         if (!playerId || !lastPos || remaining === undefined) return;
+        const spawnedUnitId = unitIdOverride || `${playerId}-unit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-        if (this.isValidPlacement(x, z, 1, playerId, false)) {
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('WALL_CHAIN_PLACE', { x, z, unitId: spawnedUnitId });
+            return;
+        }
+
+        if (this.isValidPlacement(x, z, 1, playerId, false, isRemote)) {
             // Check adjacency
             if (Math.abs(x - lastPos.x) + Math.abs(z - lastPos.z) === 1) {
-                this.spawnUnit(UnitType.WALL, { x, z }, playerId);
+                this.spawnUnit(UnitType.WALL, { x, z }, playerId, spawnedUnitId);
 
                 const newRemaining = remaining - 1;
                 if (newRemaining > 0) {
@@ -2630,19 +2976,25 @@ class GameService {
         }
     }
 
-    public handleSummonPlacement(x: number, z: number) {
+    public handleSummonPlacement(x: number, z: number, isRemote: boolean = false, unitIdOverride?: string) {
         const { playerId, sourceUnitId, remaining, unitType } = this.state.interactionState;
         if (!playerId || !sourceUnitId || !remaining || !unitType) return;
+        const spawnedUnitId = unitIdOverride || `${playerId}-unit-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('SUMMON_PLACE', { x, z, unitId: spawnedUnitId });
+            return;
+        }
 
         const source = this.state.units.find(u => u.id === sourceUnitId);
         if (!source) return;
 
-        if (this.isValidPlacement(x, z, 1, playerId, false)) {
+        if (this.isValidPlacement(x, z, 1, playerId, false, isRemote)) {
             // Range check (1 tile radius)
             const dx = Math.abs(x - source.position.x);
             const dz = Math.abs(z - source.position.z);
             if (dx <= 1 && dz <= 1 && !(dx === 0 && dz === 0)) {
-                this.spawnUnit(unitType, { x, z }, playerId);
+                this.spawnUnit(unitType, { x, z }, playerId, spawnedUnitId);
 
                 const newRemaining = remaining - 1;
                 if (newRemaining > 0) {
@@ -2668,6 +3020,12 @@ class GameService {
         const isValid = this.isValidPlacement(x, z, unit.stats.size, unit.playerId, false, isRemote);
         if (!isValid) return;
 
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('TELEPORT', { sourceUnitId, x, z });
+            this.finalizeInteraction();
+            return;
+        }
+
         this.state.units[unitIdx].position = { x, z };
         this.state.units[unitIdx].stats.energy = Math.max(0, this.state.units[unitIdx].stats.energy - 25);
         this.state.units[unitIdx].status.isTeleporting = true;
@@ -2683,7 +3041,6 @@ class GameService {
         }, 500);
 
         if (!isRemote) {
-            this.dispatchAction('TELEPORT', { sourceUnitId, x, z });
             this.finalizeInteraction();
         } else {
             this.notify();
@@ -2928,36 +3285,112 @@ class GameService {
         return true;
     }
 
-    public triggerSuicide(unitId: string) {
+    private resolveRemoteUnitId(locator: RemoteUnitLocator): string | null {
+        if (locator.unitId && this.state.units.some(u => u.id === locator.unitId)) {
+            return locator.unitId;
+        }
+
+        let candidates = this.state.units;
+
+        if (locator.playerId) {
+            candidates = candidates.filter(u => u.playerId === locator.playerId);
+        }
+
+        if (locator.unitType) {
+            candidates = candidates.filter(u => u.type === locator.unitType);
+        }
+
+        if (locator.position) {
+            const exactMatch = candidates.find(u =>
+                u.position.x === locator.position!.x && u.position.z === locator.position!.z
+            );
+            if (exactMatch) return exactMatch.id;
+
+            const sortedByDistance = [...candidates].sort((a, b) => {
+                const aDistance = Math.abs(a.position.x - locator.position!.x) + Math.abs(a.position.z - locator.position!.z);
+                const bDistance = Math.abs(b.position.x - locator.position!.x) + Math.abs(b.position.z - locator.position!.z);
+                return aDistance - bDistance;
+            });
+            return sortedByDistance[0]?.id || null;
+        }
+
+        return candidates[0]?.id || null;
+    }
+
+    public triggerSuicide(unitId: string, isRemote: boolean = false, locator?: RemoteUnitLocator) {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
-        if (this.checkPlayerRestricted(this.state.currentTurn)) return;
-        const unitIndex = this.state.units.findIndex(u => u.id === unitId);
+        if (!isRemote && this.checkPlayerRestricted(this.state.currentTurn)) return;
+
+        let resolvedUnitId = unitId;
+        let unitIndex = this.state.units.findIndex(u => u.id === resolvedUnitId);
+        if (unitIndex === -1 && isRemote) {
+            const fallbackUnitId = this.resolveRemoteUnitId({ ...(locator || {}), unitId });
+            if (fallbackUnitId) {
+                resolvedUnitId = fallbackUnitId;
+                unitIndex = this.state.units.findIndex(u => u.id === resolvedUnitId);
+            }
+        }
+
         if (unitIndex === -1) return;
         const unit = this.state.units[unitIndex];
-        if (unit.playerId !== this.state.currentTurn || unit.type !== UnitType.HEAVY) return;
+        if (!isRemote && (unit.playerId !== this.state.currentTurn || unit.type !== UnitType.HEAVY)) return;
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('SUICIDE_PROTOCOL', {
+                unitId: resolvedUnitId,
+                playerId: unit.playerId,
+                unitType: unit.type,
+                position: { ...unit.position }
+            });
+            return;
+        }
+
+        if (unit.type !== UnitType.HEAVY) return;
         const updatedUnits = [...this.state.units];
         updatedUnits[unitIndex] = { ...unit, status: { ...unit.status, isDying: true } };
         this.log(`> SUICIDE PROTOCOL INITIATED`, unit.playerId);
         this.state = { ...this.state, units: updatedUnits, selectedUnitId: null };
         this.applyAreaDamage(unit.position, 1.5, 50, unit.id);
         this.notify();
-        setTimeout(() => { this.removeUnit(unitId); this.notify(); }, 2000);
+        setTimeout(() => { this.removeUnit(resolvedUnitId); this.notify(); }, 2000);
     }
 
-    public triggerDroneExplosion(unitId: string) {
+    public triggerDroneExplosion(unitId: string, isRemote: boolean = false, locator?: RemoteUnitLocator) {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
-        if (this.checkPlayerRestricted(this.state.currentTurn)) return;
-        const unitIndex = this.state.units.findIndex(u => u.id === unitId);
+        if (!isRemote && this.checkPlayerRestricted(this.state.currentTurn)) return;
+
+        let resolvedUnitId = unitId;
+        let unitIndex = this.state.units.findIndex(u => u.id === resolvedUnitId);
+        if (unitIndex === -1 && isRemote) {
+            const fallbackUnitId = this.resolveRemoteUnitId({ ...(locator || {}), unitId });
+            if (fallbackUnitId) {
+                resolvedUnitId = fallbackUnitId;
+                unitIndex = this.state.units.findIndex(u => u.id === resolvedUnitId);
+            }
+        }
+
         if (unitIndex === -1) return;
         const unit = this.state.units[unitIndex];
-        if (unit.playerId !== this.state.currentTurn || unit.type !== UnitType.SUICIDE_DRONE) return;
+        if (!isRemote && (unit.playerId !== this.state.currentTurn || unit.type !== UnitType.SUICIDE_DRONE)) return;
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('DRONE_DETONATE', {
+                unitId: resolvedUnitId,
+                playerId: unit.playerId,
+                unitType: unit.type,
+                position: { ...unit.position }
+            });
+            return;
+        }
+
+        if (unit.type !== UnitType.SUICIDE_DRONE) return;
         const updatedUnits = [...this.state.units];
         updatedUnits[unitIndex] = { ...unit, status: { ...unit.status, isExploding: true } };
         this.log(`> DETONATING DRONE`, unit.playerId);
         this.state = { ...this.state, units: updatedUnits, selectedUnitId: null };
         this.applyAreaDamage(unit.position, 1.5, 80, unit.id);
         this.notify();
-        setTimeout(() => { this.removeUnit(unitId); this.notify(); }, 1000);
+        setTimeout(() => { this.removeUnit(resolvedUnitId); this.notify(); }, 1000);
     }
 
     private hasLineOfSight(attacker: Unit, target: Unit): boolean {
@@ -3029,12 +3462,10 @@ class GameService {
             return;
         }
 
-        // Dispatch if local
-        if (!isRemote) {
-            this.dispatchAction('ATTACK', {
-                attackerId,
-                targetId
-            });
+        // In multiplayer, wait for authoritative command broadcast before applying.
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('ATTACK', { attackerId, targetId });
+            return;
         }
 
         const activeUnits = [...this.state.units];
@@ -3151,7 +3582,11 @@ class GameService {
 
             if (attacker.type === UnitType.TITAN) {
                 this.log(`> SPLASH DAMAGE DETECTED`, attacker.playerId);
+                // Commit single-target attack changes before resolving splash, then
+                // continue with the post-splash unit snapshot.
+                this.state.units = updatedUnits;
                 this.applyAreaDamage(target.position, 1.5, 25, attacker.id, target.id);
+                updatedUnits = [...this.state.units];
             }
 
         } else {
@@ -3182,17 +3617,15 @@ class GameService {
             return u;
         });
 
-        // Trigger deaths for units that died from splash
-        hitUnits.forEach(u => {
-            // If hp is 0 and wasn't before (we can't check before easy here, but check current state units)
-            // Simple check: if hp is 0 and not marked dying.
-            if (u.stats.hp === 0 && !u.status.isDying) {
-                this.removeUnit(u.id);
-            }
-        });
-
         this.state.units = hitUnits;
-        this.checkWinCondition();
+        const deadUnitIds = hitUnits
+            .filter(u => u.stats.hp === 0 && !u.status.isDying)
+            .map(u => u.id);
+
+        deadUnitIds.forEach((unitId) => this.removeUnit(unitId));
+        if (deadUnitIds.length === 0) {
+            this.checkWinCondition();
+        }
     }
 
     private getEnvironmentalObstacles(): Set<string> {
@@ -3391,6 +3824,17 @@ class GameService {
             return;
         }
 
+        // In multiplayer, send command and wait for authoritative broadcast before mutating state.
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('MOVE', {
+                unitId: selectedUnitId,
+                path: previewPath
+            });
+            this.state.previewPath = [];
+            this.notify();
+            return;
+        }
+
         const stepsToAdd = previewPath.length;
         const layout = [...units];
         // Break mind control if moving
@@ -3417,14 +3861,6 @@ class GameService {
 
         const newUnits = [...layout];
         newUnits[unitIndex] = { ...unit, movePath: [...previewPath], status: { ...unit.status, stepsTaken: unit.status.stepsTaken + stepsToAdd } };
-
-        // Dispatch if local
-        if (!isRemote) {
-            this.dispatchAction('MOVE', {
-                unitId: selectedUnitId,
-                path: previewPath
-            });
-        }
 
         this.pushDebugTrace('confirmMove.action', 'ACTION', `move confirmed with ${stepsToAdd} steps`, {
             unitId: selectedUnitId,
@@ -3483,14 +3919,19 @@ class GameService {
         this.notify();
     }
 
-    public triggerCharacterAction(actionId: string) {
+    public triggerCharacterAction(actionId: string, isRemote: boolean = false) {
         if (this.state.appStatus !== AppStatus.PLAYING) {
             console.log("TriggerAction Skipped: Not Playing");
             return;
         }
         const playerId = this.state.currentTurn;
-        if (this.checkPlayerRestricted(playerId)) {
+        if (!isRemote && this.checkPlayerRestricted(playerId)) {
             console.log("TriggerAction Skipped: Player Restricted");
+            return;
+        }
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('CHARACTER_ACTION_TRIGGER', { actionId });
             return;
         }
 
@@ -3582,18 +4023,26 @@ class GameService {
         this.state.selectedCardId = null;
         this.state.selectedUnitId = null;
 
-        // Dispatch if local
-        if (!isRemote) {
+        // In multiplayer, server owns turn advancement.
+        if (!isRemote && this.state.isMultiplayer) {
             this.dispatchAction('SKIP_TURN', {});
+            this.notify();
+            return;
         }
 
         this.log(`> TURN ENDED BY ${isRemote ? 'OPPONENT' : 'USER'}`, this.state.currentTurn);
         this.endTurn(this.state.units);
     }
 
-    public chooseTalent(talent: Talent) {
+    public chooseTalent(talent: Talent, isRemote: boolean = false) {
         if (this.state.appStatus !== AppStatus.TALENT_SELECTION) return;
         const player = this.state.currentTurn;
+        if (!isRemote && this.state.isMultiplayer && this.state.myPlayerId !== player) return;
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('TALENT_CHOOSE', { playerId: player, talentId: talent.id });
+            return;
+        }
 
         this.state.playerTalents[player] = [...this.state.playerTalents[player], talent];
         this.log(`> TALENT ACQUIRED: ${talent.name.toUpperCase()}`, player);
@@ -3652,13 +4101,30 @@ class GameService {
         this.notify();
     }
 
-    private triggerTalentSelection(playerId: PlayerId) {
+    private generateTalentChoices(): Talent[] {
         const pool = [...TALENT_POOL];
         const shuffled = pool.sort(() => 0.5 - Math.random());
-        const choices = shuffled.slice(0, 3);
+        return shuffled.slice(0, 3);
+    }
+
+    private triggerTalentSelection(playerId: PlayerId, isRemote: boolean = false, forcedChoices?: Talent[]) {
+        if (!isRemote && this.state.isMultiplayer) {
+            if (this.state.myPlayerId !== playerId) return;
+            const choices = this.generateTalentChoices();
+            this.dispatchAction('TALENT_SELECTION_START', { playerId, choices });
+            return;
+        }
+
+        const choices = forcedChoices || this.generateTalentChoices();
+        this.state.currentTurn = playerId;
+        this.state.selectedCardId = this.state.decks[playerId]?.[0]?.id || null;
+        this.state.selectedUnitId = null;
+        this.state.previewPath = [];
+        this.state.interactionState = { mode: 'NORMAL' };
         this.state.talentChoices = choices;
         this.state.appStatus = AppStatus.TALENT_SELECTION;
         this.log(`> LEVEL UP! SELECT TALENT PROTOCOL INITIATED.`, playerId);
+        this.notify();
     }
 
     // --- RECURSIVE AUTO ATTACK ---
@@ -3761,6 +4227,10 @@ class GameService {
                 this.triggerTalentSelection(nextTurn);
             } else {
                 this.log(`> TURN ENDED. PLAYER ${nextTurn} ACTIVE.`);
+            }
+
+            if (this.state.isMultiplayer && this.state.myPlayerId === this.state.currentTurn) {
+                this.dispatchAction('SYNC_STATE', this.buildSyncStatePayload());
             }
 
             this.notify();
