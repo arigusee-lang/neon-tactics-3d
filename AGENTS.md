@@ -20,6 +20,7 @@ This file is for coding agents working in this repository. It documents the curr
 - If a command or workflow is OS-sensitive, say so explicitly and provide the macOS variant only when useful.
 - Use the existing scripts and pipeline. Do not invent replacement workflows unless explicitly asked.
 - If `npm`, `git`, `gcloud`, or similar tools are installed but unavailable because the environment is misconfigured, ask the user to fix PATH or restart the terminal/session. Do not normalize a broken shell by repeatedly using absolute executable paths.
+- On Windows, if an agent must launch `npm` in a detached/background process from PowerShell, use `npm.cmd` or `cmd.exe /c npm ...`; `Start-Process npm` can fail because `npm` is a `.cmd` shim rather than a native executable.
 - Installing project dependencies is allowed when needed.
 - If a command requires elevated access or a less restricted environment, ask for it instead of finding a workaround.
 - This repo currently has no unit tests or formal quality gates. Do not claim test coverage that does not exist.
@@ -93,6 +94,7 @@ Rules for agents:
 - Ask the user to open a second terminal and run `npm run dev`.
 - Run it in a clearly managed detached/background process if your environment supports that cleanly.
 - If your environment cannot safely keep a long-running process alive, stop and ask instead of improvising.
+- If the app starts and the expected ports bind, failure to auto-open a browser window is an environment/tooling limitation, not an app startup failure.
 - Do not replace `npm run dev` with custom wrapper scripts unless the user explicitly asks for repo changes.
 
 Notes for human operators:
