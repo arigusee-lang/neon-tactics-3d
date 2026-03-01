@@ -507,6 +507,33 @@ const Board: React.FC<BoardProps> = ({
             highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
         }
 
+        // --- MODE: MASS RETREAT TARGETING ---
+        else if (interactionState.mode === 'MASS_RETREAT_TARGETING') {
+            isTargetingMode = true;
+            isPlacementMode = true;
+
+            const zoneSize = Math.max(2, Math.min(4, interactionState.terrainBrushSize ?? 2));
+            const footprint = getTerrainBrushFootprint(x, z, zoneSize);
+            footprint.forEach((pos) => placementFootprint.add(`${pos.x},${pos.z}`));
+
+            const hasFriendlyUnit = units.some((unit) => {
+                if (unit.playerId !== interactionState.playerId || unit.status.isDying) return false;
+
+                for (let dx = 0; dx < unit.stats.size; dx++) {
+                    for (let dz = 0; dz < unit.stats.size; dz++) {
+                        if (placementFootprint.has(`${unit.position.x + dx},${unit.position.z + dz}`)) {
+                            return true;
+                        }
+                    }
+                }
+
+                return false;
+            });
+
+            isPlacementValid = hasFriendlyUnit;
+            highlightColor = isPlacementValid ? '#38bdf8' : '#ff0000';
+        }
+
         // --- MODE: CARD PLACEMENT (Normal) ---
         else if (selectedCardId && interactionState.mode === 'NORMAL') {
             const card = gameService.getCard(selectedCardId);

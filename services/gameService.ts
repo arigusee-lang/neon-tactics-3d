@@ -139,6 +139,7 @@ class GameService {
         'PLACE_UNIT',
         'ION_CANNON_STRIKE',
         'FORWARD_BASE_PLACE',
+        'MASS_RETREAT_EXECUTE',
         'FREEZE_TARGET',
         'HEAL_TARGET',
         'RESTORE_ENERGY_TARGET',
@@ -560,6 +561,9 @@ class GameService {
                 break;
             case 'FORWARD_BASE_PLACE':
                 this.handleForwardBasePlacement(data.x, data.z, true, data.playerId);
+                break;
+            case 'MASS_RETREAT_EXECUTE':
+                this.handleMassRetreat(data.x, data.z, true, data.playerId, data.size);
                 break;
             case 'FREEZE_TARGET':
                 this.handleFreezeTarget(data.targetUnitId, true, data.sourceUnitId);
@@ -2248,13 +2252,18 @@ class GameService {
     }
 
     public adjustTerrainBrushSize(delta: number) {
-        if (!this.state.isDevMode) return;
-
         const { mode, terrainTool } = this.state.interactionState;
-        if (mode !== 'TERRAIN_EDIT' || !isBrushEnabledTerrainTool(terrainTool)) return;
+        const isTerrainBrushMode = mode === 'TERRAIN_EDIT' && isBrushEnabledTerrainTool(terrainTool);
+        const isMassRetreatMode = mode === 'MASS_RETREAT_TARGETING';
+        if (!isTerrainBrushMode && !isMassRetreatMode) return;
+        if (!isMassRetreatMode && !this.state.isDevMode) return;
 
-        const currentSize = clampTerrainBrushSize(this.state.interactionState.terrainBrushSize ?? 1);
-        const nextSize = clampTerrainBrushSize(currentSize + delta);
+        const currentSize = isMassRetreatMode
+            ? Math.max(2, Math.min(4, this.state.interactionState.terrainBrushSize ?? 2))
+            : clampTerrainBrushSize(this.state.interactionState.terrainBrushSize ?? 1);
+        const nextSize = isMassRetreatMode
+            ? Math.max(2, Math.min(4, currentSize + delta))
+            : clampTerrainBrushSize(currentSize + delta);
         if (nextSize === currentSize) return;
 
         this.state.interactionState = {
@@ -2262,7 +2271,11 @@ class GameService {
             terrainBrushSize: nextSize
         };
 
-        this.log(`> MAP EDITOR: IMPACT ZONE ${nextSize}x${nextSize}`);
+        if (isMassRetreatMode) {
+            this.log(`> MASS RETREAT ZONE ${nextSize}x${nextSize}`);
+        } else {
+            this.log(`> MAP EDITOR: IMPACT ZONE ${nextSize}x${nextSize}`);
+        }
         this.notify();
     }
 
@@ -2710,6 +2723,16 @@ class GameService {
                 this.notify();
                 return;
             }
+            if (card.type === UnitType.MASS_RETREAT) {
+                this.state.interactionState = {
+                    mode: 'MASS_RETREAT_TARGETING',
+                    playerId,
+                    terrainBrushSize: 2
+                };
+                this.log(`> MASS RETREAT READY: SELECT TARGET ZONE`, playerId);
+                this.notify();
+                return;
+            }
             if (card.type === UnitType.SYSTEM_FREEZE) {
                 // Apply immediately global effect
                 const enemyId = playerId === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
@@ -2938,6 +2961,12 @@ class GameService {
             return;
         }
 
+        if (interactionState.mode === 'MASS_RETREAT_TARGETING') {
+            this.pushDebugTrace('handleTileClick.action', 'ACTION', 'mass retreat execute', { tile, pointer });
+            this.handleMassRetreat(x, z);
+            return;
+        }
+
         const clickedUnit = this.state.units.find(u =>
             x >= u.position.x && x < u.position.x + u.stats.size &&
             z >= u.position.z && z < u.position.z + u.stats.size
@@ -3122,6 +3151,82 @@ class GameService {
         this.log(`> FORWARD BASE ESTABLISHED`, playerId);
         this.finalizeInteraction();
         this.notify();
+    }
+
+    private getUnitsInArea(x: number, z: number, size: number, playerId: PlayerId): Unit[] {
+        const footprint = new Set(
+            getTerrainBrushFootprint(x, z, size).map((pos) => `${pos.x},${pos.z}`)
+        );
+
+        return this.state.units.filter((unit) => {
+            if (unit.playerId !== playerId || unit.status.isDying) return false;
+
+            for (let dx = 0; dx < unit.stats.size; dx++) {
+                for (let dz = 0; dz < unit.stats.size; dz++) {
+                    if (footprint.has(`${unit.position.x + dx},${unit.position.z + dz}`)) {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        });
+    }
+
+    private handleMassRetreat(x: number, z: number, isRemote: boolean = false, forcedPlayerId?: PlayerId, forcedSize?: number) {
+        const playerId = forcedPlayerId || this.state.interactionState.playerId;
+        if (!playerId) return;
+
+        const zoneSize = Math.max(2, Math.min(4, forcedSize || this.state.interactionState.terrainBrushSize || 2));
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('MASS_RETREAT_EXECUTE', { x, z, playerId, size: zoneSize });
+            return;
+        }
+
+        const affectedUnits = this.getUnitsInArea(x, z, zoneSize, playerId);
+        if (affectedUnits.length === 0) {
+            this.log(`> MASS RETREAT FAILED: NO FRIENDLY UNITS IN ZONE`, playerId);
+            this.notify();
+            return;
+        }
+
+        const reservedCells = new Set<string>();
+        let successCount = 0;
+        let delayMs = 0;
+
+        affectedUnits.forEach((unit) => {
+            const retreatPos = this.findNearestRetreatPosition(unit, playerId, reservedCells);
+            if (!retreatPos) {
+                return;
+            }
+
+            for (let dx = 0; dx < unit.stats.size; dx++) {
+                for (let dz = 0; dz < unit.stats.size; dz++) {
+                    reservedCells.add(`${retreatPos.x + dx},${retreatPos.z + dz}`);
+                }
+            }
+
+            const message = `> MASS RETREAT: ${unit.type} RELOCATED TO ${retreatPos.x},${retreatPos.z}`;
+            window.setTimeout(() => {
+                this.executeTeleportRelocation(unit.id, retreatPos, {
+                    playerId,
+                    logMessage: message
+                });
+            }, delayMs);
+            delayMs += 260;
+            successCount++;
+        });
+
+        if (successCount === 0) {
+            this.log(`> MASS RETREAT FAILED: NO VALID DEPLOYMENT ZONES`, playerId);
+            this.notify();
+            return;
+        }
+
+        this.consumeActionCard(playerId, UnitType.MASS_RETREAT, this.state.selectedCardId);
+        this.log(`> MASS RETREAT INITIATED (${successCount}/${affectedUnits.length})`, playerId);
+        this.finalizeInteraction();
     }
 
     public handleFreezeTarget(targetUnitId: string, isRemote: boolean = false, sourceUnitIdOverride?: string) {
@@ -3465,12 +3570,13 @@ class GameService {
         this.notify();
     }
 
-    private findNearestRetreatPosition(unit: Unit, playerId: PlayerId): Position | null {
+    private findNearestRetreatPosition(unit: Unit, playerId: PlayerId, extraOccupied: Set<string> = new Set()): Position | null {
         const size = unit.stats.size;
         const sourceCenterX = unit.position.x + ((size - 1) / 2);
         const sourceCenterZ = unit.position.z + ((size - 1) / 2);
         const candidates: Array<{ position: Position; footprintDistance: number; centerDistance: number; }> = [];
         const occupied = this.getAllOccupiedCells(unit.id);
+        extraOccupied.forEach((key) => occupied.add(key));
 
         Object.keys(this.state.terrain).forEach(key => {
             const [x, z] = key.split(',').map(Number);

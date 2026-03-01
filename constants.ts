@@ -274,6 +274,12 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     description: 'Teleport a friendly unit to the nearest empty deployment zone.',
     cost: 75
   },
+  [UnitType.MASS_RETREAT]: {
+    category: CardCategory.ACTION,
+    name: 'Mass Retreat',
+    description: 'Select a 2x2 to 4x4 area and teleport all friendly units inside it to available deployment zones.',
+    cost: 150
+  },
   [UnitType.LANDING_SABOTAGE]: {
     category: CardCategory.ACTION,
     name: 'Landing Sabotage',

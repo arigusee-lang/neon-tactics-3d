@@ -187,11 +187,13 @@ const App: React.FC = () => {
             const state = gameStateRef.current;
             if (!state) return;
             if (!e.ctrlKey) return;
-            if (!state.isDevMode) return;
 
             const { interactionState } = state;
-            if (interactionState.mode !== 'TERRAIN_EDIT') return;
-            if (!isBrushEnabledTerrainTool(interactionState.terrainTool)) return;
+            const isTerrainBrushMode = state.isDevMode
+                && interactionState.mode === 'TERRAIN_EDIT'
+                && isBrushEnabledTerrainTool(interactionState.terrainTool);
+            const isMassRetreatMode = interactionState.mode === 'MASS_RETREAT_TARGETING';
+            if (!isTerrainBrushMode && !isMassRetreatMode) return;
 
             e.preventDefault();
             e.stopPropagation();
@@ -293,6 +295,10 @@ const App: React.FC = () => {
     const terrainTool = gameState.interactionState.terrainTool;
     const terrainBrushSize = clampTerrainBrushSize(gameState.interactionState.terrainBrushSize ?? 1);
     const terrainImpactText = isBrushEnabledTerrainTool(terrainTool) ? ` | IMPACT ZONE: ${terrainBrushSize}x${terrainBrushSize}` : '';
+    const massRetreatZoneSize = Math.max(2, Math.min(4, gameState.interactionState.terrainBrushSize ?? 2));
+    const massRetreatText = gameState.interactionState.mode === 'MASS_RETREAT_TARGETING'
+        ? ` | RETREAT ZONE: ${massRetreatZoneSize}x${massRetreatZoneSize}`
+        : '';
 
     return (
         <div className="relative w-full h-screen bg-black overflow-hidden font-mono">
@@ -525,6 +531,8 @@ const App: React.FC = () => {
                                         ? `SUMMONING... (${gameState.interactionState.remaining} LEFT)`
                                         : gameState.interactionState.mode === 'ABILITY_FREEZE'
                                             ? `TARGETING CRYO SHOT...`
+                                            : gameState.interactionState.mode === 'MASS_RETREAT_TARGETING'
+                                                ? `SELECT MASS RETREAT ZONE${massRetreatText}`
                                             : gameState.interactionState.mode === 'TERRAIN_EDIT'
                                                 ? `TERRAIN MODIFICATION ACTIVE: ${gameState.interactionState.terrainTool}${terrainImpactText}`
                                                 : 'SELECT DESTINATION...'

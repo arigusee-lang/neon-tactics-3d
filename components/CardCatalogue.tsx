@@ -81,6 +81,9 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
             case UnitType.REPAIR_BOT: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="10" width="16" height="8" rx="2" /><circle cx="8" cy="18" r="3" /><circle cx="16" cy="18" r="3" /><path d="M12 10V6 M8 6h8" /></svg>;
 
             case UnitType.SYSTEM_FREEZE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeDasharray="2 2" /><path d="M12 4V20 M4 12H20" /></svg>;
+            case UnitType.FORWARD_BASE: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="4" width="16" height="16" rx="1" /><path d="M8 8H16V16H8Z" strokeDasharray="2 2" /><path d="M12 2V7 M12 17V22 M2 12H7 M17 12H22" /></svg>;
+            case UnitType.TACTICAL_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M10 6L4 12L10 18" /><path d="M5 12H15" /><rect x="15" y="7" width="5" height="10" rx="1" /><path d="M17.5 4V7 M17.5 17V20" strokeDasharray="2 2" /></svg>;
+            case UnitType.MASS_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M10 6L5 12L10 18" /><path d="M16 6L11 12L16 18" /><path d="M5 12H20" /></svg>;
             case UnitType.LANDING_SABOTAGE: return <svg viewBox="0 0 24 24" {...p}><path d="M4 4H20V20H4Z" /><path d="M4 12H20 M12 4V20" strokeDasharray="2 2" /><path d="M7 7L17 17 M17 7L7 17" /></svg>;
             case UnitType.CONE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L4 20H20L12 2Z" /></svg>;
             case UnitType.WALL: return <svg viewBox="0 0 24 24" {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 6V18 M18 6V18 M2 12H22" /></svg>;
