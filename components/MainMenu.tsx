@@ -203,6 +203,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
   if (
     status === AppStatus.PLAYING ||
+    status === AppStatus.RULEBOOK ||
     status === AppStatus.CARD_CATALOGUE ||
     status === AppStatus.CHARACTER_SELECTION ||
     status === AppStatus.SHOP ||
@@ -238,6 +239,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 >
                   <div className="absolute inset-0 translate-y-full bg-green-400/10 transition-transform duration-300 group-hover:translate-y-0" />
                   Start
+                </button>
+
+                <button
+                  onClick={() => gameService.enterRulebook()}
+                  className="group relative overflow-hidden border border-emerald-500/50 bg-emerald-900/40 px-8 py-3 font-mono font-bold uppercase tracking-widest text-emerald-300 transition-all duration-200 hover:border-emerald-400 hover:bg-emerald-600/20 hover:text-white"
+                >
+                  <div className="absolute inset-0 translate-y-full bg-emerald-400/10 transition-transform duration-300 group-hover:translate-y-0" />
+                  Rulebook
                 </button>
 
                 <button

@@ -1018,7 +1018,17 @@ class GameService {
         this.notify();
     }
 
+    public enterRulebook() {
+        this.state.appStatus = AppStatus.RULEBOOK;
+        this.notify();
+    }
+
     public exitCardCatalogue() {
+        this.state.appStatus = AppStatus.MENU;
+        this.notify();
+    }
+
+    public exitRulebook() {
         this.state.appStatus = AppStatus.MENU;
         this.notify();
     }
@@ -2756,6 +2766,11 @@ class GameService {
                 return;
             }
 
+            if (card.type === UnitType.LOGISTICS_DELAY) {
+                this.applyLogisticsDelay(playerId);
+                return;
+            }
+
             if (card.type === UnitType.TACTICAL_RETREAT) {
                 const targetUnit = this.state.units.find(u =>
                     position.x >= u.position.x && position.x < u.position.x + u.stats.size &&
@@ -3227,6 +3242,25 @@ class GameService {
         this.consumeActionCard(playerId, UnitType.MASS_RETREAT, this.state.selectedCardId);
         this.log(`> MASS RETREAT INITIATED (${successCount}/${affectedUnits.length})`, playerId);
         this.finalizeInteraction();
+    }
+
+    private applyLogisticsDelay(playerId: PlayerId) {
+        let delayedCount = 0;
+
+        [PlayerId.ONE, PlayerId.TWO].forEach((targetPlayerId) => {
+            this.state.pendingOrders[targetPlayerId] = this.state.pendingOrders[targetPlayerId].map((order) => {
+                delayedCount++;
+                return {
+                    ...order,
+                    deliveryTurns: order.deliveryTurns + 3
+                };
+            });
+        });
+
+        this.consumeActionCard(playerId, UnitType.LOGISTICS_DELAY, this.state.selectedCardId);
+        this.log(`> LOGISTICS DELAY: ${delayedCount} IN-TRANSIT ORDERS PUSHED BACK BY 3 TURNS`, playerId);
+        this.checkWinCondition();
+        this.notify();
     }
 
     public handleFreezeTarget(targetUnitId: string, isRemote: boolean = false, sourceUnitIdOverride?: string) {

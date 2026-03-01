@@ -17,6 +17,7 @@ export enum AppStatus {
   MENU = 'MENU',       // Initial load, empty board
   CHARACTER_SELECTION = 'CHARACTER_SELECTION', // Choosing avatar/perks
   MAP_SELECTION = 'MAP_SELECTION', // New menu for choosing map
+  RULEBOOK = 'RULEBOOK', // Viewing the general rules of play
   PLAYING = 'PLAYING', // Active game
   PAUSED = 'PAUSED',   // In-game menu
   GAME_OVER = 'GAME_OVER',
@@ -55,7 +56,8 @@ export enum UnitType {
   FORWARD_BASE = 'FORWARD_BASE',
   TACTICAL_RETREAT = 'TACTICAL_RETREAT',
   MASS_RETREAT = 'MASS_RETREAT',
-  LANDING_SABOTAGE = 'LANDING_SABOTAGE'
+  LANDING_SABOTAGE = 'LANDING_SABOTAGE',
+  LOGISTICS_DELAY = 'LOGISTICS_DELAY'
 }
 
 export interface Position {

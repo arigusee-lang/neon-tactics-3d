@@ -12,6 +12,7 @@ import ShopModal from './components/ShopModal';
 import CardCatalogue from './components/CardCatalogue';
 import DebugPointerInfo from './components/DebugPointerInfo';
 import WinScreen from './components/WinScreen';
+import RulebookModal from './components/RulebookModal';
 import { gameService } from './services/gameService';
 import { GameState, PlayerId, AppStatus, Effect, UnitType, Talent } from './types';
 import { COLORS, CHARACTERS } from './constants';
@@ -248,6 +249,8 @@ const App: React.FC = () => {
                     gameService.closeShop();
                 } else if (gameState.appStatus === AppStatus.CARD_CATALOGUE) {
                     gameService.exitCardCatalogue();
+                } else if (gameState.appStatus === AppStatus.RULEBOOK) {
+                    gameService.exitRulebook();
                 }
             }
 
@@ -369,6 +372,12 @@ const App: React.FC = () => {
             {gameState.appStatus === AppStatus.CARD_CATALOGUE && (
                 <CardCatalogue
                     onClose={() => gameService.exitCardCatalogue()}
+                />
+            )}
+
+            {gameState.appStatus === AppStatus.RULEBOOK && (
+                <RulebookModal
+                    onClose={() => gameService.exitRulebook()}
                 />
             )}
 

@@ -285,5 +285,11 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     name: 'Landing Sabotage',
     description: 'Disable a single enemy landing zone tile so units can no longer deploy there.',
     cost: 100
+  },
+  [UnitType.LOGISTICS_DELAY]: {
+    category: CardCategory.ACTION,
+    name: 'Logistics Delay',
+    description: 'Add 3 turns to every item currently in transit from the shop.',
+    cost: 100
   }
 };

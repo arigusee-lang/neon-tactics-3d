@@ -89,6 +89,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
             case UnitType.TACTICAL_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M9 7L4 12L9 17" /><path d="M4 12H14a6 6 0 1 0 0 12" /></svg>;
             case UnitType.MASS_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M10 6L5 12L10 18" /><path d="M16 6L11 12L16 18" /><path d="M5 12H20" /></svg>;
             case UnitType.LANDING_SABOTAGE: return <svg viewBox="0 0 24 24" {...p}><path d="M4 4H20V20H4Z" /><path d="M4 12H20 M12 4V20" strokeDasharray="2 2" /><path d="M7 7L17 17 M17 7L7 17" /></svg>;
+            case UnitType.LOGISTICS_DELAY: return <svg viewBox="0 0 24 24" {...p}><path d="M4 7H14L18 11V17H4Z" /><path d="M14 7V11H18" /><path d="M8 4V11" strokeDasharray="2 2" /><path d="M20 6V16" /><path d="M17 13L20 16L23 13" /></svg>;
             case UnitType.CONE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L4 20H20L12 2Z" /></svg>;
             case UnitType.WALL: return <svg viewBox="0 0 24 24" {...p}><rect x="2" y="6" width="20" height="12" rx="2" /><path d="M6 6V18 M18 6V18 M2 12H22" /></svg>;
             case UnitType.TOWER: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L6 22H18L12 2Z" /><line x1="12" y1="2" x2="12" y2="22" /><circle cx="12" cy="8" r="2" /></svg>;
