@@ -84,6 +84,11 @@ export interface MapPreviewData extends MapMetadata {
   mapBounds: MapBounds;
 }
 
+export interface TilePulse {
+  key: string;
+  kind: 'SABOTAGE';
+}
+
 export interface UnitStats {
   hp: number;
   maxHp: number;
@@ -147,6 +152,7 @@ export interface UnitStatus {
   isTeleporting?: boolean;
   isExploding?: boolean;
   healPulseAmount?: number | null;
+  energyPulseAmount?: number | null;
   attackTargetId?: string | null;     // Transient: For current animation frame
   autoAttackTargetId?: string | null; // Persistent: For "Nemesis" logic
   neutralHasAttacked?: boolean;
@@ -277,6 +283,7 @@ export interface GameState {
   systemMessage: string | null;
   actionLog: LogEntry[];
   interactionState: InteractionState;
+  tilePulse: TilePulse | null;
 
   // Player Level Effects
   playerEffects: { [key in PlayerId]: Effect[] };

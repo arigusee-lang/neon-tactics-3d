@@ -525,6 +525,7 @@ class GameService {
                 [PlayerId.NEUTRAL]: this.state.playerEffects[PlayerId.NEUTRAL].map((effect) => ({ ...effect }))
             },
             interactionState: { ...this.state.interactionState },
+            tilePulse: this.state.tilePulse ? { ...this.state.tilePulse } : null,
             winner: this.state.winner
         };
     }
@@ -658,6 +659,7 @@ class GameService {
                 if (data.playerEffects) {
                     this.state.playerEffects = data.playerEffects;
                 }
+                this.state.tilePulse = data.tilePulse ? { ...data.tilePulse } : null;
                 if (typeof data.winner !== 'undefined') {
                     this.state.winner = data.winner;
                 }
@@ -738,6 +740,7 @@ class GameService {
             systemMessage: "WAITING FOR START COMMAND",
             actionLog: [initialLog],
             interactionState: { mode: 'NORMAL' },
+            tilePulse: null,
             playerEffects: {
                 [PlayerId.ONE]: [],
                 [PlayerId.TWO]: [],
@@ -1910,11 +1913,59 @@ class GameService {
         }
     }
 
+    private triggerSupportPulse(targetUnitId: string, amount: number, pulseType: 'HEAL' | 'ENERGY') {
+        const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
+        if (targetIdx === -1) return;
+
+        this.state.units[targetIdx] = {
+            ...this.state.units[targetIdx],
+            status: {
+                ...this.state.units[targetIdx].status,
+                healPulseAmount: pulseType === 'HEAL' ? amount : null,
+                energyPulseAmount: pulseType === 'ENERGY' ? amount : null
+            }
+        };
+
+        this.notify();
+        this.replicateAuthoritativeState();
+
+        setTimeout(() => {
+            const cleanupIdx = this.state.units.findIndex(u => u.id === targetUnitId);
+            if (cleanupIdx === -1) return;
+
+            this.state.units[cleanupIdx] = {
+                ...this.state.units[cleanupIdx],
+                status: {
+                    ...this.state.units[cleanupIdx].status,
+                    healPulseAmount: null,
+                    energyPulseAmount: null
+                }
+            };
+            this.notify();
+            this.replicateAuthoritativeState();
+        }, 1200);
+    }
+
+    private triggerTilePulse(key: string, kind: 'SABOTAGE') {
+        this.state.tilePulse = { key, kind };
+        this.notify();
+        this.replicateAuthoritativeState();
+
+        setTimeout(() => {
+            if (this.state.tilePulse?.key !== key || this.state.tilePulse?.kind !== kind) return;
+            this.state.tilePulse = null;
+            this.notify();
+            this.replicateAuthoritativeState();
+        }, 900);
+    }
+
     private processStructures(playerId: PlayerId) {
         const structures = this.state.units.filter(u =>
             u.playerId === playerId &&
             u.type === UnitType.CHARGING_STATION
         );
+
+        const energyRestores = new Map<string, number>();
 
         structures.forEach(station => {
             const sx = station.position.x;
@@ -1938,12 +1989,23 @@ class GameService {
                     fz < sz + size + 1 && fz + fSize > sz - 1
                 );
 
-                if (overlaps) {
-                    const restore = 25;
-                    friendly.stats.energy = Math.min(friendly.stats.maxEnergy, friendly.stats.energy + restore);
-                    this.log(`> INDUCTIVE CHARGE: +${restore} ENERGY to ${friendly.type}`, playerId);
-                }
+                if (!overlaps) return;
+
+                energyRestores.set(friendly.id, (energyRestores.get(friendly.id) || 0) + 25);
             });
+        });
+
+        energyRestores.forEach((restoreAmount, unitId) => {
+            const targetIdx = this.state.units.findIndex(u => u.id === unitId);
+            if (targetIdx === -1) return;
+
+            const target = this.state.units[targetIdx];
+            const appliedRestore = Math.min(restoreAmount, target.stats.maxEnergy - target.stats.energy);
+            if (appliedRestore <= 0) return;
+
+            this.state.units[targetIdx].stats.energy = Math.min(target.stats.maxEnergy, target.stats.energy + restoreAmount);
+            this.log(`> INDUCTIVE CHARGE: +${appliedRestore} ENERGY to ${target.type}`, playerId);
+            this.triggerSupportPulse(unitId, appliedRestore, 'ENERGY');
         });
     }
 
@@ -2646,8 +2708,7 @@ class GameService {
                 this.state.selectedCardId = null;
 
                 this.log(`> LANDING SABOTAGE: ENEMY ZONE DISABLED AT ${position.x},${position.z}`, playerId);
-                this.notify();
-                this.replicateAuthoritativeState();
+                this.triggerTilePulse(tileKey, 'SABOTAGE');
                 return;
             }
             return;
@@ -3039,7 +3100,7 @@ class GameService {
             healAmount += source.level;
         }
 
-        this.animateSupportAction(targetUnitId, healAmount, () => {
+        this.animateSupportAction(targetUnitId, healAmount, 'HEAL', () => {
             const latestSourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
             const latestTargetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
             if (latestSourceIdx === -1 || latestTargetIdx === -1) return;
@@ -3097,13 +3158,22 @@ class GameService {
         }
 
         const restoreAmount = 50;
-        const newEnergy = Math.min(target.stats.maxEnergy, target.stats.energy + restoreAmount);
 
-        this.state.units[targetIdx].stats.energy = newEnergy;
-        this.state.units[sourceIdx].stats.energy -= 25;
+        this.animateSupportAction(targetUnitId, restoreAmount, 'ENERGY', () => {
+            const latestSourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
+            const latestTargetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
+            if (latestSourceIdx === -1 || latestTargetIdx === -1) return;
 
-        this.log(`> ENERGY TRANSFER COMPLETE: +${restoreAmount} EN`, source.playerId);
-        this.finalizeInteraction();
+            const latestSource = this.state.units[latestSourceIdx];
+            const latestTarget = this.state.units[latestTargetIdx];
+            const newEnergy = Math.min(latestTarget.stats.maxEnergy, latestTarget.stats.energy + restoreAmount);
+
+            this.state.units[latestTargetIdx].stats.energy = newEnergy;
+            this.state.units[latestSourceIdx].stats.energy -= 25;
+
+            this.log(`> ENERGY TRANSFER COMPLETE: +${restoreAmount} EN`, latestSource.playerId);
+            this.finalizeInteraction();
+        });
     }
 
     public handleMindControlTarget(targetUnitId: string, isRemote: boolean = false, sourceUnitIdOverride?: string) {
@@ -4127,41 +4197,23 @@ class GameService {
         return true;
     }
 
-    private animateSupportAction(targetUnitId: string, healAmount: number, onResolve: () => void) {
+    private animateSupportAction(
+        targetUnitId: string,
+        amount: number,
+        pulseType: 'HEAL' | 'ENERGY',
+        onResolve: () => void
+    ) {
         const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
         if (targetIdx === -1) {
             onResolve();
             return;
         }
 
-        this.state.units[targetIdx] = {
-            ...this.state.units[targetIdx],
-            status: {
-                ...this.state.units[targetIdx].status,
-                healPulseAmount: healAmount
-            }
-        };
-        this.notify();
-        this.replicateAuthoritativeState();
+        this.triggerSupportPulse(targetUnitId, amount, pulseType);
 
         setTimeout(() => {
             onResolve();
         }, 350);
-
-        setTimeout(() => {
-            const cleanupIdx = this.state.units.findIndex(u => u.id === targetUnitId);
-            if (cleanupIdx !== -1) {
-                this.state.units[cleanupIdx] = {
-                    ...this.state.units[cleanupIdx],
-                    status: {
-                        ...this.state.units[cleanupIdx].status,
-                        healPulseAmount: null
-                    }
-                };
-            }
-            this.notify();
-            this.replicateAuthoritativeState();
-        }, 700);
     }
 
     private executeTeleportRelocation(

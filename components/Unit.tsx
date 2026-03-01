@@ -23,6 +23,7 @@ import HackerModel from './HackerModel';
 import ArcPortalModelV2 from './ArcPortalModelV2';
 import RepairBotModel from './RepairBotModel';
 import SpikeModel from './SpikeModel';
+import ScoutDroneModel from './ScoutDroneModel';
 import { gameService } from '../services/gameService';
 
 interface UnitProps {
@@ -349,14 +350,15 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
 
     const [hovered, setHovered] = useState(false);
     const [isMoving, setIsMoving] = useState(false);
-    const [healPulseAmount, setHealPulseAmount] = useState<number | null>(null);
+    const [supportPulseAmount, setSupportPulseAmount] = useState<number | null>(null);
+    const [supportPulseKind, setSupportPulseKind] = useState<'HEAL' | 'ENERGY' | null>(null);
 
     const [attackTargetPos, setAttackTargetPos] = useState<Vector3 | null>(null);
     const [mindControlTargetPos, setMindControlTargetPos] = useState<Vector3 | null>(null);
     const attackStartRef = useRef(0);
-    const healPulseStartRef = useRef<number | null>(null);
-    const healPulseLightRef = useRef<THREE.PointLight>(null);
-    const healPulseTextRef = useRef<HTMLDivElement>(null);
+    const supportPulseStartRef = useRef<number | null>(null);
+    const supportPulseLightRef = useRef<THREE.PointLight>(null);
+    const supportPulseTextRef = useRef<HTMLDivElement>(null);
 
     const processingStep = useRef(false);
 
@@ -458,18 +460,25 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
     }, [data.status.mindControlTargetId, data.position]); // Re-calc if hacker moves too (though he likely won't move while channeling)
 
     useEffect(() => {
-        if (!data.status.healPulseAmount || data.status.healPulseAmount <= 0) return;
+        const healAmount = data.status.healPulseAmount || 0;
+        const energyAmount = data.status.energyPulseAmount || 0;
+        const nextKind = healAmount > 0 ? 'HEAL' : energyAmount > 0 ? 'ENERGY' : null;
+        const nextAmount = healAmount > 0 ? healAmount : energyAmount > 0 ? energyAmount : null;
 
-        healPulseStartRef.current = performance.now();
-        setHealPulseAmount(data.status.healPulseAmount);
+        if (!nextKind || !nextAmount) return;
+
+        supportPulseStartRef.current = performance.now();
+        setSupportPulseKind(nextKind);
+        setSupportPulseAmount(nextAmount);
 
         const timeoutId = window.setTimeout(() => {
-            setHealPulseAmount(null);
-            healPulseStartRef.current = null;
+            setSupportPulseAmount(null);
+            setSupportPulseKind(null);
+            supportPulseStartRef.current = null;
         }, 1200);
 
         return () => window.clearTimeout(timeoutId);
-    }, [data.status.healPulseAmount]);
+    }, [data.status.healPulseAmount, data.status.energyPulseAmount]);
 
 
     useEffect(() => {
@@ -488,15 +497,15 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             return;
         }
 
-        if (healPulseAmount && healPulseStartRef.current) {
-            const progress = Math.min((performance.now() - healPulseStartRef.current) / 1150, 1);
-            if (healPulseLightRef.current) {
-                healPulseLightRef.current.intensity = (1 - progress) * 2.8;
-                healPulseLightRef.current.distance = 1.6 + ((1 - progress) * 1.2);
+        if (supportPulseAmount && supportPulseStartRef.current) {
+            const progress = Math.min((performance.now() - supportPulseStartRef.current) / 1150, 1);
+            if (supportPulseLightRef.current) {
+                supportPulseLightRef.current.intensity = (1 - progress) * 2.8;
+                supportPulseLightRef.current.distance = 1.6 + ((1 - progress) * 1.2);
             }
-            if (healPulseTextRef.current) {
-                healPulseTextRef.current.style.opacity = `${1 - progress}`;
-                healPulseTextRef.current.style.transform = `translateY(${-progress * 24}px) scale(${1 + ((1 - progress) * 0.08)})`;
+            if (supportPulseTextRef.current) {
+                supportPulseTextRef.current.style.opacity = `${1 - progress}`;
+                supportPulseTextRef.current.style.transform = `translateY(${-progress * 24}px) scale(${1 + ((1 - progress) * 0.08)})`;
             }
         }
 
@@ -587,50 +596,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             case EUnitType.HACKER: return <HackerModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} isMindControlling={!!data.status.mindControlTargetId} />;
             case EUnitType.REPAIR_BOT: return <RepairBotModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId || (data.status.attacksUsed > 0 && !data.status.attackTargetId)} />; // attacksUsed check for repair anim? 
 
-            case EUnitType.BOX:
-                return (
-                    <group ref={internalRef}>
-                        <mesh castShadow>
-                            <boxGeometry args={[0.2, 0.15, 0.25]} />
-                            {renderMatrixMat(0.9)}
-                        </mesh>
-                        <mesh position={[0, 0, 0.13]}>
-                            <planeGeometry args={[0.1, 0.05]} />
-                            <meshBasicMaterial color={playerColor} />
-                        </mesh>
-                        <group>
-                            <mesh position={[0.25, 0, 0.25]} rotation={[0, Math.PI / 4, 0]}>
-                                <boxGeometry args={[0.4, 0.02, 0.05]} />
-                                <meshStandardMaterial color="#333" />
-                            </mesh>
-                            <mesh position={[-0.25, 0, 0.25]} rotation={[0, -Math.PI / 4, 0]}>
-                                <boxGeometry args={[0.4, 0.02, 0.05]} />
-                                <meshStandardMaterial color="#333" />
-                            </mesh>
-                            <mesh position={[0.25, 0, -0.25]} rotation={[0, -Math.PI / 4, 0]}>
-                                <boxGeometry args={[0.4, 0.02, 0.05]} />
-                                <meshStandardMaterial color="#333" />
-                            </mesh>
-                            <mesh position={[-0.25, 0, -0.25]} rotation={[0, Math.PI / 4, 0]}>
-                                <boxGeometry args={[0.4, 0.02, 0.05]} />
-                                <meshStandardMaterial color="#333" />
-                            </mesh>
-                        </group>
-                        {[
-                            [0.4, 0.05, 0.4], [-0.4, 0.05, 0.4],
-                            [0.4, 0.05, -0.4], [-0.4, 0.05, -0.4]
-                        ].map((pos, i) => (
-                            <mesh key={i} position={pos as any}>
-                                <cylinderGeometry args={[0.12, 0.12, 0.01, 8]} />
-                                <meshBasicMaterial color={playerColor} wireframe opacity={0.4} transparent />
-                            </mesh>
-                        ))}
-                        <mesh position={[0, -0.15, 0]}>
-                            <boxGeometry args={[0.1, 0.1, 0.1]} />
-                            {renderMatrixMat(0.5)}
-                        </mesh>
-                    </group>
-                );
+            case EUnitType.BOX: return <ScoutDroneModel color={playerColor} isMoving={isMoving} isDying={isDying} />;
 
             case EUnitType.SPIKE: return <SpikeModel color={playerColor} isAttacking={!!data.status.attackTargetId} />;
 
@@ -665,6 +631,13 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
     const baseHeight = getUnitBaseHeight(data.position.x, data.position.z);
     const ringY = -baseHeight + 0.05;
     const frozenY = (size / 2) - 0.5;
+    const supportPulseColor = supportPulseKind === 'ENERGY' ? '#a855f7' : '#34d399';
+    const supportPulseClassName = supportPulseKind === 'ENERGY'
+        ? 'rounded border border-purple-300/70 bg-purple-500/15 px-2 py-0.5 text-[11px] font-black text-purple-300 shadow-[0_0_16px_rgba(168,85,247,0.35)] backdrop-blur-sm'
+        : 'rounded border border-emerald-300/70 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-black text-emerald-300 shadow-[0_0_16px_rgba(52,211,153,0.35)] backdrop-blur-sm';
+    const supportPulseLabel = supportPulseKind === 'ENERGY'
+        ? `+${supportPulseAmount} EN`
+        : `+${supportPulseAmount} HP`;
 
     const projectileStartOffset = data.type === EUnitType.TOWER
         ? new Vector3(0, 2.3, 0)
@@ -704,23 +677,23 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
 
             {isFrozen && <mesh position={[0, frozenY, 0]}><boxGeometry args={[size, size, size]} /><meshBasicMaterial color="#00ffff" transparent opacity={0.3} wireframe /></mesh>}
             {hasShield && <mesh position={[0, frozenY, 0]}><sphereGeometry args={[size * 0.7, 16, 16]} /><meshBasicMaterial color="#fbbf24" transparent opacity={0.3} wireframe /></mesh>}
-            {healPulseAmount && (
+            {supportPulseAmount && (
                 <>
                     <pointLight
-                        ref={healPulseLightRef}
+                        ref={supportPulseLightRef}
                         position={[0, size > 1 ? 1.6 : 1.1, 0]}
-                        color="#34d399"
+                        color={supportPulseColor}
                         intensity={2.8}
                         distance={2.6}
                         decay={2}
                     />
                     <Html position={[0, size > 1 ? 3.6 : 2.5, 0]} center distanceFactor={12} zIndexRange={[110, 0]} pointerEvents="none">
                         <div
-                            ref={healPulseTextRef}
-                            className="rounded border border-emerald-300/70 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-black text-emerald-300 shadow-[0_0_16px_rgba(52,211,153,0.35)] backdrop-blur-sm"
+                            ref={supportPulseTextRef}
+                            className={supportPulseClassName}
                             style={{ opacity: 1, transform: 'translateY(0px) scale(1)' }}
                         >
-                            +{healPulseAmount} HP
+                            {supportPulseLabel}
                         </div>
                     </Html>
                 </>

@@ -4,9 +4,10 @@ import { useFrame } from '@react-three/fiber';
 import { TILE_SIZE, TILE_SPACING, BOARD_OFFSET, COLORS, CARD_CONFIG, ELEVATION_HEIGHT } from '../constants';
 import { gameService } from '../services/gameService';
 import Tile from './Tile';
-import { Unit, PlayerId, Position, CardCategory, InteractionState, TerrainData, Collectible, MapBounds } from '../types';
+import { Unit, PlayerId, Position, CardCategory, InteractionState, TerrainData, Collectible, MapBounds, TilePulse } from '../types';
 import { Html } from '@react-three/drei';
 import { clampTerrainBrushSize, getTerrainBrushFootprint, isBrushEnabledTerrainTool } from '../utils/terrainBrush';
+import * as THREE from 'three';
 
 interface BoardProps {
     revealedTiles: string[];
@@ -127,6 +128,54 @@ const EnergyCellModel: React.FC = () => {
     );
 }
 
+const TilePulseEffect: React.FC<{ position: [number, number, number]; kind: 'SABOTAGE'; }> = ({ position, kind }) => {
+    const ringRef = useRef<THREE.Mesh>(null);
+    const labelRef = useRef<HTMLDivElement>(null);
+    const startTimeRef = useRef<number | null>(null);
+
+    useFrame((state) => {
+        if (startTimeRef.current === null) {
+            startTimeRef.current = state.clock.elapsedTime;
+        }
+
+        const elapsed = state.clock.elapsedTime - (startTimeRef.current || state.clock.elapsedTime);
+        const progress = Math.min(elapsed / 0.85, 1);
+
+        if (ringRef.current) {
+            ringRef.current.scale.setScalar(0.7 + (progress * 1.8));
+            const material = ringRef.current.material as THREE.MeshBasicMaterial;
+            material.opacity = (1 - progress) * 0.75;
+        }
+
+        if (labelRef.current) {
+            labelRef.current.style.opacity = `${1 - progress}`;
+            labelRef.current.style.transform = `translateY(${-progress * 18}px) scale(${1 + ((1 - progress) * 0.06)})`;
+        }
+    });
+
+    const color = kind === 'SABOTAGE' ? '#ef4444' : '#ffffff';
+    const label = kind === 'SABOTAGE' ? 'ZONE DISABLED' : 'PULSE';
+
+    return (
+        <group position={position}>
+            <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
+                <ringGeometry args={[0.35, 0.62, 24]} />
+                <meshBasicMaterial color={color} transparent opacity={0.75} side={THREE.DoubleSide} />
+            </mesh>
+            <pointLight position={[0, 0.35, 0]} color={color} intensity={2.4} distance={2.6} decay={2} />
+            <Html position={[0, 0.45, 0]} center pointerEvents="none">
+                <div
+                    ref={labelRef}
+                    className="rounded border border-red-400/70 bg-red-500/15 px-2 py-0.5 text-[10px] font-black tracking-[0.18em] text-red-300 shadow-[0_0_16px_rgba(239,68,68,0.35)] backdrop-blur-sm"
+                    style={{ opacity: 1, transform: 'translateY(0px) scale(1)' }}
+                >
+                    {label}
+                </div>
+            </Html>
+        </group>
+    );
+};
+
 const Board: React.FC<BoardProps> = ({
     revealedTiles,
     units,
@@ -141,6 +190,7 @@ const Board: React.FC<BoardProps> = ({
     // Hack to access internal game state for interaction mode via a hook-like pattern 
     const interactionState = (gameService as any).state.interactionState as InteractionState;
     const terrainData = (gameService as any).state.terrain as Record<string, TerrainData>;
+    const tilePulse = (gameService as any).state.tilePulse as TilePulse | null;
 
     const [hoveredTile, setHoveredTile] = useState<Position | null>(null);
 
@@ -620,6 +670,10 @@ const Board: React.FC<BoardProps> = ({
                                 <ringGeometry args={[0.3, 0.4, 4]} />
                                 <meshBasicMaterial color="#00ffff" />
                             </mesh>
+                        )}
+
+                        {tilePulse?.key === key && (
+                            <TilePulseEffect position={[worldX, visualHeight + 0.08, worldZ]} kind={tilePulse.kind} />
                         )}
 
                     </React.Fragment>
