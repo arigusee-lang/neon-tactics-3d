@@ -68,11 +68,11 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
             <group position={[0, 0.1, 0]}>
                 <mesh castShadow receiveShadow>
                     <cylinderGeometry args={[0.4, 0.5, 0.2, 8]} />
-                    <meshStandardMaterial color="#222" metalness={0.8} roughness={0.2} />
+                    <meshStandardMaterial ref={addMatRef} color="#222" metalness={0.8} roughness={0.2} />
                 </mesh>
                 <mesh position={[0, 0.15, 0]}>
                     <cylinderGeometry args={[0.3, 0.35, 0.1, 8]} />
-                    <meshStandardMaterial color="#111" />
+                    <meshStandardMaterial ref={addMatRef} color="#111" />
                     <Edges color={color} threshold={15} scale={1} />
                 </mesh>
             </group>
@@ -83,6 +83,7 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                 <mesh>
                     <cylinderGeometry args={[0.08, 0.08, 2.0, 8]} />
                     <meshStandardMaterial
+                        ref={addMatRef}
                         color={color}
                         emissive={color}
                         emissiveIntensity={2}
@@ -95,6 +96,7 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                 <mesh>
                     <cylinderGeometry args={[0.15, 0.15, 2.1, 8]} />
                     <meshStandardMaterial
+                        ref={addMatRef}
                         color="#88ccff"
                         transparent
                         opacity={0.3}
@@ -110,13 +112,13 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                 <group key={i} rotation={[0, rot, 0]}>
                     <mesh position={[0.22, 1.2, 0]}>
                         <boxGeometry args={[0.05, 1.8, 0.05]} />
-                        <meshStandardMaterial color="#333" metalness={0.6} roughness={0.4} />
+                        <meshStandardMaterial ref={addMatRef} color="#333" metalness={0.6} roughness={0.4} />
                     </mesh>
                     {/* Connection Nodes */}
                     {[0.4, 1.2, 2.0].map((y, j) => (
                         <mesh key={j} position={[0.22, y, 0]}>
                             <boxGeometry args={[0.08, 0.1, 0.08]} />
-                            <meshStandardMaterial color="#111" />
+                            <meshStandardMaterial ref={addMatRef} color="#111" />
                         </mesh>
                     ))}
                 </group>
@@ -129,7 +131,7 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                     {[0, Math.PI].map((rot, i) => (
                         <mesh key={i} rotation={[0, rot, 0]} position={[0, 0, 0.35]}>
                             <boxGeometry args={[0.4, 0.05, 0.1]} />
-                            <meshStandardMaterial color="#444" metalness={0.8} />
+                            <meshStandardMaterial ref={addMatRef} color="#444" metalness={0.8} />
                             <mesh position={[0, 0, 0.06]}>
                                 <planeGeometry args={[0.3, 0.02]} />
                                 <meshBasicMaterial color={color} side={THREE.DoubleSide} />
@@ -141,7 +143,7 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                 {/* Middle Spinner */}
                 <mesh rotation={[Math.PI / 2, 0, 0]}>
                     <torusGeometry args={[0.3, 0.02, 4, 24]} />
-                    <meshStandardMaterial color={color} emissive={color} emissiveIntensity={1} />
+                    <meshStandardMaterial ref={addMatRef} color={color} emissive={color} emissiveIntensity={1} />
                 </mesh>
             </group>
 
@@ -150,6 +152,7 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                 <mesh ref={coreRef}>
                     <octahedronGeometry args={[0.2]} />
                     <meshStandardMaterial
+                        ref={addMatRef}
                         color={color}
                         emissive={color}
                         emissiveIntensity={3}

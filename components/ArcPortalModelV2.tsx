@@ -85,9 +85,27 @@ const FluxTowerReplica = ({ position, scale = 1, color }: { position: [number, n
 };
 
 const ArcPortalModelV2: React.FC<ArcPortalModelV2Props> = ({ color, isDying }) => {
+    const groupRef = useRef<Group>(null);
+    const pedestalRef = useRef<Group>(null);
+    const leftTowerRef = useRef<Group>(null);
+    const rightTowerRef = useRef<Group>(null);
+    const leftUrnRef = useRef<Group>(null);
+    const rightUrnRef = useRef<Group>(null);
+    const portalAssemblyRef = useRef<Group>(null);
+    const hoodRef = useRef<Group>(null);
     const portalRef = useRef<Mesh>(null);
     const topLightsRef = useRef<Group>(null);
     const urnGlowRef = useRef<Group>(null);
+    const deathStartRef = useRef<number | null>(null);
+    const deathVectors = useMemo(() => ({
+        pedestal: new THREE.Vector3(0, -0.12, 0.04),
+        leftTower: new THREE.Vector3(-0.22, 0.18, -0.08),
+        rightTower: new THREE.Vector3(0.22, 0.18, -0.08),
+        leftUrn: new THREE.Vector3(-0.28, 0.14, 0.16),
+        rightUrn: new THREE.Vector3(0.28, 0.14, 0.16),
+        portalAssembly: new THREE.Vector3(0, 0.26, -0.18),
+        hood: new THREE.Vector3(0, 0.22, -0.1)
+    }), []);
 
     // --- GEOMETRY ---
     const { portalGeometry, topCoverGeometry } = useMemo(() => {
@@ -131,8 +149,90 @@ const ArcPortalModelV2: React.FC<ArcPortalModelV2Props> = ({ color, isDying }) =
         return { portalGeometry: portalGeo, topCoverGeometry: hoodGeo };
     }, []);
 
-    useFrame((state) => {
+    useFrame((state, delta) => {
         const time = state.clock.elapsedTime;
+
+        if (isDying) {
+            if (deathStartRef.current === null) {
+                deathStartRef.current = time;
+            }
+            const elapsed = time - deathStartRef.current;
+            const fade = Math.max(0, 1 - elapsed * 1.2);
+
+            if (groupRef.current) {
+                groupRef.current.traverse((child) => {
+                    if (!(child instanceof Mesh)) return;
+
+                    const materials = Array.isArray(child.material) ? child.material : [child.material];
+                    materials.forEach((material) => {
+                        if (material instanceof MeshStandardMaterial) {
+                            if (material.userData.baseOpacity === undefined) {
+                                material.userData.baseOpacity = material.opacity;
+                            }
+                            if (material.userData.baseEmissiveIntensity === undefined) {
+                                material.userData.baseEmissiveIntensity = material.emissiveIntensity;
+                            }
+                            material.transparent = true;
+                            material.opacity = material.userData.baseOpacity * fade;
+                            material.emissiveIntensity = material.userData.baseEmissiveIntensity * fade;
+                        } else if (material instanceof THREE.MeshBasicMaterial) {
+                            if (material.userData.baseOpacity === undefined) {
+                                material.userData.baseOpacity = material.opacity;
+                            }
+                            material.transparent = true;
+                            material.opacity = material.userData.baseOpacity * fade;
+                        }
+                    });
+                });
+            }
+
+            if (pedestalRef.current) {
+                pedestalRef.current.position.addScaledVector(deathVectors.pedestal, delta * 2.5);
+                pedestalRef.current.rotation.x = Math.min(0.18, pedestalRef.current.rotation.x + delta * 0.15);
+            }
+            if (leftTowerRef.current) {
+                leftTowerRef.current.position.addScaledVector(deathVectors.leftTower, delta * 3.2);
+                leftTowerRef.current.rotation.z -= delta * 1.4;
+                leftTowerRef.current.rotation.x += delta * 0.8;
+            }
+            if (rightTowerRef.current) {
+                rightTowerRef.current.position.addScaledVector(deathVectors.rightTower, delta * 3.2);
+                rightTowerRef.current.rotation.z += delta * 1.4;
+                rightTowerRef.current.rotation.x += delta * 0.8;
+            }
+            if (leftUrnRef.current) {
+                leftUrnRef.current.position.addScaledVector(deathVectors.leftUrn, delta * 4.2);
+                leftUrnRef.current.rotation.z -= delta * 2.2;
+                leftUrnRef.current.rotation.x += delta * 1.1;
+            }
+            if (rightUrnRef.current) {
+                rightUrnRef.current.position.addScaledVector(deathVectors.rightUrn, delta * 4.2);
+                rightUrnRef.current.rotation.z += delta * 2.2;
+                rightUrnRef.current.rotation.x += delta * 1.1;
+            }
+            if (portalAssemblyRef.current) {
+                portalAssemblyRef.current.position.addScaledVector(deathVectors.portalAssembly, delta * 3.4);
+                portalAssemblyRef.current.rotation.x -= delta * 0.7;
+            }
+            if (hoodRef.current) {
+                hoodRef.current.position.addScaledVector(deathVectors.hood, delta * 4);
+                hoodRef.current.rotation.x -= delta * 1.8;
+            }
+            if (portalRef.current) {
+                portalRef.current.scale.setScalar(Math.max(0.12, 1 - elapsed * 0.55));
+                portalRef.current.rotation.z += delta * 1.4;
+            }
+            if (topLightsRef.current) {
+                topLightsRef.current.rotation.y += delta * 3.5;
+            }
+            if (urnGlowRef.current) {
+                urnGlowRef.current.rotation.y -= delta * 1.8;
+            }
+            return;
+        }
+
+        deathStartRef.current = null;
+
         if (portalRef.current) {
             const pulse = 1.2 + Math.sin(time * 1.5) * 0.3;
             (portalRef.current.material as MeshStandardMaterial).emissiveIntensity = pulse;
@@ -163,8 +263,6 @@ const ArcPortalModelV2: React.FC<ArcPortalModelV2Props> = ({ color, isDying }) =
         }
     });
 
-    if (isDying) return null;
-
     // Colors
     const stoneColor = "#151515";
     const metalColor = "#333";
@@ -179,9 +277,9 @@ const ArcPortalModelV2: React.FC<ArcPortalModelV2Props> = ({ color, isDying }) =
     );
 
     return (
-        <group>
+        <group ref={groupRef}>
             {/* 1. PEDESTAL / PLATFORM */}
-            <group position={[0, 0.2, -0.3]}>
+            <group ref={pedestalRef} position={[0, 0.2, -0.3]}>
                 {/* Main Slab */}
                 <mesh position={[0, 0, 0]} receiveShadow>
                     <boxGeometry args={[3.4, 0.4, 1.6]} />
@@ -244,12 +342,16 @@ const ArcPortalModelV2: React.FC<ArcPortalModelV2Props> = ({ color, isDying }) =
             </group>
 
             {/* 4. FLUX TOWERS (Pulled Closer) */}
-            <FluxTowerReplica position={[-1.1, 0.4, -0.3]} scale={0.9} color={color} />
-            <FluxTowerReplica position={[1.1, 0.4, -0.3]} scale={0.9} color={color} />
+            <group ref={leftTowerRef}>
+                <FluxTowerReplica position={[-1.1, 0.4, -0.3]} scale={0.9} color={color} />
+            </group>
+            <group ref={rightTowerRef}>
+                <FluxTowerReplica position={[1.1, 0.4, -0.3]} scale={0.9} color={color} />
+            </group>
 
             {/* URNS (Near Towers) */}
             <group ref={urnGlowRef}>
-                <group position={[-1.1, 0.4, 0.3]}>
+                <group ref={leftUrnRef} position={[-1.1, 0.4, 0.3]}>
                     <mesh castShadow>
                         <cylinderGeometry args={[0.15, 0.1, 0.3, 8]} />
                         <meshStandardMaterial color={urnColor} />
@@ -259,7 +361,7 @@ const ArcPortalModelV2: React.FC<ArcPortalModelV2Props> = ({ color, isDying }) =
                         <meshStandardMaterial color={color} emissive={color} emissiveIntensity={2} />
                     </mesh>
                 </group>
-                <group position={[1.1, 0.4, 0.3]}>
+                <group ref={rightUrnRef} position={[1.1, 0.4, 0.3]}>
                     <mesh castShadow>
                         <cylinderGeometry args={[0.15, 0.1, 0.3, 8]} />
                         <meshStandardMaterial color={urnColor} />
@@ -272,7 +374,7 @@ const ArcPortalModelV2: React.FC<ArcPortalModelV2Props> = ({ color, isDying }) =
             </group>
 
             {/* 5. CENTRAL PORTAL */}
-            <group position={[0, 0.4, -0.3]}>
+            <group ref={portalAssemblyRef} position={[0, 0.4, -0.3]}>
                 <mesh ref={portalRef} geometry={portalGeometry}>
                     <meshStandardMaterial
                         color={color}
@@ -305,7 +407,7 @@ const ArcPortalModelV2: React.FC<ArcPortalModelV2Props> = ({ color, isDying }) =
                     ))}
 
                     {/* 7. TOP COVER ARC (Hood) */}
-                    <group position={[0, 1.8, 0]}>
+                    <group ref={hoodRef} position={[0, 1.8, 0]}>
                         <mesh geometry={topCoverGeometry} castShadow receiveShadow>
                             <meshStandardMaterial color={stoneColor} metalness={0.5} roughness={0.7} />
                         </mesh>

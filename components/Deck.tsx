@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Card, UnitType, CardCategory } from '../types';
 import { CARD_CONFIG, MAX_INVENTORY_CAPACITY } from '../constants';
-import CyberMarineIcon from './icons/CyberMarineIcon';
 import { groupCards } from '../utils/cardUtils';
 
 interface DeckProps {
@@ -42,7 +41,7 @@ const Deck: React.FC<DeckProps> = ({ cards, selectedId, onSelect, playerColor, d
     const renderIcon = (type: UnitType, color: string) => {
         const p = { width: "100%", height: "100%", fill: "none", stroke: color, strokeWidth: "2", vectorEffect: "non-scaling-stroke" as const };
         switch (type) {
-            case UnitType.SOLDIER: return <CyberMarineIcon color={color} />;
+            case UnitType.SOLDIER: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="6" r="4" /><path d="M6 22V14C6 11 12 11 12 11V22" /></svg>;
             case UnitType.HEAVY: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L20 7V17L12 22L4 17V7L12 2Z" /><rect x="8" y="8" width="8" height="8" fill="currentColor" fillOpacity="0.2" /></svg>;
             case UnitType.MEDIC: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2V22 M2 12H22" strokeWidth="4" /><rect x="6" y="6" width="12" height="12" stroke="none" fill="currentColor" fillOpacity="0.1" /></svg>;
             case UnitType.LIGHT_TANK: return <svg viewBox="0 0 24 24" {...p}><path d="M4 14H20M2 18H22M6 10H18L16 6H8L6 10Z" /><rect x="4" y="14" width="16" height="6" fill="currentColor" fillOpacity="0.2" /></svg>;

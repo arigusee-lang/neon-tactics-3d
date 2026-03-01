@@ -126,6 +126,9 @@ class GameService {
     private lastPreviewSignature: string | null = null;
     private lastPreviewPathKey: string = '';
     private lastPreviewBlocked = false;
+    private unitCycleOrder: string[] = [];
+    private unitCycleSetKey: string = '';
+    private lastTabSelectionId: string | null = null;
     private pendingStartConfig: PendingStartConfig | null = null;
     private readonly authoritativeActions = new Set<string>([
         'SYNC_STATE',
@@ -927,20 +930,18 @@ class GameService {
     // --- WIN CONDITION CHECK ---
     private checkWinCondition() {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
+        if (this.state.isDevMode) return;
 
         const p1HasUnits = this.state.units.some(u => u.playerId === PlayerId.ONE);
-        const p1HasCards = this.state.decks[PlayerId.ONE].length > 0;
-
         const p2HasUnits = this.state.units.some(u => u.playerId === PlayerId.TWO);
-        const p2HasCards = this.state.decks[PlayerId.TWO].length > 0;
 
-        if (!p1HasUnits && !p1HasCards) {
+        if (!p1HasUnits) {
             this.state.winner = PlayerId.TWO;
             this.state.appStatus = AppStatus.GAME_OVER;
             this.log(`> MISSION FAILURE: PLAYER 1 ELIMINATED.`);
             this.log(`> VICTORY: PLAYER 2`);
             this.notify();
-        } else if (!p2HasUnits && !p2HasCards) {
+        } else if (!p2HasUnits) {
             this.state.winner = PlayerId.ONE;
             this.state.appStatus = AppStatus.GAME_OVER;
             this.log(`> MISSION FAILURE: PLAYER 2 ELIMINATED.`);
@@ -1405,7 +1406,33 @@ class GameService {
         };
     }
 
-    private buildMapScenario(mapType: string = 'EMPTY', customSize?: { x: number, y: number }): MapScenario {
+    private getMainPlacementForLandingStrip(bounds: MapBounds, playerId: PlayerId): Position | null {
+        const mainSize = CARD_CONFIG[UnitType.ARC_PORTAL]?.baseStats?.size || 3;
+        if (bounds.width < mainSize || bounds.height < mainSize * 2) {
+            return null;
+        }
+
+        const centeredX = bounds.originX + Math.floor((bounds.width - mainSize) / 2);
+        const topZ = playerId === PlayerId.ONE
+            ? bounds.originZ
+            : bounds.originZ + bounds.height - mainSize;
+
+        return { x: centeredX, z: topZ };
+    }
+
+    private createAutoMainUnitsForEmptyMap(bounds: MapBounds): Unit[] {
+        const units: Unit[] = [];
+
+        [PlayerId.ONE, PlayerId.TWO].forEach((playerId) => {
+            const position = this.getMainPlacementForLandingStrip(bounds, playerId);
+            if (!position) return;
+            units.push(this.createUnit(UnitType.ARC_PORTAL, position, playerId));
+        });
+
+        return units;
+    }
+
+    private buildMapScenario(mapType: string = 'EMPTY', customSize?: { x: number, y: number }, isDevModeForSetup: boolean = false): MapScenario {
         const terrain: Record<string, TerrainData> = {};
         let initialUnits: Unit[] = [];
         let initialCollectibles: any[] = [];
@@ -1420,7 +1447,7 @@ class GameService {
 
         if (mapType === 'EMPTY') {
             const sizeX = Math.max(4, Math.min(BOARD_SIZE, customSize?.x || 10));
-            const sizeZ = Math.max(4, Math.min(BOARD_SIZE, customSize?.y || 10));
+            const sizeZ = Math.max(isDevModeForSetup ? 6 : 4, Math.min(BOARD_SIZE, customSize?.y || 10));
             const startX = Math.floor((BOARD_SIZE - sizeX) / 2);
             const startZ = Math.floor((BOARD_SIZE - sizeZ) / 2);
             mapBounds = this.createMapBounds(startX, startZ, sizeX, sizeZ);
@@ -1434,6 +1461,10 @@ class GameService {
                         landingZone: setLandingZone(x, z, mapBounds.originZ, mapBounds.height)
                     };
                 }
+            }
+
+            if (isDevModeForSetup) {
+                initialUnits = this.createAutoMainUnitsForEmptyMap(mapBounds);
             }
         } else if (mapType === 'MAP_1') {
             const sizeX = Math.max(4, Math.min(BOARD_SIZE, customSize?.x || 12));
@@ -1566,7 +1597,7 @@ class GameService {
         if (loadedMaps[mapType]) {
             this.log(`> LOADING MAP: ${mapType}...`);
         }
-        const { terrain, initialUnits, initialCollectibles, mapBounds, deletedTiles } = this.buildMapScenario(mapType, customSize);
+        const { terrain, initialUnits, initialCollectibles, mapBounds, deletedTiles } = this.buildMapScenario(mapType, customSize, isDevMode);
         if (loadedMaps[mapType]) {
             this.log(`> TERRAIN LOADED: ${Object.keys(terrain).length} TILES`);
         }
@@ -2126,6 +2157,77 @@ class GameService {
         }
         this.state = { ...this.state, selectedUnitId: unitId, selectedCardId: null, previewPath: [], interactionState: { mode: 'NORMAL' } };
         this.notify();
+    }
+
+    public selectNearestControlledUnit() {
+        if (this.state.appStatus !== AppStatus.PLAYING) return;
+        if (!this.state.selectedUnitId) return;
+
+        const referenceUnit = this.state.units.find(u => u.id === this.state.selectedUnitId);
+        if (!referenceUnit) return;
+
+        const controlledPlayerId = this.state.isMultiplayer
+            ? (this.state.myPlayerId || this.state.currentTurn)
+            : this.state.currentTurn;
+
+        const referenceCenterX = referenceUnit.position.x + ((referenceUnit.stats.size - 1) / 2);
+        const referenceCenterZ = referenceUnit.position.z + ((referenceUnit.stats.size - 1) / 2);
+
+        const controlledUnits = this.state.units
+            .filter(u => u.playerId === controlledPlayerId)
+            .filter(u => !u.status.isDying);
+
+        if (controlledUnits.length <= 1) return;
+
+        const controlledSetKey = controlledUnits
+            .map(u => u.id)
+            .sort((a, b) => a.localeCompare(b))
+            .join('|');
+
+        const shouldRebuildCycle =
+            this.unitCycleOrder.length === 0 ||
+            this.unitCycleSetKey !== controlledSetKey ||
+            this.lastTabSelectionId !== referenceUnit.id ||
+            !this.unitCycleOrder.includes(referenceUnit.id);
+
+        if (shouldRebuildCycle) {
+            const remaining = controlledUnits.filter(u => u.id !== referenceUnit.id);
+            const orderedIds = [referenceUnit.id];
+            let cursor = referenceUnit;
+
+            while (remaining.length > 0) {
+                remaining.sort((a, b) => {
+                    const aCenterX = a.position.x + ((a.stats.size - 1) / 2);
+                    const aCenterZ = a.position.z + ((a.stats.size - 1) / 2);
+                    const bCenterX = b.position.x + ((b.stats.size - 1) / 2);
+                    const bCenterZ = b.position.z + ((b.stats.size - 1) / 2);
+                    const cursorCenterX = cursor.position.x + ((cursor.stats.size - 1) / 2);
+                    const cursorCenterZ = cursor.position.z + ((cursor.stats.size - 1) / 2);
+
+                    const distanceA = Math.abs(cursorCenterX - aCenterX) + Math.abs(cursorCenterZ - aCenterZ);
+                    const distanceB = Math.abs(cursorCenterX - bCenterX) + Math.abs(cursorCenterZ - bCenterZ);
+
+                    if (distanceA !== distanceB) return distanceA - distanceB;
+                    if (a.position.z !== b.position.z) return a.position.z - b.position.z;
+                    if (a.position.x !== b.position.x) return a.position.x - b.position.x;
+                    return a.id.localeCompare(b.id);
+                });
+
+                const nextUnit = remaining.shift()!;
+                orderedIds.push(nextUnit.id);
+                cursor = nextUnit;
+            }
+
+            this.unitCycleOrder = orderedIds;
+            this.unitCycleSetKey = controlledSetKey;
+        }
+
+        const currentIndex = this.unitCycleOrder.indexOf(referenceUnit.id);
+        if (currentIndex === -1) return;
+
+        const nextId = this.unitCycleOrder[(currentIndex + 1) % this.unitCycleOrder.length];
+        this.lastTabSelectionId = nextId;
+        this.selectUnit(nextId);
     }
 
     public selectTerrainTool(tool: TerrainTool) {
@@ -4284,6 +4386,23 @@ class GameService {
         const unitToRemove = this.state.units.find(u => u.id === unitId);
         if (unitToRemove && unitToRemove.status.mindControlTargetId) {
             this.breakMindControl(unitId);
+        }
+
+        if (unitToRemove?.type === UnitType.ARC_PORTAL) {
+            const owner = unitToRemove.playerId;
+            Object.keys(this.state.terrain).forEach((key) => {
+                const tile = this.state.terrain[key];
+                if (tile?.landingZone === owner) {
+                    this.state.terrain[key] = {
+                        ...tile,
+                        landingZone: undefined
+                    };
+                }
+            });
+
+            if (owner === PlayerId.ONE || owner === PlayerId.TWO) {
+                this.log(`> MAIN DESTROYED: ${owner} LANDING GRID OFFLINE`);
+            }
         }
 
         // Check if removing a Mind Controlled Victim

@@ -1,5 +1,5 @@
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Edges } from '@react-three/drei';
 import * as THREE from 'three';
@@ -7,14 +7,22 @@ import * as THREE from 'three';
 interface SpikeModelProps {
     color: string;
     isAttacking?: boolean;
+    isDying?: boolean;
 }
 
-const SpikeModel: React.FC<SpikeModelProps> = ({ color, isAttacking }) => {
+const SpikeModel: React.FC<SpikeModelProps> = ({ color, isAttacking, isDying }) => {
     const groupRef = useRef<THREE.Group>(null);
     const internalRef = useRef<THREE.Group>(null);
     const ring1Ref = useRef<THREE.Mesh>(null);
     const ring2Ref = useRef<THREE.Mesh>(null);
     const coreRef = useRef<THREE.Mesh>(null);
+    const deathStartRef = useRef<number | null>(null);
+    const [debrisVectors] = useState(() => ({
+        upper: new THREE.Vector3(0.18, 0.9, -0.1).normalize().multiplyScalar(0.018),
+        lower: new THREE.Vector3(-0.16, 0.55, 0.12).normalize().multiplyScalar(0.014),
+        ring1: new THREE.Vector3(0.22, 0.25, 0.18).normalize().multiplyScalar(0.022),
+        ring2: new THREE.Vector3(-0.2, 0.18, -0.22).normalize().multiplyScalar(0.02),
+    }));
 
     // Helper to render the common "Matrix" material style inline
     const renderMatrixMat = (opacity = 0.8, colorOverride?: string) => (
@@ -34,6 +42,50 @@ const SpikeModel: React.FC<SpikeModelProps> = ({ color, isAttacking }) => {
 
     useFrame((state, delta) => {
         const time = state.clock.elapsedTime;
+
+        if (isDying) {
+            if (deathStartRef.current === null) {
+                deathStartRef.current = time;
+            }
+            const elapsed = time - deathStartRef.current;
+            const fade = Math.max(0, 1 - elapsed * 1.6);
+
+            if (groupRef.current) {
+                groupRef.current.rotation.y += delta * 1.8;
+                groupRef.current.position.y -= delta * 0.15;
+            }
+            if (internalRef.current) {
+                internalRef.current.position.addScaledVector(debrisVectors.upper, delta * 12);
+                internalRef.current.rotation.x += delta * 2.5;
+                internalRef.current.rotation.z += delta * 1.8;
+            }
+            if (ring1Ref.current) {
+                ring1Ref.current.position.addScaledVector(debrisVectors.ring1, delta * 10);
+                ring1Ref.current.rotation.x += delta * 5;
+                ring1Ref.current.rotation.y += delta * 3;
+                const material = ring1Ref.current.material as THREE.MeshBasicMaterial;
+                material.opacity = 0.8 * fade;
+                material.transparent = true;
+            }
+            if (ring2Ref.current) {
+                ring2Ref.current.position.addScaledVector(debrisVectors.ring2, delta * 10);
+                ring2Ref.current.rotation.x -= delta * 4;
+                ring2Ref.current.rotation.z += delta * 4;
+                const material = ring2Ref.current.material as THREE.MeshBasicMaterial;
+                material.opacity = 0.6 * fade;
+                material.transparent = true;
+            }
+            if (coreRef.current) {
+                coreRef.current.position.addScaledVector(debrisVectors.lower, delta * 9);
+                coreRef.current.scale.multiplyScalar(Math.max(0.94, fade));
+                const material = coreRef.current.material as THREE.MeshBasicMaterial;
+                material.transparent = true;
+                material.opacity = fade;
+            }
+            return;
+        }
+
+        deathStartRef.current = null;
 
         if (internalRef.current) {
             // Hover animation

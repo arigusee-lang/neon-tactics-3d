@@ -246,9 +246,9 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
   [UnitType.ARC_PORTAL]: {
     category: CardCategory.UNIT,
     name: 'Arc Portal',
-    description: 'Massive gateway to another dimension. 9-Tile Structure.',
+    description: 'Main structure. On destruction, all of its owner\'s landing zones collapse.',
     cost: 900,
-    baseStats: { hp: 15000, maxEnergy: 0, attack: 0, range: 0, movement: 0, size: 3, blocksLos: true }
+    baseStats: { hp: 3000, maxEnergy: 0, attack: 0, range: 0, movement: 0, size: 3, blocksLos: true }
   },
   [UnitType.SYSTEM_FREEZE]: {
     category: CardCategory.ACTION,

@@ -975,6 +975,29 @@
       "landingZone": "P2"
     }
   },
-  "units": [],
+  "units": [
+    {
+      "id": "crossmap-main-p1",
+      "playerId": "P1",
+      "position": {
+        "x": 18,
+        "z": 12
+      },
+      "type": "ARC_PORTAL",
+      "rotation": 0,
+      "level": 1
+    },
+    {
+      "id": "crossmap-main-p2",
+      "playerId": "P2",
+      "position": {
+        "x": 18,
+        "z": 24
+      },
+      "type": "ARC_PORTAL",
+      "rotation": 3.141592653589793,
+      "level": 1
+    }
+  ],
   "collectibles": []
 }

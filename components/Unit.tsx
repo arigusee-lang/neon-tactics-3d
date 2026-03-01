@@ -598,7 +598,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
 
             case EUnitType.BOX: return <ScoutDroneModel color={playerColor} isMoving={isMoving} isDying={isDying} />;
 
-            case EUnitType.SPIKE: return <SpikeModel color={playerColor} isAttacking={!!data.status.attackTargetId} />;
+            case EUnitType.SPIKE: return <SpikeModel color={playerColor} isAttacking={!!data.status.attackTargetId} isDying={isDying} />;
 
             default:
                 return (

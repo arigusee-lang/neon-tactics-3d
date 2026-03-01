@@ -11,6 +11,7 @@ import MapEditor from './components/MapEditor';
 import ShopModal from './components/ShopModal';
 import CardCatalogue from './components/CardCatalogue';
 import DebugPointerInfo from './components/DebugPointerInfo';
+import WinScreen from './components/WinScreen';
 import { gameService } from './services/gameService';
 import { GameState, PlayerId, AppStatus, Effect, UnitType, Talent } from './types';
 import { COLORS, CHARACTERS } from './constants';
@@ -208,6 +209,12 @@ const App: React.FC = () => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (!gameState) return;
 
+            if (e.code === 'Tab') {
+                e.preventDefault();
+                gameService.selectNearestControlledUnit();
+                return;
+            }
+
             if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD' && gameState.isDevMode) {
                 e.preventDefault();
                 setIsDebugPointerVisible((prev) => !prev);
@@ -307,16 +314,18 @@ const App: React.FC = () => {
                 />
             </div>
 
-            <MainMenu
-                status={gameState.appStatus}
-                onResume={() => gameService.togglePause()}
-                onAbortToMenu={() => gameService.restartGame()}
-                onRestartCurrentMap={() => gameService.restartCurrentMap()}
-                availableMaps={gameState.availableMaps}
-                roomId={gameState.roomId}
-                isMultiplayer={gameState.isMultiplayer}
-                isDevMode={gameState.isDevMode}
-            />
+            {gameState.appStatus !== AppStatus.GAME_OVER && (
+                <MainMenu
+                    status={gameState.appStatus}
+                    onResume={() => gameService.togglePause()}
+                    onAbortToMenu={() => gameService.restartGame()}
+                    onRestartCurrentMap={() => gameService.restartCurrentMap()}
+                    availableMaps={gameState.availableMaps}
+                    roomId={gameState.roomId}
+                    isMultiplayer={gameState.isMultiplayer}
+                    isDevMode={gameState.isDevMode}
+                />
+            )}
 
             {/* Character Selection Modal */}
             {gameState.appStatus === AppStatus.CHARACTER_SELECTION && (
@@ -354,6 +363,18 @@ const App: React.FC = () => {
             {gameState.appStatus === AppStatus.CARD_CATALOGUE && (
                 <CardCatalogue
                     onClose={() => gameService.exitCardCatalogue()}
+                />
+            )}
+
+            {gameState.appStatus === AppStatus.GAME_OVER && (
+                <WinScreen
+                    winner={gameState.winner}
+                    myPlayerId={gameState.myPlayerId}
+                    isMultiplayer={gameState.isMultiplayer}
+                    isDevMode={gameState.isDevMode}
+                    roundNumber={gameState.roundNumber}
+                    onRestartCurrentMap={() => gameService.restartCurrentMap()}
+                    onAbortToMenu={() => gameService.restartGame()}
                 />
             )}
 
