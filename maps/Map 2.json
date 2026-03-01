@@ -1,4 +1,6 @@
 {
+  "description": "Compact duel map with a raised central choke point.",
+  "players": 2,
   "terrain": {
     "15,15": {
       "type": "NORMAL",

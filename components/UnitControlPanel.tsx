@@ -405,7 +405,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                                 label="RESTORE ENERGY"
                                                 icon="⚡"
                                                 cost={25}
-                                                description="Restore 50 Energy to target unit."
+                                                description="Restore 50 Energy to a friendly unit within 2 tiles."
                                                 onClick={() => gameService.activateRestoreEnergyAbility(unit.id)}
                                                 disabled={unit.stats.energy < 25}
                                                 color="#8b5cf6" // violet-500

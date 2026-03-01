@@ -1,6 +1,7 @@
 
 import { Position, TerrainData, MapBounds } from '../types';
 import { BOARD_SIZE } from '../constants';
+import { canTraverseTerrainEdge } from './terrainTraversal';
 
 interface Node {
   x: number;
@@ -103,6 +104,10 @@ export const findPath = (
       }
 
       if (isBlocked) continue;
+
+      if (unitSize === 1 && !canTraverseTerrainEdge(currentNode, neighbor, terrain)) {
+        continue;
+      }
 
       const gScore = currentNode.g + 1;
       let neighborNode = openSet.get(neighborKey);

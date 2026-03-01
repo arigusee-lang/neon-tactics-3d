@@ -273,5 +273,11 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     name: 'Tactical Retreat',
     description: 'Teleport a friendly unit to the nearest empty deployment zone.',
     cost: 75
+  },
+  [UnitType.LANDING_SABOTAGE]: {
+    category: CardCategory.ACTION,
+    name: 'Landing Sabotage',
+    description: 'Disable a single enemy landing zone tile so units can no longer deploy there.',
+    cost: 100
   }
 };

@@ -322,6 +322,8 @@ const App: React.FC = () => {
             {gameState.appStatus === AppStatus.CHARACTER_SELECTION && (
                 <CharacterSelectionModal
                     playerCharacters={gameState.playerCharacters}
+                    isMultiplayer={gameState.isMultiplayer}
+                    myPlayerId={gameState.myPlayerId}
                 />
             )}
 

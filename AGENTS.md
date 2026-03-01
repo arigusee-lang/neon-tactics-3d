@@ -194,6 +194,7 @@ Agent rules for deploy work:
 - When documenting or explaining run steps, keep one obvious path for the product owner.
 - When giving commands to a non-technical user, prefer exact copy-paste commands and say when a terminal must remain open.
 - When a task depends on the dev server continuing to run, say that clearly.
+- Keep gameplay content in sync with the catalogue. When adding or changing units, action cards, abilities, perks, collectibles, or similar player-facing content, update the catalogue and any related discovery/browsing UI in the same task unless the user explicitly says not to.
 - If you discover repo friction that should be improved, put recommendations in a separate markdown file or raise them in chat. Do not fold speculative improvements into this file unless asked.
 
 ## OS Expectations

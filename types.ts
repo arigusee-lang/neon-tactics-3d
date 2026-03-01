@@ -53,7 +53,8 @@ export enum UnitType {
   SYSTEM_FREEZE = 'SYSTEM_FREEZE',
   ION_CANNON = 'ION_CANNON',
   FORWARD_BASE = 'FORWARD_BASE',
-  TACTICAL_RETREAT = 'TACTICAL_RETREAT'
+  TACTICAL_RETREAT = 'TACTICAL_RETREAT',
+  LANDING_SABOTAGE = 'LANDING_SABOTAGE'
 }
 
 export interface Position {
@@ -66,6 +67,21 @@ export interface MapBounds {
   originZ: number;
   width: number;
   height: number;
+}
+
+export type MapPlayerSupport = 2 | 3 | 4 | 'dev';
+
+export interface MapMetadata {
+  id: string;
+  description?: string;
+  players: MapPlayerSupport;
+}
+
+export interface MapPreviewData extends MapMetadata {
+  terrain: Record<string, TerrainData>;
+  units: Unit[];
+  collectibles: Collectible[];
+  mapBounds: MapBounds;
 }
 
 export interface UnitStats {
@@ -130,8 +146,10 @@ export interface UnitStatus {
   isDying?: boolean;
   isTeleporting?: boolean;
   isExploding?: boolean;
+  healPulseAmount?: number | null;
   attackTargetId?: string | null;     // Transient: For current animation frame
   autoAttackTargetId?: string | null; // Persistent: For "Nemesis" logic
+  neutralHasAttacked?: boolean;
 
   // Mind Control Logic
   mindControlTargetId?: string | null; // ID of the unit being controlled (on Hacker)
@@ -292,7 +310,7 @@ export interface GameState {
   debugLastDecision: string | null;
   debugLastHoverTile: Position | null;
 
-  availableMaps: string[];
+  availableMaps: MapMetadata[];
 }
 
 export type GameEvent = 'PLACE_UNIT' | 'GAME_RESET' | 'SELECT_CARD' | 'SELECT_UNIT';

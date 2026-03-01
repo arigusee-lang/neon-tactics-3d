@@ -349,10 +349,14 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
 
     const [hovered, setHovered] = useState(false);
     const [isMoving, setIsMoving] = useState(false);
+    const [healPulseAmount, setHealPulseAmount] = useState<number | null>(null);
 
     const [attackTargetPos, setAttackTargetPos] = useState<Vector3 | null>(null);
     const [mindControlTargetPos, setMindControlTargetPos] = useState<Vector3 | null>(null);
     const attackStartRef = useRef(0);
+    const healPulseStartRef = useRef<number | null>(null);
+    const healPulseLightRef = useRef<THREE.PointLight>(null);
+    const healPulseTextRef = useRef<HTMLDivElement>(null);
 
     const processingStep = useRef(false);
 
@@ -453,6 +457,20 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
         }
     }, [data.status.mindControlTargetId, data.position]); // Re-calc if hacker moves too (though he likely won't move while channeling)
 
+    useEffect(() => {
+        if (!data.status.healPulseAmount || data.status.healPulseAmount <= 0) return;
+
+        healPulseStartRef.current = performance.now();
+        setHealPulseAmount(data.status.healPulseAmount);
+
+        const timeoutId = window.setTimeout(() => {
+            setHealPulseAmount(null);
+            healPulseStartRef.current = null;
+        }, 1200);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [data.status.healPulseAmount]);
+
 
     useEffect(() => {
         if (data.movePath.length === 0) {
@@ -468,6 +486,28 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
 
         if (isDying) {
             return;
+        }
+
+        if (healPulseAmount && healPulseStartRef.current) {
+            const progress = Math.min((performance.now() - healPulseStartRef.current) / 1150, 1);
+            if (healPulseLightRef.current) {
+                healPulseLightRef.current.intensity = (1 - progress) * 2.8;
+                healPulseLightRef.current.distance = 1.6 + ((1 - progress) * 1.2);
+            }
+            if (healPulseTextRef.current) {
+                healPulseTextRef.current.style.opacity = `${1 - progress}`;
+                healPulseTextRef.current.style.transform = `translateY(${-progress * 24}px) scale(${1 + ((1 - progress) * 0.08)})`;
+            }
+        }
+
+        if (isTeleporting && data.type !== EUnitType.SOLDIER) {
+            groupRef.current.scale.x = THREE.MathUtils.lerp(groupRef.current.scale.x, 0.1, 0.14);
+            groupRef.current.scale.y = THREE.MathUtils.lerp(groupRef.current.scale.y, 3.2, 0.14);
+            groupRef.current.scale.z = THREE.MathUtils.lerp(groupRef.current.scale.z, 0.1, 0.14);
+        } else {
+            groupRef.current.scale.x = THREE.MathUtils.lerp(groupRef.current.scale.x, 1, 0.2);
+            groupRef.current.scale.y = THREE.MathUtils.lerp(groupRef.current.scale.y, 1, 0.2);
+            groupRef.current.scale.z = THREE.MathUtils.lerp(groupRef.current.scale.z, 1, 0.2);
         }
 
         if (data.status.attackTargetId && attackTargetPos) {
@@ -664,6 +704,27 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
 
             {isFrozen && <mesh position={[0, frozenY, 0]}><boxGeometry args={[size, size, size]} /><meshBasicMaterial color="#00ffff" transparent opacity={0.3} wireframe /></mesh>}
             {hasShield && <mesh position={[0, frozenY, 0]}><sphereGeometry args={[size * 0.7, 16, 16]} /><meshBasicMaterial color="#fbbf24" transparent opacity={0.3} wireframe /></mesh>}
+            {healPulseAmount && (
+                <>
+                    <pointLight
+                        ref={healPulseLightRef}
+                        position={[0, size > 1 ? 1.6 : 1.1, 0]}
+                        color="#34d399"
+                        intensity={2.8}
+                        distance={2.6}
+                        decay={2}
+                    />
+                    <Html position={[0, size > 1 ? 3.6 : 2.5, 0]} center distanceFactor={12} zIndexRange={[110, 0]} pointerEvents="none">
+                        <div
+                            ref={healPulseTextRef}
+                            className="rounded border border-emerald-300/70 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-black text-emerald-300 shadow-[0_0_16px_rgba(52,211,153,0.35)] backdrop-blur-sm"
+                            style={{ opacity: 1, transform: 'translateY(0px) scale(1)' }}
+                        >
+                            +{healPulseAmount} HP
+                        </div>
+                    </Html>
+                </>
+            )}
             {isSelected && !isDying && !isExploding && (
                 <mesh position={[0, ringY, 0]} rotation={[-Math.PI / 2, 0, 0]}>
                     <ringGeometry args={[0.65 * size, 0.75 * size, 32]} />

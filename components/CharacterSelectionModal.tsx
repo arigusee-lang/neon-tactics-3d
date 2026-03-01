@@ -1,7 +1,7 @@
 
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { CHARACTERS, COLORS } from '../constants';
-import { Character, PlayerId } from '../types';
+import { PlayerId } from '../types';
 import { gameService } from '../services/gameService';
 
 // Avatar image mapping for each character
@@ -55,18 +55,41 @@ const PerkNode: React.FC<{ level: number, description: string, active: boolean }
 
 interface CharacterSelectionModalProps {
     playerCharacters: Record<PlayerId, string | null>;
+    isMultiplayer?: boolean;
+    myPlayerId?: PlayerId | null;
 }
 
-const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playerCharacters }) => {
+const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playerCharacters, isMultiplayer = false, myPlayerId = null }) => {
     const [selectionStep, setSelectionStep] = useState<PlayerId>(PlayerId.ONE);
     const [selectedCharId, setSelectedCharId] = useState<string | null>(CHARACTERS[0].id);
 
+    const activeSelectionStep = isMultiplayer ? (myPlayerId || PlayerId.ONE) : selectionStep;
+    const localLockedCharacter = myPlayerId ? playerCharacters[myPlayerId] : null;
+    const remotePlayerId = myPlayerId === PlayerId.ONE ? PlayerId.TWO : myPlayerId === PlayerId.TWO ? PlayerId.ONE : null;
+    const remoteLockedCharacter = remotePlayerId ? playerCharacters[remotePlayerId] : null;
+
+    useEffect(() => {
+        if (isMultiplayer && localLockedCharacter) {
+            setSelectedCharId(localLockedCharacter);
+        }
+    }, [isMultiplayer, localLockedCharacter]);
+
     const activeCharacter = CHARACTERS.find(c => c.id === selectedCharId);
+    const confirmButtonLabel = useMemo(() => {
+        if (!isMultiplayer) return 'Confirm Selection';
+        if (localLockedCharacter && remoteLockedCharacter) return 'Starting Match...';
+        if (localLockedCharacter) return 'Waiting For Opponent';
+        return 'Lock In Selection';
+    }, [isMultiplayer, localLockedCharacter, remoteLockedCharacter]);
 
     const handleConfirm = () => {
         if (!selectedCharId) return;
 
-        gameService.selectCharacter(selectionStep, selectedCharId);
+        gameService.selectCharacter(activeSelectionStep, selectedCharId);
+
+        if (isMultiplayer) {
+            return;
+        }
 
         if (selectionStep === PlayerId.ONE) {
             setSelectionStep(PlayerId.TWO);
@@ -76,7 +99,7 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
         }
     };
 
-    const playerName = selectionStep === PlayerId.ONE ? "PLAYER 1" : "PLAYER 2";
+    const playerName = activeSelectionStep === PlayerId.ONE ? "PLAYER 1" : "PLAYER 2";
 
     return (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -171,10 +194,21 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
                             <div className="mt-auto w-full max-w-xs">
                                 <button
                                     onClick={handleConfirm}
+                                    disabled={isMultiplayer && !!localLockedCharacter && !!remoteLockedCharacter}
                                     className="w-full py-3 rounded bg-green-600 hover:bg-green-500 text-white font-bold text-sm uppercase tracking-widest transition-all shadow-lg shadow-green-900/20 hover:shadow-green-500/30 active:scale-[0.98]"
                                 >
-                                    Confirm Selection
+                                    {confirmButtonLabel}
                                 </button>
+
+                                {isMultiplayer && (
+                                    <div className="mt-3 text-center text-[10px] text-gray-400 uppercase tracking-widest">
+                                        {localLockedCharacter
+                                            ? (remoteLockedCharacter
+                                                ? 'All pilots locked. Synchronizing battlefield.'
+                                                : 'Selection locked. Awaiting opponent uplink.')
+                                            : 'Choose your commander and lock the slot.'}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </div>

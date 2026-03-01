@@ -1,12 +1,40 @@
 # Maps Directory
 
-This directory is used to store map JSON files exported from the Dev Mode Map Editor.
+This directory stores JSON maps loaded by the game at startup.
 
-## How to use:
+## Map Metadata
 
-1.  **Enable Dev Mode**: Set `isDevMode: true` in `gameService.ts` or use a dev toggle if available.
-2.  **Edit Map**: Use the Map Editor tools to create your map layout and place units.
-3.  **Export**: Click the "Export Map JSON" button in the Map Editor panel.
-4.  **Save**: The file will be downloaded to your default Downloads folder (e.g., `map_export_123456789.json`).
-5.  **Import**: Move the downloaded JSON file into this `maps` directory. 
-    *   (Future implementation will load maps from here).
+Each map JSON can now include:
+
+```json
+{
+  "description": "Optional text shown in the map picker.",
+  "players": 2
+}
+```
+
+`players` supports:
+
+- `2`
+- `3`
+- `4`
+- `"dev"` for maps that should stay out of multiplayer and only appear in solo/dev flows
+
+If `players` is omitted, the game currently defaults it to `2`.
+
+## Core Map Shape
+
+```json
+{
+  "description": "Optional text",
+  "players": 2,
+  "mapSize": { "x": 12, "y": 12 },
+  "mapOrigin": { "x": 10, "z": 10 },
+  "deletedTiles": [],
+  "terrain": {},
+  "units": [],
+  "collectibles": []
+}
+```
+
+`description` is optional. `players` is optional in old files, but new exports should include it.
