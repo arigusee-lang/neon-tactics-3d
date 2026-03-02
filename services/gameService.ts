@@ -1,5 +1,5 @@
 
-import { GameState, PlayerId, Unit, PlacePayload, UnitType, Card, Position, CardCategory, LogEntry, InteractionMode, AppStatus, Effect, Talent, TerrainData, TerrainTool, ShopItem, UnitStats, DebugClickTraceEntry, DebugClickResult, DebugPointerMeta, MapBounds, MapMetadata, MapPlayerSupport, MapPreviewData } from '../types';
+import { GameState, PlayerId, Unit, PlacePayload, UnitType, Card, Position, CardCategory, LogEntry, InteractionMode, AppStatus, Effect, Talent, TerrainData, TerrainTool, ShopItem, UnitStats, DebugClickTraceEntry, DebugClickResult, DebugPointerMeta, MapBounds, MapMetadata, MapPlayerSupport, MapPreviewData, ALL_PLAYER_IDS, CONTESTED_PLAYER_IDS, MatchMode, EmptyMapConfig } from '../types';
 import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS } from '../constants';
 import { findPath } from '../utils/pathfinding';
 import { clampTerrainBrushSize, getTerrainBrushFootprint, isBrushEnabledTerrainTool } from '../utils/terrainBrush';
@@ -39,6 +39,7 @@ Object.keys(mapModules).forEach(path => {
 interface MapJsonShape {
     description?: string;
     players?: MapPlayerSupport;
+    mode?: MatchMode;
     terrain?: Record<string, TerrainData>;
     units?: any[];
     collectibles?: any[];
@@ -56,6 +57,16 @@ const normalizeMapPlayers = (value: unknown): MapPlayerSupport => {
     return 2;
 };
 
+const normalizeMatchMode = (value: unknown, players: MapPlayerSupport): MatchMode => {
+    if (value === 'duel' || value === 'team_2v1' || value === 'team_2v2' || value === 'ffa') {
+        return value;
+    }
+
+    if (players === 3) return 'team_2v1';
+    if (players === 4) return 'team_2v2';
+    return 'duel';
+};
+
 const normalizeMapDescription = (value: unknown): string | undefined => {
     if (typeof value !== 'string') {
         return undefined;
@@ -69,7 +80,8 @@ const BUILT_IN_MAPS: MapMetadata[] = [
     {
         id: 'MAP_1',
         description: 'Classic starter battlefield.',
-        players: 2
+        players: 2,
+        mode: 'duel'
     }
 ];
 
@@ -79,10 +91,12 @@ const AVAILABLE_MAPS: MapMetadata[] = [
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
         .map((mapId) => {
             const mapData = loadedMaps[mapId] as MapJsonShape;
+            const players = normalizeMapPlayers(mapData.players);
             return {
                 id: mapId,
                 description: normalizeMapDescription(mapData.description),
-                players: normalizeMapPlayers(mapData.players)
+                players,
+                mode: normalizeMatchMode(mapData.mode, players)
             };
         })
 ];
@@ -91,6 +105,7 @@ interface PendingStartConfig {
     mapType: string;
     isDevMode: boolean;
     customSize?: { x: number; y: number };
+    emptyMapConfig?: EmptyMapConfig;
 }
 
 interface MapScenario {
@@ -167,12 +182,127 @@ class GameService {
         return !!this.socket?.id && !!this.authoritySocketId && this.socket.id === this.authoritySocketId;
     }
 
+    private createPerPlayerRecord<T>(factory: (playerId: PlayerId) => T): Record<PlayerId, T> {
+        return ALL_PLAYER_IDS.reduce((acc, playerId) => {
+            acc[playerId] = factory(playerId);
+            return acc;
+        }, {} as Record<PlayerId, T>);
+    }
+
     private createEmptyPlayerCharacters(): Record<PlayerId, string | null> {
-        return {
-            [PlayerId.ONE]: null,
-            [PlayerId.TWO]: null,
-            [PlayerId.NEUTRAL]: null
-        };
+        return this.createPerPlayerRecord(() => null);
+    }
+
+    private getPlayerShortLabel(playerId: PlayerId): string {
+        if (playerId === PlayerId.ONE) return 'P1';
+        if (playerId === PlayerId.TWO) return 'P2';
+        if (playerId === PlayerId.THREE) return 'P3';
+        if (playerId === PlayerId.FOUR) return 'P4';
+        return 'NEUTRAL';
+    }
+
+    private normalizeEmptyMapConfig(emptyMapConfig?: EmptyMapConfig): EmptyMapConfig {
+        if (emptyMapConfig) return emptyMapConfig;
+        return { players: 2, mode: 'duel' };
+    }
+
+    private getActivePlayersForMap(mapId: string, isDevMode: boolean = false, emptyMapConfig?: EmptyMapConfig): PlayerId[] {
+        if (mapId === 'EMPTY') {
+            const config = this.normalizeEmptyMapConfig(emptyMapConfig);
+            if (config.players === 4) return [PlayerId.ONE, PlayerId.TWO, PlayerId.THREE, PlayerId.FOUR];
+            if (config.players === 3) return [PlayerId.ONE, PlayerId.TWO, PlayerId.THREE];
+            return [PlayerId.ONE, PlayerId.TWO];
+        }
+
+        const metadata = this.getMapMetadata(mapId);
+        if (metadata.players === 4) return [PlayerId.ONE, PlayerId.TWO, PlayerId.THREE, PlayerId.FOUR];
+        if (metadata.players === 3) return [PlayerId.ONE, PlayerId.TWO, PlayerId.THREE];
+        return [PlayerId.ONE, PlayerId.TWO];
+    }
+
+    private getMatchModeForMap(mapId: string, emptyMapConfig?: EmptyMapConfig): MatchMode {
+        if (mapId === 'EMPTY') {
+            return this.normalizeEmptyMapConfig(emptyMapConfig).mode;
+        }
+        return this.getMapMetadata(mapId).mode;
+    }
+
+    private getSpawnToolPlayerId(terrainTool: TerrainTool): PlayerId | null {
+        switch (terrainTool) {
+            case 'SET_P1_SPAWN':
+                return PlayerId.ONE;
+            case 'SET_P2_SPAWN':
+                return PlayerId.TWO;
+            case 'SET_P3_SPAWN':
+                return PlayerId.THREE;
+            case 'SET_P4_SPAWN':
+                return PlayerId.FOUR;
+            default:
+                return null;
+        }
+    }
+
+    private isContestedPlayer(playerId: PlayerId): boolean {
+        return CONTESTED_PLAYER_IDS.includes(playerId);
+    }
+
+    private arePlayersAllied(a: PlayerId, b: PlayerId): boolean {
+        if (a === b) return true;
+        if (!this.isContestedPlayer(a) || !this.isContestedPlayer(b)) return false;
+
+        switch (this.state.matchMode) {
+            case 'team_2v1':
+            case 'team_2v2':
+                return (a === PlayerId.ONE || a === PlayerId.TWO) && (b === PlayerId.ONE || b === PlayerId.TWO);
+            default:
+                return false;
+        }
+    }
+
+    private arePlayersHostile(a: PlayerId, b: PlayerId): boolean {
+        if (a === b) return false;
+        if (a === PlayerId.NEUTRAL || b === PlayerId.NEUTRAL) return a !== b;
+        return !this.arePlayersAllied(a, b);
+    }
+
+    private getHostilePlayers(playerId: PlayerId): PlayerId[] {
+        return this.state.activePlayerIds.filter((candidate) => this.arePlayersHostile(playerId, candidate));
+    }
+
+    private getWinningPlayersForMode(survivors: PlayerId[]): PlayerId[] | null {
+        if (survivors.length === 0) return null;
+
+        switch (this.state.matchMode) {
+            case 'team_2v1': {
+                const alphaAlive = survivors.some((playerId) => playerId === PlayerId.ONE || playerId === PlayerId.TWO);
+                const betaAlive = survivors.includes(PlayerId.THREE);
+                if (alphaAlive && !betaAlive) return [PlayerId.ONE, PlayerId.TWO];
+                if (!alphaAlive && betaAlive) return [PlayerId.THREE];
+                return null;
+            }
+            case 'team_2v2': {
+                const alphaAlive = survivors.some((playerId) => playerId === PlayerId.ONE || playerId === PlayerId.TWO);
+                const betaAlive = survivors.some((playerId) => playerId === PlayerId.THREE || playerId === PlayerId.FOUR);
+                if (alphaAlive && !betaAlive) return [PlayerId.ONE, PlayerId.TWO];
+                if (!alphaAlive && betaAlive) return [PlayerId.THREE, PlayerId.FOUR];
+                return null;
+            }
+            case 'ffa':
+            case 'duel':
+            default:
+                return survivors.length === 1 ? [survivors[0]] : null;
+        }
+    }
+
+    private getNextTurnInOrder(currentTurn: PlayerId, turnOrder: PlayerId[] = this.state.turnOrder): PlayerId {
+        if (turnOrder.length === 0) return currentTurn;
+        const currentIndex = turnOrder.indexOf(currentTurn);
+        if (currentIndex === -1) return turnOrder[0];
+        return turnOrder[(currentIndex + 1) % turnOrder.length];
+    }
+
+    private isLastTurnInOrder(playerId: PlayerId, turnOrder: PlayerId[] = this.state.turnOrder): boolean {
+        return turnOrder.length > 0 && turnOrder[turnOrder.length - 1] === playerId;
     }
 
     private replicateAuthoritativeState(delayMs: number = 0) {
@@ -343,6 +473,32 @@ class GameService {
             console.log('Connected to server:', this.socket?.id);
         });
 
+        this.socket.on('lobby_state', (payload: { roomId: string; mapId?: string; players: string[]; playerIds?: PlayerId[]; maxPlayers: number; started: boolean; authoritySocketId?: string }) => {
+            this.state.roomId = payload.roomId;
+            this.state.lobbyMapId = payload.mapId || null;
+            this.state.lobbyPlayerCount = Array.isArray(payload.players) ? payload.players.length : 0;
+            this.state.lobbyMaxPlayers = payload.maxPlayers || 0;
+            this.state.isMultiplayer = true;
+            this.authoritySocketId = payload.authoritySocketId || this.authoritySocketId;
+
+            const mySocketId = this.socket?.id;
+            const myIndex = mySocketId ? payload.players.indexOf(mySocketId) : -1;
+            const resolvedPlayerId = myIndex >= 0
+                ? (payload.playerIds?.[myIndex] || CONTESTED_PLAYER_IDS[myIndex] || null)
+                : null;
+
+            if (resolvedPlayerId) {
+                this.state.myPlayerId = resolvedPlayerId;
+            }
+
+            if (Array.isArray(payload.playerIds) && payload.playerIds.length > 0) {
+                this.state.activePlayerIds = [...payload.playerIds];
+                this.state.turnOrder = [...payload.playerIds];
+            }
+
+            this.notify();
+        });
+
         this.socket.on('lobby_created', (payload: string | { roomId: string; mapId?: string; authoritySocketId?: string }) => {
             const roomId = typeof payload === 'string' ? payload : payload.roomId;
             const mapId = typeof payload === 'string' ? null : (payload.mapId || null);
@@ -350,32 +506,37 @@ class GameService {
             console.log('Lobby Created:', roomId, mapId ? `map=${mapId}` : '');
             this.state.roomId = roomId;
             this.state.isMultiplayer = true;
+            this.state.lobbyMapId = mapId;
             this.state.myPlayerId = PlayerId.ONE;
             this.authoritySocketId = authoritySocketId || this.socket?.id || null;
             this.log(`> LOBBY ESTABLISHED: ${roomId}${mapId ? ` [${mapId}]` : ''}`, PlayerId.ONE);
             this.notify();
         });
 
-        this.socket.on('game_start', (data: { roomId: string; players: string[]; mapId?: string; authoritySocketId?: string }) => {
+        this.socket.on('game_start', (data: { roomId: string; players: string[]; mapId?: string; authoritySocketId?: string; turnOrder?: PlayerId[] }) => {
             console.log('Game Start:', data);
             this.state.roomId = data.roomId;
             this.state.isMultiplayer = true;
+            this.state.lobbyMapId = data.mapId || null;
+            this.state.lobbyPlayerCount = data.players.length;
+            this.state.lobbyMaxPlayers = data.turnOrder?.length || data.players.length;
             this.authoritySocketId = data.authoritySocketId || data.players[0] || null;
 
-            // Resolve role from server socket order: players[0] is host (P1), players[1] is joiner (P2).
+            // Resolve role from server socket order: fixed slot assignment follows join order.
             const mySocketId = this.socket?.id;
             const myIndex = mySocketId ? data.players.indexOf(mySocketId) : -1;
-            if (myIndex === 0) {
-                this.state.myPlayerId = PlayerId.ONE;
-            } else if (myIndex === 1) {
-                this.state.myPlayerId = PlayerId.TWO;
+            const resolvedPlayerId = myIndex >= 0 ? CONTESTED_PLAYER_IDS[myIndex] : null;
+            if (resolvedPlayerId) {
+                this.state.myPlayerId = resolvedPlayerId;
             } else if (!this.state.myPlayerId) {
                 // Fallback for unexpected payloads/reconnect race.
-                this.state.myPlayerId = PlayerId.TWO;
+                this.state.myPlayerId = data.turnOrder?.[0] || PlayerId.ONE;
             }
+            this.state.activePlayerIds = data.turnOrder ? [...data.turnOrder] : CONTESTED_PLAYER_IDS.slice(0, data.players.length);
+            this.state.turnOrder = data.turnOrder ? [...data.turnOrder] : [...this.state.activePlayerIds];
 
             this.beginMatchSetup(data.mapId || 'MAP_1', false);
-            this.log(`> MULTIPLAYER LINK ESTABLISHED. YOU ARE ${this.state.myPlayerId === PlayerId.ONE ? 'PLAYER 1' : 'PLAYER 2'}`, this.state.myPlayerId!);
+            this.log(`> MULTIPLAYER LINK ESTABLISHED. YOU ARE ${this.state.myPlayerId}`, this.state.myPlayerId!);
             this.notify();
         });
 
@@ -444,6 +605,10 @@ class GameService {
             // Clear stale role if this client previously hosted another lobby.
             this.state.myPlayerId = null;
             this.authoritySocketId = null;
+            this.state.roomId = null;
+            this.state.lobbyMapId = null;
+            this.state.lobbyPlayerCount = 0;
+            this.state.lobbyMaxPlayers = 0;
             this.socket.emit('join_lobby', roomId);
         }
     }
@@ -478,56 +643,47 @@ class GameService {
     private buildSyncStatePayload() {
         return {
             terrain: this.state.terrain,
-            decks: {
-                [PlayerId.ONE]: this.state.decks[PlayerId.ONE].map((card) => this.cloneCardForSync(card)),
-                [PlayerId.TWO]: this.state.decks[PlayerId.TWO].map((card) => this.cloneCardForSync(card)),
-                [PlayerId.NEUTRAL]: this.state.decks[PlayerId.NEUTRAL].map((card) => this.cloneCardForSync(card))
-            },
+            decks: this.createPerPlayerRecord((playerId) =>
+                this.state.decks[playerId].map((card) => this.cloneCardForSync(card))
+            ),
             units: this.state.units.map((unit) => ({ ...unit })),
             collectibles: this.state.collectibles.map((collectible) => ({ ...collectible })),
             credits: { ...this.state.credits },
             mapBounds: this.state.mapBounds,
             deletedTiles: [...this.state.deletedTiles],
             currentTurn: this.state.currentTurn,
+            activePlayerIds: [...this.state.activePlayerIds],
+            turnOrder: [...this.state.turnOrder],
+            matchMode: this.state.matchMode,
             roundNumber: this.state.roundNumber,
-            shopStock: {
-                [PlayerId.ONE]: this.state.shopStock[PlayerId.ONE].map((item) => ({ ...item })),
-                [PlayerId.TWO]: this.state.shopStock[PlayerId.TWO].map((item) => ({ ...item })),
-                [PlayerId.NEUTRAL]: this.state.shopStock[PlayerId.NEUTRAL].map((item) => ({ ...item }))
-            },
-            pendingOrders: {
-                [PlayerId.ONE]: this.state.pendingOrders[PlayerId.ONE].map((item) => ({ ...item })),
-                [PlayerId.TWO]: this.state.pendingOrders[PlayerId.TWO].map((item) => ({ ...item })),
-                [PlayerId.NEUTRAL]: this.state.pendingOrders[PlayerId.NEUTRAL].map((item) => ({ ...item }))
-            },
+            shopStock: this.createPerPlayerRecord((playerId) =>
+                this.state.shopStock[playerId].map((item) => ({ ...item }))
+            ),
+            pendingOrders: this.createPerPlayerRecord((playerId) =>
+                this.state.pendingOrders[playerId].map((item) => ({ ...item }))
+            ),
             nextDeliveryRound: this.state.nextDeliveryRound,
             shopAvailable: this.state.shopAvailable,
-            recentlyDeliveredCardIds: {
-                [PlayerId.ONE]: [...this.state.recentlyDeliveredCardIds[PlayerId.ONE]],
-                [PlayerId.TWO]: [...this.state.recentlyDeliveredCardIds[PlayerId.TWO]],
-                [PlayerId.NEUTRAL]: [...this.state.recentlyDeliveredCardIds[PlayerId.NEUTRAL]]
-            },
-            playerTalents: {
-                [PlayerId.ONE]: this.state.playerTalents[PlayerId.ONE].map((talent) => ({ ...talent })),
-                [PlayerId.TWO]: this.state.playerTalents[PlayerId.TWO].map((talent) => ({ ...talent })),
-                [PlayerId.NEUTRAL]: this.state.playerTalents[PlayerId.NEUTRAL].map((talent) => ({ ...talent }))
-            },
-            characterActions: {
-                [PlayerId.ONE]: this.state.characterActions[PlayerId.ONE].map((action) => ({ ...action })),
-                [PlayerId.TWO]: this.state.characterActions[PlayerId.TWO].map((action) => ({ ...action })),
-                [PlayerId.NEUTRAL]: this.state.characterActions[PlayerId.NEUTRAL].map((action) => ({ ...action }))
-            },
+            recentlyDeliveredCardIds: this.createPerPlayerRecord((playerId) =>
+                [...this.state.recentlyDeliveredCardIds[playerId]]
+            ),
+            playerTalents: this.createPerPlayerRecord((playerId) =>
+                this.state.playerTalents[playerId].map((talent) => ({ ...talent }))
+            ),
+            characterActions: this.createPerPlayerRecord((playerId) =>
+                this.state.characterActions[playerId].map((action) => ({ ...action }))
+            ),
+            appStatus: this.state.appStatus,
+            talentChoices: this.state.talentChoices.map((talent) => ({ ...talent })),
+            pendingTalentQueue: [...this.state.pendingTalentQueue],
+            pendingTalentResumePlayerId: this.state.pendingTalentResumePlayerId,
             playerCharacters: { ...this.state.playerCharacters },
-            unlockedUnits: {
-                [PlayerId.ONE]: [...this.state.unlockedUnits[PlayerId.ONE]],
-                [PlayerId.TWO]: [...this.state.unlockedUnits[PlayerId.TWO]],
-                [PlayerId.NEUTRAL]: [...this.state.unlockedUnits[PlayerId.NEUTRAL]]
-            },
-            playerEffects: {
-                [PlayerId.ONE]: this.state.playerEffects[PlayerId.ONE].map((effect) => ({ ...effect })),
-                [PlayerId.TWO]: this.state.playerEffects[PlayerId.TWO].map((effect) => ({ ...effect })),
-                [PlayerId.NEUTRAL]: this.state.playerEffects[PlayerId.NEUTRAL].map((effect) => ({ ...effect }))
-            },
+            unlockedUnits: this.createPerPlayerRecord((playerId) =>
+                [...this.state.unlockedUnits[playerId]]
+            ),
+            playerEffects: this.createPerPlayerRecord((playerId) =>
+                this.state.playerEffects[playerId].map((effect) => ({ ...effect }))
+            ),
             interactionState: { ...this.state.interactionState },
             tilePulse: this.state.tilePulse ? { ...this.state.tilePulse } : null,
             winner: this.state.winner
@@ -633,6 +789,18 @@ class GameService {
                 if (data.currentTurn) {
                     this.state.currentTurn = data.currentTurn;
                 }
+                if (data.appStatus) {
+                    this.state.appStatus = data.appStatus;
+                }
+                if (Array.isArray(data.activePlayerIds)) {
+                    this.state.activePlayerIds = [...data.activePlayerIds];
+                }
+                if (Array.isArray(data.turnOrder)) {
+                    this.state.turnOrder = [...data.turnOrder];
+                }
+                if (data.matchMode) {
+                    this.state.matchMode = data.matchMode;
+                }
                 if (typeof data.roundNumber === 'number') {
                     this.state.roundNumber = data.roundNumber;
                 }
@@ -654,6 +822,13 @@ class GameService {
                 if (data.playerTalents) {
                     this.state.playerTalents = data.playerTalents;
                 }
+                if (Array.isArray(data.talentChoices)) {
+                    this.state.talentChoices = data.talentChoices;
+                }
+                if (Array.isArray(data.pendingTalentQueue)) {
+                    this.state.pendingTalentQueue = [...data.pendingTalentQueue];
+                }
+                this.state.pendingTalentResumePlayerId = data.pendingTalentResumePlayerId || null;
                 if (data.characterActions) {
                     this.state.characterActions = data.characterActions;
                 }
@@ -722,12 +897,16 @@ class GameService {
             k !== UnitType.HEAVY_TANK &&
             !DEV_ONLY_UNITS.includes(k as UnitType)
         ) as UnitType[];
+        const activePlayerIds = [PlayerId.ONE, PlayerId.TWO];
 
         return {
             appStatus: AppStatus.MENU,
             mapId: 'EMPTY',
             lightMode: 'DARK',
             currentTurn: PlayerId.ONE,
+            activePlayerIds,
+            turnOrder: [...activePlayerIds],
+            matchMode: 'duel',
             winner: null,
             roundNumber: 1,
             units: [],
@@ -736,11 +915,7 @@ class GameService {
             terrain: {},
             mapBounds,
             deletedTiles: [],
-            decks: {
-                [PlayerId.ONE]: [],
-                [PlayerId.TWO]: [],
-                [PlayerId.NEUTRAL]: []
-            },
+            decks: this.createPerPlayerRecord(() => []),
             selectedCardId: null,
             selectedUnitId: null,
             previewPath: [],
@@ -748,59 +923,27 @@ class GameService {
             actionLog: [initialLog],
             interactionState: { mode: 'NORMAL' },
             tilePulse: null,
-            playerEffects: {
-                [PlayerId.ONE]: [],
-                [PlayerId.TWO]: [],
-                [PlayerId.NEUTRAL]: []
-            },
-            playerTalents: {
-                [PlayerId.ONE]: [],
-                [PlayerId.TWO]: [],
-                [PlayerId.NEUTRAL]: []
-            },
-            characterActions: {
-                [PlayerId.ONE]: [],
-                [PlayerId.TWO]: [],
-                [PlayerId.NEUTRAL]: []
-            },
+            playerEffects: this.createPerPlayerRecord(() => []),
+            playerTalents: this.createPerPlayerRecord(() => []),
+            characterActions: this.createPerPlayerRecord(() => []),
             talentChoices: [],
+            pendingTalentQueue: [],
+            pendingTalentResumePlayerId: null,
 
             // Character System
-            playerCharacters: {
-                [PlayerId.ONE]: null,
-                [PlayerId.TWO]: null,
-                [PlayerId.NEUTRAL]: null
-            },
-            unlockedUnits: {
-                [PlayerId.ONE]: [...baseUnlocks],
-                [PlayerId.TWO]: [...baseUnlocks],
-                [PlayerId.NEUTRAL]: []
-            },
+            playerCharacters: this.createEmptyPlayerCharacters(),
+            unlockedUnits: this.createPerPlayerRecord((playerId) =>
+                playerId === PlayerId.NEUTRAL ? [] : [...baseUnlocks]
+            ),
 
             // Shop Init
-            credits: {
-                [PlayerId.ONE]: INITIAL_CREDITS,
-                [PlayerId.TWO]: INITIAL_CREDITS,
-                [PlayerId.NEUTRAL]: 0
-            },
-            shopStock: {
-                [PlayerId.ONE]: [],
-                [PlayerId.TWO]: [],
-                [PlayerId.NEUTRAL]: []
-            },
-            pendingOrders: {
-                [PlayerId.ONE]: [],
-                [PlayerId.TWO]: [],
-                [PlayerId.NEUTRAL]: []
-            },
+            credits: this.createPerPlayerRecord((playerId) => playerId === PlayerId.NEUTRAL ? 0 : INITIAL_CREDITS),
+            shopStock: this.createPerPlayerRecord(() => []),
+            pendingOrders: this.createPerPlayerRecord(() => []),
             nextDeliveryRound: 10,
             shopAvailable: true,
             deliveryHappened: false,
-            recentlyDeliveredCardIds: {
-                [PlayerId.ONE]: [],
-                [PlayerId.TWO]: [],
-                [PlayerId.NEUTRAL]: []
-            },
+            recentlyDeliveredCardIds: this.createPerPlayerRecord(() => []),
             isDevMode: false,
             debugClickTrace: [],
             debugLastDecision: null,
@@ -809,6 +952,9 @@ class GameService {
             // Multiplayer
             roomId: null,
             isMultiplayer: false,
+            lobbyMapId: null,
+            lobbyPlayerCount: 0,
+            lobbyMaxPlayers: 0,
             myPlayerId: null,
             availableMaps: AVAILABLE_MAPS
         };
@@ -832,7 +978,8 @@ class GameService {
         }
 
         const mapData = {
-            players: 2 as MapPlayerSupport,
+            players: this.state.activePlayerIds.length as MapPlayerSupport,
+            mode: this.state.matchMode,
             mapSize: { x: this.state.mapBounds.width, y: this.state.mapBounds.height },
             mapOrigin: { x: this.state.mapBounds.originX, z: this.state.mapBounds.originZ },
             deletedTiles: Array.from(deletedSet),
@@ -928,7 +1075,11 @@ class GameService {
     }
 
     private getRandomColor(playerId: PlayerId): string {
-        return playerId === PlayerId.ONE ? COLORS.P1 : playerId === PlayerId.TWO ? COLORS.P2 : COLORS.NEUTRAL;
+        if (playerId === PlayerId.ONE) return COLORS.P1;
+        if (playerId === PlayerId.TWO) return COLORS.P2;
+        if (playerId === PlayerId.THREE) return COLORS.P3;
+        if (playerId === PlayerId.FOUR) return COLORS.P4;
+        return COLORS.NEUTRAL;
     }
 
     // --- WIN CONDITION CHECK ---
@@ -936,20 +1087,22 @@ class GameService {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
         if (this.state.isDevMode) return;
 
-        const p1HasUnits = this.state.units.some(u => u.playerId === PlayerId.ONE);
-        const p2HasUnits = this.state.units.some(u => u.playerId === PlayerId.TWO);
+        const survivors = this.state.activePlayerIds.filter((playerId) =>
+            this.state.units.some((unit) => unit.playerId === playerId)
+        );
+        const winningPlayers = this.getWinningPlayersForMode(survivors);
 
-        if (!p1HasUnits) {
-            this.state.winner = PlayerId.TWO;
+        if (winningPlayers) {
+            this.state.winner = winningPlayers;
             this.state.appStatus = AppStatus.GAME_OVER;
-            this.log(`> MISSION FAILURE: PLAYER 1 ELIMINATED.`);
-            this.log(`> VICTORY: PLAYER 2`);
-            this.notify();
-        } else if (!p2HasUnits) {
-            this.state.winner = PlayerId.ONE;
-            this.state.appStatus = AppStatus.GAME_OVER;
-            this.log(`> MISSION FAILURE: PLAYER 2 ELIMINATED.`);
-            this.log(`> VICTORY: PLAYER 1`);
+
+            this.state.activePlayerIds
+                .filter((playerId) => !survivors.includes(playerId))
+                .forEach((playerId) => {
+                    this.log(`> MISSION FAILURE: ${playerId} ELIMINATED.`);
+                });
+
+            this.log(`> VICTORY: ${winningPlayers.join('+')}`);
             this.notify();
         }
     }
@@ -971,9 +1124,15 @@ class GameService {
         this.notify();
     }
 
-    public beginMatchSetup(mapType: string, isDevMode: boolean, customSize?: { x: number; y: number }) {
-        this.pendingStartConfig = { mapType, isDevMode, customSize };
+    public beginMatchSetup(mapType: string, isDevMode: boolean, customSize?: { x: number; y: number }, emptyMapConfig?: EmptyMapConfig) {
+        this.pendingStartConfig = { mapType, isDevMode, customSize, emptyMapConfig };
+        const activePlayerIds = this.getActivePlayersForMap(mapType, isDevMode, emptyMapConfig);
+        const turnOrder = [...activePlayerIds];
+        const matchMode = this.getMatchModeForMap(mapType, emptyMapConfig);
         this.state.playerCharacters = this.createEmptyPlayerCharacters();
+        this.state.activePlayerIds = activePlayerIds;
+        this.state.turnOrder = turnOrder;
+        this.state.matchMode = matchMode;
         this.enterCharacterSelection();
     }
 
@@ -986,7 +1145,7 @@ class GameService {
             return;
         }
 
-        this.startGame(config.mapType, config.isDevMode, config.customSize);
+        this.startGame(config.mapType, config.isDevMode, config.customSize, config.emptyMapConfig);
     }
 
     public selectCharacter(playerId: PlayerId, charId: string) {
@@ -1236,14 +1395,12 @@ class GameService {
 
     private generateShopStock(deliveryRound: number) {
         const totalUnits = deliveryRound;
-        const stockP1 = this._generateRandomStock(totalUnits, PlayerId.ONE);
-        const stockP2 = this._generateRandomStock(totalUnits, PlayerId.TWO);
-
-        this.state.shopStock = {
-            [PlayerId.ONE]: stockP1,
-            [PlayerId.TWO]: stockP2,
-            [PlayerId.NEUTRAL]: []
-        };
+        this.state.shopStock = this.createPerPlayerRecord((playerId) => {
+            if (playerId === PlayerId.NEUTRAL || !this.state.activePlayerIds.includes(playerId)) {
+                return [];
+            }
+            return this._generateRandomStock(totalUnits, playerId);
+        });
     }
 
     private _generateRandomStock(count: number, playerId: PlayerId): ShopItem[] {
@@ -1293,11 +1450,12 @@ class GameService {
     }
 
     private processDeliveries(round: number) {
-        this.state.recentlyDeliveredCardIds[PlayerId.ONE] = [];
-        this.state.recentlyDeliveredCardIds[PlayerId.TWO] = [];
+        this.state.activePlayerIds.forEach((playerId) => {
+            this.state.recentlyDeliveredCardIds[playerId] = [];
+        });
 
         // 1. Process Pending Orders (Decrement & Deliver)
-        [PlayerId.ONE, PlayerId.TWO].forEach(pid => {
+        this.state.activePlayerIds.forEach(pid => {
             const orders = this.state.pendingOrders[pid];
             if (orders.length === 0) return;
 
@@ -1358,8 +1516,9 @@ class GameService {
                 this.state.nextDeliveryRound = nextRound;
 
                 // Supply Injection
-                this.state.credits[PlayerId.ONE] += 500;
-                this.state.credits[PlayerId.TWO] += 500;
+                this.state.activePlayerIds.forEach((playerId) => {
+                    this.state.credits[playerId] += 500;
+                });
 
                 this.generateShopStock(nextRound);
                 this.log(`> SHOP RESTOCKED & +500 CREDITS. NEXT DROP: ROUND ${nextRound}`);
@@ -1392,7 +1551,7 @@ class GameService {
         if (character.actions) {
             // Ensure container exists
             if (!this.state.characterActions) {
-                this.state.characterActions = { [PlayerId.ONE]: [], [PlayerId.TWO]: [], [PlayerId.NEUTRAL]: [] };
+                this.state.characterActions = this.createPerPlayerRecord(() => []);
             }
 
             this.state.characterActions[playerId] = character.actions.map(a => ({
@@ -1405,48 +1564,131 @@ class GameService {
 
     // --- GAME INITIALIZATION ---
 
-    private getMapMetadata(mapId: string): MapMetadata {
+    private getMapMetadata(mapId: string, emptyMapConfig?: EmptyMapConfig): MapMetadata {
         if (mapId === 'EMPTY') {
+            const config = this.normalizeEmptyMapConfig(emptyMapConfig);
             return {
                 id: 'EMPTY',
                 description: 'Blank sandbox generated from the selected dimensions.',
-                players: 'dev'
+                players: config.players,
+                mode: config.mode
             };
         }
 
         return AVAILABLE_MAPS.find((map) => map.id === mapId) || {
             id: mapId,
-            players: 2
+            players: 2,
+            mode: 'duel'
         };
     }
 
-    private getMainPlacementForLandingStrip(bounds: MapBounds, playerId: PlayerId): Position | null {
+    private getEmptyMapLayout(emptyMapConfig?: EmptyMapConfig): Array<{ playerId: PlayerId; side: 'TOP' | 'RIGHT' | 'BOTTOM' | 'LEFT' }> {
+        const { players } = this.normalizeEmptyMapConfig(emptyMapConfig);
+        if (players === 4) {
+            return [
+                { playerId: PlayerId.ONE, side: 'TOP' },
+                { playerId: PlayerId.TWO, side: 'RIGHT' },
+                { playerId: PlayerId.THREE, side: 'BOTTOM' },
+                { playerId: PlayerId.FOUR, side: 'LEFT' }
+            ];
+        }
+
+        if (players === 3) {
+            return [
+                { playerId: PlayerId.ONE, side: 'TOP' },
+                { playerId: PlayerId.TWO, side: 'RIGHT' },
+                { playerId: PlayerId.THREE, side: 'BOTTOM' }
+            ];
+        }
+
+        return [
+            { playerId: PlayerId.ONE, side: 'TOP' },
+            { playerId: PlayerId.TWO, side: 'BOTTOM' }
+        ];
+    }
+
+    private getEmptyMapLandingZoneOwner(x: number, z: number, bounds: MapBounds, emptyMapConfig?: EmptyMapConfig): PlayerId | undefined {
+        const stripDepth = Math.max(3, CARD_CONFIG[UnitType.ARC_PORTAL]?.baseStats?.size || 3);
+        const leftEdge = bounds.originX;
+        const rightEdge = bounds.originX + bounds.width - 1;
+        const topEdge = bounds.originZ;
+        const bottomEdge = bounds.originZ + bounds.height - 1;
+        const withinTop = z <= topEdge + stripDepth - 1;
+        const withinBottom = z >= bottomEdge - stripDepth + 1;
+        const withinLeft = x <= leftEdge + stripDepth - 1;
+        const withinRight = x >= rightEdge - stripDepth + 1;
+
+        for (const slot of this.getEmptyMapLayout(emptyMapConfig)) {
+            if (slot.side === 'TOP' && withinTop) return slot.playerId;
+            if (slot.side === 'RIGHT' && withinRight && !withinTop && !withinBottom) return slot.playerId;
+            if (slot.side === 'BOTTOM' && withinBottom) return slot.playerId;
+            if (slot.side === 'LEFT' && withinLeft && !withinTop && !withinBottom) return slot.playerId;
+        }
+
+        return undefined;
+    }
+
+    private getMainPlacementForLandingStrip(bounds: MapBounds, playerId: PlayerId, emptyMapConfig?: EmptyMapConfig): Position | null {
         const mainSize = CARD_CONFIG[UnitType.ARC_PORTAL]?.baseStats?.size || 3;
-        if (bounds.width < mainSize || bounds.height < mainSize * 2) {
+        if (bounds.width < mainSize || bounds.height < mainSize) {
             return null;
         }
 
-        const centeredX = bounds.originX + Math.floor((bounds.width - mainSize) / 2);
-        const topZ = playerId === PlayerId.ONE
-            ? bounds.originZ
-            : bounds.originZ + bounds.height - mainSize;
+        const slot = this.getEmptyMapLayout(emptyMapConfig).find((entry) => entry.playerId === playerId);
+        if (!slot) return null;
 
-        return { x: centeredX, z: topZ };
+        const centeredX = bounds.originX + Math.floor((bounds.width - mainSize) / 2);
+        const centeredZ = bounds.originZ + Math.floor((bounds.height - mainSize) / 2);
+
+        switch (slot.side) {
+            case 'TOP':
+                return { x: centeredX, z: bounds.originZ };
+            case 'RIGHT':
+                return { x: bounds.originX + bounds.width - mainSize, z: centeredZ };
+            case 'BOTTOM':
+                return { x: centeredX, z: bounds.originZ + bounds.height - mainSize };
+            case 'LEFT':
+                return { x: bounds.originX, z: centeredZ };
+            default:
+                return null;
+        }
     }
 
-    private createAutoMainUnitsForEmptyMap(bounds: MapBounds): Unit[] {
+    private getMainRotationForLandingStrip(playerId: PlayerId, emptyMapConfig?: EmptyMapConfig): number {
+        const slot = this.getEmptyMapLayout(emptyMapConfig).find((entry) => entry.playerId === playerId);
+        if (!slot) {
+            return this.getInitialRotation(playerId);
+        }
+
+        switch (slot.side) {
+            case 'TOP':
+                return 0;
+            case 'RIGHT':
+                return -Math.PI / 2;
+            case 'BOTTOM':
+                return Math.PI;
+            case 'LEFT':
+                return Math.PI / 2;
+            default:
+                return this.getInitialRotation(playerId);
+        }
+    }
+
+    private createAutoMainUnitsForEmptyMap(bounds: MapBounds, emptyMapConfig?: EmptyMapConfig): Unit[] {
         const units: Unit[] = [];
 
-        [PlayerId.ONE, PlayerId.TWO].forEach((playerId) => {
-            const position = this.getMainPlacementForLandingStrip(bounds, playerId);
+        this.getActivePlayersForMap('EMPTY', true, emptyMapConfig).forEach((playerId) => {
+            const position = this.getMainPlacementForLandingStrip(bounds, playerId, emptyMapConfig);
             if (!position) return;
-            units.push(this.createUnit(UnitType.ARC_PORTAL, position, playerId));
+            const mainUnit = this.createUnit(UnitType.ARC_PORTAL, position, playerId);
+            mainUnit.rotation = this.getMainRotationForLandingStrip(playerId, emptyMapConfig);
+            units.push(mainUnit);
         });
 
         return units;
     }
 
-    private buildMapScenario(mapType: string = 'EMPTY', customSize?: { x: number, y: number }, isDevModeForSetup: boolean = false): MapScenario {
+    private buildMapScenario(mapType: string = 'EMPTY', customSize?: { x: number, y: number }, isDevModeForSetup: boolean = false, emptyMapConfig?: EmptyMapConfig): MapScenario {
         const terrain: Record<string, TerrainData> = {};
         let initialUnits: Unit[] = [];
         let initialCollectibles: any[] = [];
@@ -1460,8 +1702,11 @@ class GameService {
         };
 
         if (mapType === 'EMPTY') {
-            const sizeX = Math.max(4, Math.min(BOARD_SIZE, customSize?.x || 10));
-            const sizeZ = Math.max(isDevModeForSetup ? 6 : 4, Math.min(BOARD_SIZE, customSize?.y || 10));
+            const normalizedEmptyMapConfig = this.normalizeEmptyMapConfig(emptyMapConfig);
+            const minimumWidth = normalizedEmptyMapConfig.players > 2 ? 6 : 4;
+            const minimumHeight = normalizedEmptyMapConfig.players > 2 ? 7 : (isDevModeForSetup ? 6 : 4);
+            const sizeX = Math.max(minimumWidth, Math.min(BOARD_SIZE, customSize?.x || 10));
+            const sizeZ = Math.max(minimumHeight, Math.min(BOARD_SIZE, customSize?.y || 10));
             const startX = Math.floor((BOARD_SIZE - sizeX) / 2);
             const startZ = Math.floor((BOARD_SIZE - sizeZ) / 2);
             mapBounds = this.createMapBounds(startX, startZ, sizeX, sizeZ);
@@ -1472,13 +1717,13 @@ class GameService {
                         type: 'NORMAL',
                         elevation: 0,
                         rotation: 0,
-                        landingZone: setLandingZone(x, z, mapBounds.originZ, mapBounds.height)
+                        landingZone: this.getEmptyMapLandingZoneOwner(x, z, mapBounds, emptyMapConfig)
                     };
                 }
             }
 
             if (isDevModeForSetup) {
-                initialUnits = this.createAutoMainUnitsForEmptyMap(mapBounds);
+                initialUnits = this.createAutoMainUnitsForEmptyMap(mapBounds, emptyMapConfig);
             }
         } else if (mapType === 'MAP_1') {
             const sizeX = Math.max(4, Math.min(BOARD_SIZE, customSize?.x || 12));
@@ -1576,13 +1821,13 @@ class GameService {
         };
     }
 
-    public getMapPreviewData(mapId: string, customSize?: { x: number; y: number }): MapPreviewData | null {
+    public getMapPreviewData(mapId: string, customSize?: { x: number; y: number }, emptyMapConfig?: EmptyMapConfig): MapPreviewData | null {
         if (mapId !== 'EMPTY' && mapId !== 'MAP_1' && !loadedMaps[mapId]) {
             return null;
         }
 
-        const scenario = this.buildMapScenario(mapId, customSize);
-        const metadata = this.getMapMetadata(mapId);
+        const scenario = this.buildMapScenario(mapId, customSize, false, emptyMapConfig);
+        const metadata = this.getMapMetadata(mapId, emptyMapConfig);
 
         return {
             ...metadata,
@@ -1593,32 +1838,39 @@ class GameService {
         };
     }
 
-    public startGame(mapType: string = 'EMPTY', isDevMode: boolean = false, customSize?: { x: number, y: number }) {
+    public startGame(mapType: string = 'EMPTY', isDevMode: boolean = false, customSize?: { x: number, y: number }, emptyMapConfig?: EmptyMapConfig) {
         this.pendingStartConfig = null;
-        const deckP1 = isDevMode ? this.generateDevDeck(PlayerId.ONE) : this.generateDeck(PlayerId.ONE);
-        const deckP2 = isDevMode ? this.generateDevDeck(PlayerId.TWO) : this.generateDeck(PlayerId.TWO);
         const deckNeutral = isDevMode ? this.generateDevDeck(PlayerId.NEUTRAL) : [];
+        const activePlayerIds = this.getActivePlayersForMap(mapType, isDevMode, emptyMapConfig);
+        const turnOrder = [...activePlayerIds];
+        const matchMode = this.getMatchModeForMap(mapType, emptyMapConfig);
+        const generatedDecks = this.createPerPlayerRecord((playerId) => {
+            if (playerId === PlayerId.NEUTRAL) return deckNeutral;
+            if (!activePlayerIds.includes(playerId)) return [];
+            return isDevMode ? this.generateDevDeck(playerId) : this.generateDeck(playerId);
+        });
         const fullUnlockPool = Object.keys(CARD_CONFIG) as UnitType[];
         const unlockedUnits = isDevMode
-            ? {
-                [PlayerId.ONE]: [...fullUnlockPool],
-                [PlayerId.TWO]: [...fullUnlockPool],
-                [PlayerId.NEUTRAL]: []
-            }
+            ? this.createPerPlayerRecord((playerId) =>
+                playerId === PlayerId.NEUTRAL || !activePlayerIds.includes(playerId)
+                    ? []
+                    : [...fullUnlockPool]
+            )
             : this.state.unlockedUnits;
 
         this.discovered.clear();
         if (loadedMaps[mapType]) {
             this.log(`> LOADING MAP: ${mapType}...`);
         }
-        const { terrain, initialUnits, initialCollectibles, mapBounds, deletedTiles } = this.buildMapScenario(mapType, customSize, isDevMode);
+        const { terrain, initialUnits, initialCollectibles, mapBounds, deletedTiles } = this.buildMapScenario(mapType, customSize, isDevMode, emptyMapConfig);
         if (loadedMaps[mapType]) {
             this.log(`> TERRAIN LOADED: ${Object.keys(terrain).length} TILES`);
         }
         this.seedInitialDiscovery(terrain, mapBounds, isDevMode);
 
-        this.applyCharacterPerks(PlayerId.ONE);
-        this.applyCharacterPerks(PlayerId.TWO);
+        activePlayerIds.forEach((playerId) => {
+            this.applyCharacterPerks(playerId);
+        });
 
         this.state = {
             ...this.state,
@@ -1631,30 +1883,27 @@ class GameService {
             mapBounds,
             deletedTiles,
             roundNumber: 1,
-            decks: {
-                [PlayerId.ONE]: deckP1,
-                [PlayerId.TWO]: deckP2,
-                [PlayerId.NEUTRAL]: deckNeutral
-            },
-            selectedCardId: deckP1[0]?.id || null,
+            decks: generatedDecks,
+            selectedCardId: generatedDecks[PlayerId.ONE][0]?.id || null,
             selectedUnitId: null,
             previewPath: [],
             interactionState: { mode: 'NORMAL' },
             systemMessage: isDevMode ? "DEV MODE ACTIVE: INFINITE RESOURCES" : "MATCH STARTED. PLAYER 1 ACTIVE.",
             currentTurn: PlayerId.ONE,
+            activePlayerIds,
+            turnOrder,
+            matchMode,
             unlockedUnits,
 
-            credits: { [PlayerId.ONE]: INITIAL_CREDITS, [PlayerId.TWO]: INITIAL_CREDITS, [PlayerId.NEUTRAL]: 0 },
-            pendingOrders: { [PlayerId.ONE]: [], [PlayerId.TWO]: [], [PlayerId.NEUTRAL]: [] },
-            shopStock: { [PlayerId.ONE]: [], [PlayerId.TWO]: [], [PlayerId.NEUTRAL]: [] },
+            credits: this.createPerPlayerRecord((playerId) =>
+                playerId === PlayerId.NEUTRAL || !activePlayerIds.includes(playerId) ? 0 : INITIAL_CREDITS
+            ),
+            pendingOrders: this.createPerPlayerRecord(() => []),
+            shopStock: this.createPerPlayerRecord(() => []),
             nextDeliveryRound: 10,
             shopAvailable: true,
             deliveryHappened: false,
-            recentlyDeliveredCardIds: {
-                [PlayerId.ONE]: [],
-                [PlayerId.TWO]: [],
-                [PlayerId.NEUTRAL]: []
-            },
+            recentlyDeliveredCardIds: this.createPerPlayerRecord(() => []),
 
             isDevMode: isDevMode,
             debugClickTrace: [],
@@ -1713,7 +1962,11 @@ class GameService {
             ? { x: this.state.mapBounds.width, y: this.state.mapBounds.height }
             : undefined;
 
-        this.startGame(this.state.mapId, this.state.isDevMode, customSize);
+        const emptyMapConfig = this.state.mapId === 'EMPTY'
+            ? { players: this.state.activePlayerIds.length as 2 | 3 | 4, mode: this.state.matchMode }
+            : undefined;
+
+        this.startGame(this.state.mapId, this.state.isDevMode, customSize, emptyMapConfig);
     }
 
     private log(message: string, playerId?: PlayerId) {
@@ -1880,7 +2133,7 @@ class GameService {
     private addPlayerEffect(playerId: PlayerId, effect: Omit<Effect, 'id'>) {
         const newEffect: Effect = { ...effect, id: `pe-${Date.now()}-${Math.random()}` };
         this.state.playerEffects[playerId].push(newEffect);
-        this.log(`> EFFECT APPLIED TO [${playerId === PlayerId.ONE ? 'P1' : 'P2'}]: ${effect.name}`);
+        this.log(`> EFFECT APPLIED TO [${this.getPlayerShortLabel(playerId)}]: ${effect.name}`);
     }
 
     private addUnitEffect(unitId: string, effect: Omit<Effect, 'id'>) {
@@ -1904,7 +2157,7 @@ class GameService {
         const activePlayerEffects = this.state.playerEffects[playerId].filter(e => {
             e.duration -= 1;
             if (e.duration <= 0) {
-                this.log(`> EFFECT EXPIRED: ${e.name} [${playerId === PlayerId.ONE ? 'P1' : 'P2'}]`);
+                this.log(`> EFFECT EXPIRED: ${e.name} [${this.getPlayerShortLabel(playerId)}]`);
                 return false;
             }
             return true;
@@ -1932,7 +2185,7 @@ class GameService {
 
         // Lazy Init actions if missing (e.g. hot reload or legacy save)
         if (!this.state.characterActions) {
-            this.state.characterActions = { [PlayerId.ONE]: [], [PlayerId.TWO]: [], [PlayerId.NEUTRAL]: [] };
+            this.state.characterActions = this.createPerPlayerRecord(() => []);
         }
 
         if (!this.state.characterActions[playerId] || this.state.characterActions[playerId].length === 0) {
@@ -2402,29 +2655,18 @@ class GameService {
             } else {
                 this.log(`> DELETED ${targetKeys.length} TILES`);
             }
-        } else if (terrainTool === 'SET_P1_SPAWN') {
-            const clearZone = targetKeys.every(key => this.state.terrain[key]?.landingZone === PlayerId.ONE);
+        } else if (this.getSpawnToolPlayerId(terrainTool)) {
+            const playerId = this.getSpawnToolPlayerId(terrainTool)!;
+            const clearZone = targetKeys.every(key => this.state.terrain[key]?.landingZone === playerId);
             targetKeys.forEach(key => {
                 const tile = ensureTerrainTile(key);
-                tile.landingZone = clearZone ? undefined : PlayerId.ONE;
+                tile.landingZone = clearZone ? undefined : playerId;
             });
 
             if (clearZone) {
-                this.log(`> CLEARED P1 LANDING ZONE (${targetKeys.length} TILES)`);
+                this.log(`> CLEARED ${playerId} LANDING ZONE (${targetKeys.length} TILES)`);
             } else {
-                this.log(`> MARKED P1 LANDING ZONE (${targetKeys.length} TILES)`);
-            }
-        } else if (terrainTool === 'SET_P2_SPAWN') {
-            const clearZone = targetKeys.every(key => this.state.terrain[key]?.landingZone === PlayerId.TWO);
-            targetKeys.forEach(key => {
-                const tile = ensureTerrainTile(key);
-                tile.landingZone = clearZone ? undefined : PlayerId.TWO;
-            });
-
-            if (clearZone) {
-                this.log(`> CLEARED P2 LANDING ZONE (${targetKeys.length} TILES)`);
-            } else {
-                this.log(`> MARKED P2 LANDING ZONE (${targetKeys.length} TILES)`);
+                this.log(`> MARKED ${playerId} LANDING ZONE (${targetKeys.length} TILES)`);
             }
         } else if (terrainTool === 'PLACE_COLLECTIBLE') {
             const key = targetKeys[0];
@@ -2744,9 +2986,9 @@ class GameService {
                 return;
             }
             if (card.type === UnitType.SYSTEM_FREEZE) {
-                // Apply immediately global effect
-                const enemyId = playerId === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
-                const enemyUnits = this.state.units.filter(u => u.playerId === enemyId || u.playerId === PlayerId.NEUTRAL);
+                const enemyUnits = this.state.units.filter((unit) =>
+                    this.isContestedPlayer(unit.playerId) && this.arePlayersHostile(playerId, unit.playerId)
+                );
 
                 enemyUnits.forEach(u => {
                     this.addUnitEffect(u.id, { name: 'SYSTEM FREEZE', description: 'Global hack initiated.', icon: '❄️', duration: 1, maxDuration: 1 });
@@ -2819,8 +3061,6 @@ class GameService {
             if (card.type === UnitType.LANDING_SABOTAGE) {
                 const tileKey = `${position.x},${position.z}`;
                 const targetTile = this.state.terrain[tileKey];
-                const enemyId = playerId === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
-
                 if (!targetTile) {
                     this.state.systemMessage = "LANDING SABOTAGE: INVALID TILE";
                     this.log(`> LANDING SABOTAGE FAILED: NO TILE`, playerId);
@@ -2828,7 +3068,7 @@ class GameService {
                     return;
                 }
 
-                if (targetTile.landingZone !== enemyId) {
+                if (!targetTile.landingZone || !this.arePlayersHostile(playerId, targetTile.landingZone)) {
                     this.state.systemMessage = "LANDING SABOTAGE: TARGET ENEMY LANDING ZONE";
                     this.log(`> LANDING SABOTAGE FAILED: INVALID TARGET`, playerId);
                     this.notify();
@@ -3043,7 +3283,7 @@ class GameService {
 
         if (this.state.selectedUnitId) {
             const selectedUnit = this.state.units.find(u => u.id === this.state.selectedUnitId);
-            if (selectedUnit && clickedUnit && selectedUnit.playerId !== clickedUnit.playerId) {
+            if (selectedUnit && clickedUnit && this.arePlayersHostile(selectedUnit.playerId, clickedUnit.playerId)) {
                 this.pushDebugTrace('handleTileClick.action', 'ACTION', `attack ${clickedUnit.id} by ${selectedUnit.id}`, { tile, unitId: clickedUnit.id, pointer });
                 this.attackUnit(selectedUnit.id, clickedUnit.id);
                 return;
@@ -3124,8 +3364,6 @@ class GameService {
             return;
         }
 
-        const enemyId = playerId === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
-
         // Check if 2x2 area is valid
         const size = 2;
         const validTiles: string[] = [];
@@ -3153,7 +3391,7 @@ class GameService {
                     return;
                 }
 
-                if (tile.landingZone === enemyId) {
+                if (tile.landingZone && this.arePlayersHostile(playerId, tile.landingZone)) {
                     this.log(`> DEPLOYMENT FAILED: ENEMY TERRITORY`, playerId);
                     return;
                 }
@@ -3253,7 +3491,7 @@ class GameService {
     private applyLogisticsDelay(playerId: PlayerId) {
         let delayedCount = 0;
 
-        [PlayerId.ONE, PlayerId.TWO].forEach((targetPlayerId) => {
+        this.getHostilePlayers(playerId).forEach((targetPlayerId) => {
             this.state.pendingOrders[targetPlayerId] = this.state.pendingOrders[targetPlayerId].map((order) => {
                 delayedCount++;
                 return {
@@ -3279,8 +3517,16 @@ class GameService {
         const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
         if (targetIdx === -1) return;
 
+        const source = this.state.units[sourceIdx];
+        const target = this.state.units[targetIdx];
+
         if (!isRemote && this.state.isMultiplayer) {
             this.dispatchAction('FREEZE_TARGET', { sourceUnitId, targetUnitId });
+            return;
+        }
+
+        if (!this.arePlayersHostile(source.playerId, target.playerId)) {
+            this.log(`> TARGET INVALID: HOSTILE ONLY`, source.playerId);
             return;
         }
 
@@ -3294,7 +3540,7 @@ class GameService {
         });
 
         this.state.units[sourceIdx].stats.energy -= 50;
-        this.log(`> CRYO SHOT HIT TARGET`, this.state.units[sourceIdx].playerId);
+        this.log(`> CRYO SHOT HIT TARGET`, source.playerId);
         this.finalizeInteraction();
     }
 
@@ -3317,7 +3563,7 @@ class GameService {
             return;
         }
 
-        if (source.playerId !== target.playerId) {
+        if (!this.arePlayersAllied(source.playerId, target.playerId)) {
             this.log(`> TARGET INVALID: FRIENDLY ONLY`, source.playerId);
             return;
         }
@@ -3383,7 +3629,7 @@ class GameService {
             return;
         }
 
-        if (source.playerId !== target.playerId) {
+        if (!this.arePlayersAllied(source.playerId, target.playerId)) {
             this.log(`> TARGET INVALID: FRIENDLY ONLY`, source.playerId);
             return;
         }
@@ -3441,7 +3687,7 @@ class GameService {
             return;
         }
 
-        if (hacker.playerId === target.playerId) {
+        if (!this.arePlayersHostile(hacker.playerId, target.playerId)) {
             this.log(`> CANNOT TARGET FRIENDLY UNITS`, hacker.playerId);
             return;
         }
@@ -3770,7 +4016,11 @@ class GameService {
     }
 
     private getInitialRotation(playerId: PlayerId): number {
-        return playerId === PlayerId.ONE ? 0 : Math.PI;
+        if (playerId === PlayerId.ONE) return 0;
+        if (playerId === PlayerId.TWO) return Math.PI;
+        if (playerId === PlayerId.THREE) return Math.PI / 2;
+        if (playerId === PlayerId.FOUR) return -Math.PI / 2;
+        return 0;
     }
 
     public spawnUnit(type: UnitType, position: Position, playerId: PlayerId, idOverride?: string) {
@@ -3819,7 +4069,7 @@ class GameService {
             return;
         }
 
-        if (selectedUnit && clickedUnit && selectedUnit.playerId === this.state.currentTurn && selectedUnit.playerId !== clickedUnit.playerId) {
+        if (selectedUnit && clickedUnit && selectedUnit.playerId === this.state.currentTurn && this.arePlayersHostile(selectedUnit.playerId, clickedUnit.playerId)) {
             this.pushDebugTrace('handleUnitClick.action', 'ACTION', `attack ${clickedUnit.id} by ${selectedUnit.id}`, { unitId, pointer });
             this.attackUnit(selectedUnit.id, clickedUnit.id);
         } else {
@@ -4176,7 +4426,7 @@ class GameService {
         }
 
         const activeUnits = [...this.state.units];
-        const isEnemyPlayer = target.playerId === PlayerId.ONE || target.playerId === PlayerId.TWO;
+        const isEnemyPlayer = this.arePlayersHostile(attacker.playerId, target.playerId);
 
         const dx = target.position.x - attacker.position.x;
         const dz = target.position.z - attacker.position.z;
@@ -4202,6 +4452,9 @@ class GameService {
     private checkAttackValidity(attacker: Unit, target: Unit): { isValid: boolean, reason?: string } {
         const distance = this.getUnitFootprintDistance(attacker, target);
 
+        if (!this.arePlayersHostile(attacker.playerId, target.playerId)) {
+            return { isValid: false, reason: 'INVALID TARGET RELATION' };
+        }
         if (distance > attacker.stats.range) { return { isValid: false, reason: `OUT OF RANGE (${distance}/${attacker.stats.range})` }; }
         if (!this.hasLineOfSight(attacker, target)) { return { isValid: false, reason: `LINE OF SIGHT BLOCKED` }; }
         return { isValid: true };
@@ -4546,7 +4799,7 @@ class GameService {
                 }
             });
 
-            if (owner === PlayerId.ONE || owner === PlayerId.TWO) {
+            if (this.isContestedPlayer(owner)) {
                 this.log(`> MAIN DESTROYED: ${owner} LANDING GRID OFFLINE`);
             }
         }
@@ -4988,7 +5241,27 @@ class GameService {
         }
 
         this.state.talentChoices = [];
+
+        if (this.state.pendingTalentQueue.length > 0) {
+            const [nextPlayer, ...remainingQueue] = this.state.pendingTalentQueue;
+            this.state.pendingTalentQueue = remainingQueue;
+            this.triggerTalentSelection(nextPlayer, isRemote);
+            return;
+        }
+
+        const resumePlayer = this.state.pendingTalentResumePlayerId || player;
+        this.state.pendingTalentResumePlayerId = null;
         this.state.appStatus = AppStatus.PLAYING;
+        this.state.currentTurn = resumePlayer;
+        this.state.selectedCardId = this.state.decks[resumePlayer]?.[0]?.id || null;
+        this.state.selectedUnitId = null;
+        this.state.previewPath = [];
+        this.state.interactionState = { mode: 'NORMAL' };
+        this.log(`> TURN ENDED. PLAYER ${resumePlayer} ACTIVE.`);
+
+        if (this.state.isMultiplayer && this.isSyncAuthority()) {
+            this.replicateAuthoritativeState();
+        }
         this.notify();
     }
 
@@ -4998,15 +5271,7 @@ class GameService {
         return shuffled.slice(0, 3);
     }
 
-    private triggerTalentSelection(playerId: PlayerId, isRemote: boolean = false, forcedChoices?: Talent[]) {
-        if (!isRemote && this.state.isMultiplayer) {
-            if (this.state.myPlayerId !== playerId) return;
-            const choices = this.generateTalentChoices();
-            this.dispatchAction('TALENT_SELECTION_START', { playerId, choices });
-            return;
-        }
-
-        const choices = forcedChoices || this.generateTalentChoices();
+    private openTalentSelection(playerId: PlayerId, choices: Talent[]) {
         this.state.currentTurn = playerId;
         this.state.selectedCardId = this.state.decks[playerId]?.[0]?.id || null;
         this.state.selectedUnitId = null;
@@ -5015,6 +5280,15 @@ class GameService {
         this.state.talentChoices = choices;
         this.state.appStatus = AppStatus.TALENT_SELECTION;
         this.log(`> LEVEL UP! SELECT TALENT PROTOCOL INITIATED.`, playerId);
+    }
+
+    private triggerTalentSelection(playerId: PlayerId, isRemote: boolean = false, forcedChoices?: Talent[]) {
+        const choices = forcedChoices || this.generateTalentChoices();
+        this.openTalentSelection(playerId, choices);
+
+        if (this.state.isMultiplayer && this.isSyncAuthority()) {
+            this.replicateAuthoritativeState();
+        }
         this.notify();
     }
 
@@ -5083,10 +5357,11 @@ class GameService {
             this.processPassiveTalents(this.state.currentTurn);
 
             const completeRoundTransition = () => {
-                const nextTurn = this.state.currentTurn === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
+                const turnOrder = this.state.turnOrder.length > 0 ? this.state.turnOrder : [...this.state.activePlayerIds];
+                const nextTurn = this.getNextTurnInOrder(this.state.currentTurn, turnOrder);
                 let nextRound = this.state.roundNumber;
 
-                if (this.state.currentTurn === PlayerId.TWO) {
+                if (this.isLastTurnInOrder(this.state.currentTurn, turnOrder)) {
                     nextRound++;
                     this.log(`> SIMULATION LEVEL ${nextRound}`);
                     this.state.units = this.state.units.map(u => ({ ...u, level: (u.level || 1) + 1 }));
@@ -5111,11 +5386,20 @@ class GameService {
                 };
 
                 if (this.checkPlayerRestricted(nextTurn)) {
-                    this.log(`> WARNING: PLAYER ${nextTurn === PlayerId.ONE ? 'P1' : 'P2'} SYSTEMS COMPROMISED`);
+                    this.log(`> WARNING: PLAYER ${nextTurn} SYSTEMS COMPROMISED`);
                 }
 
                 if (nextRound > 0 && nextRound % 10 === 0) {
-                    this.triggerTalentSelection(nextTurn);
+                    const talentQueue = turnOrder.filter((playerId) => this.state.activePlayerIds.includes(playerId));
+                    const [firstPlayer, ...remainingPlayers] = talentQueue;
+
+                    this.state.pendingTalentQueue = remainingPlayers;
+                    this.state.pendingTalentResumePlayerId = nextTurn;
+
+                    if (firstPlayer) {
+                        this.triggerTalentSelection(firstPlayer);
+                        return;
+                    }
                 } else {
                     this.log(`> TURN ENDED. PLAYER ${nextTurn} ACTIVE.`);
                 }
@@ -5127,7 +5411,7 @@ class GameService {
                 this.notify();
             };
 
-            if (this.state.currentTurn === PlayerId.TWO) {
+            if (this.isLastTurnInOrder(this.state.currentTurn)) {
                 this.executeNeutralCreepTurn(() => {
                     completeRoundTransition();
                 });

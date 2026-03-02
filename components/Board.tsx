@@ -222,8 +222,30 @@ const Board: React.FC<BoardProps> = ({
     const interactionState = (gameService as any).state.interactionState as InteractionState;
     const terrainData = (gameService as any).state.terrain as Record<string, TerrainData>;
     const tilePulse = (gameService as any).state.tilePulse as TilePulse | null;
+    const matchMode = (gameService as any).state.matchMode as 'duel' | 'team_2v1' | 'team_2v2' | 'ffa';
 
     const [hoveredTile, setHoveredTile] = useState<Position | null>(null);
+
+    const arePlayersAllied = (a?: PlayerId, b?: PlayerId) => {
+        if (!a || !b) return false;
+        if (a === b) return true;
+        if (a === PlayerId.NEUTRAL || b === PlayerId.NEUTRAL) return false;
+
+        switch (matchMode) {
+            case 'team_2v1':
+            case 'team_2v2':
+                return (a === PlayerId.ONE || a === PlayerId.TWO) && (b === PlayerId.ONE || b === PlayerId.TWO);
+            default:
+                return false;
+        }
+    };
+
+    const arePlayersHostile = (a?: PlayerId, b?: PlayerId) => {
+        if (!a || !b) return false;
+        if (a === b) return false;
+        if (a === PlayerId.NEUTRAL || b === PlayerId.NEUTRAL) return a !== b;
+        return !arePlayersAllied(a, b);
+    };
 
     // Helper to find currently selected unit object
     const selectedUnit = selectedUnitId ? units.find(u => u.id === selectedUnitId) : null;
@@ -456,7 +478,7 @@ const Board: React.FC<BoardProps> = ({
             placementFootprint.add(key);
 
             const targetUnit = getUnitAt(x, z);
-            const isValid = targetUnit && targetUnit.playerId !== interactionState.playerId;
+            const isValid = targetUnit && arePlayersHostile(interactionState.playerId, targetUnit.playerId);
 
             isPlacementValid = !!isValid;
             highlightColor = isPlacementValid ? '#00ffff' : '#ff0000';
@@ -476,7 +498,7 @@ const Board: React.FC<BoardProps> = ({
                 const dx = Math.abs(sourceUnit.position.x - targetUnit.position.x);
                 const dz = Math.abs(sourceUnit.position.z - targetUnit.position.z);
                 const inRange = dx <= 2 && dz <= 2;
-                const isFriendly = targetUnit.playerId === interactionState.playerId;
+                const isFriendly = arePlayersAllied(targetUnit.playerId, interactionState.playerId);
                 isValid = inRange && isFriendly;
             }
 
@@ -517,8 +539,6 @@ const Board: React.FC<BoardProps> = ({
 
             // Validity Check
             let valid = true;
-            // Hacky way to check enemy ID since we don't assume generic 2 player always but PlayerId is enum
-            const enemyId = interactionState.playerId === PlayerId.ONE ? PlayerId.TWO : PlayerId.ONE;
 
             for (const pKey of placementFootprint) {
                 // Must be revealed
@@ -528,7 +548,7 @@ const Board: React.FC<BoardProps> = ({
                 }
                 // Must not be enemy zone
                 const t = terrainData[pKey];
-                if (t && t.landingZone === enemyId) {
+                if (t?.landingZone && arePlayersHostile(interactionState.playerId, t.landingZone)) {
                     valid = false;
                     break;
                 }

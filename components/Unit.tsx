@@ -451,7 +451,12 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
 
     const size = data.stats.size || 1;
     const sizeOffset = ((size - 1) * (TILE_SIZE + TILE_SPACING)) / 2;
-    const playerColor = data.playerId === PlayerId.ONE ? COLORS.P1 : data.playerId === PlayerId.NEUTRAL ? '#888888' : COLORS.P2;
+    const playerColor =
+        data.playerId === PlayerId.ONE ? COLORS.P1 :
+        data.playerId === PlayerId.TWO ? COLORS.P2 :
+        data.playerId === PlayerId.THREE ? COLORS.P3 :
+        data.playerId === PlayerId.FOUR ? COLORS.P4 :
+        '#888888';
     const isDying = data.status.isDying || false;
     const isTeleporting = data.status.isTeleporting || false;
     const isExploding = data.status.isExploding || false;

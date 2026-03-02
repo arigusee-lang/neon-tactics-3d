@@ -5,8 +5,22 @@ import React from 'react';
 export enum PlayerId {
   ONE = 'P1',
   TWO = 'P2',
+  THREE = 'P3',
+  FOUR = 'P4',
   NEUTRAL = 'NEUTRAL'
 }
+
+export const CONTESTED_PLAYER_IDS: PlayerId[] = [
+  PlayerId.ONE,
+  PlayerId.TWO,
+  PlayerId.THREE,
+  PlayerId.FOUR
+];
+
+export const ALL_PLAYER_IDS: PlayerId[] = [
+  ...CONTESTED_PLAYER_IDS,
+  PlayerId.NEUTRAL
+];
 
 export enum CardCategory {
   UNIT = 'UNIT',
@@ -73,11 +87,18 @@ export interface MapBounds {
 }
 
 export type MapPlayerSupport = 2 | 3 | 4 | 'dev';
+export type MatchMode = 'duel' | 'team_2v1' | 'team_2v2' | 'ffa';
+
+export interface EmptyMapConfig {
+  players: 2 | 3 | 4;
+  mode: MatchMode;
+}
 
 export interface MapMetadata {
   id: string;
   description?: string;
   players: MapPlayerSupport;
+  mode: MatchMode;
 }
 
 export interface MapPreviewData extends MapMetadata {
@@ -200,7 +221,7 @@ export interface LogEntry {
   playerId?: PlayerId;
 }
 
-export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'DELETE' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN' | 'PLACE_COLLECTIBLE' | 'PLACE_HEALTH' | 'PLACE_ENERGY';
+export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'DELETE' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN' | 'SET_P3_SPAWN' | 'SET_P4_SPAWN' | 'PLACE_COLLECTIBLE' | 'PLACE_HEALTH' | 'PLACE_ENERGY';
 
 export type InteractionMode = 'NORMAL' | 'WALL_PLACEMENT' | 'ABILITY_SUMMON' | 'ABILITY_TELEPORT' | 'ABILITY_FREEZE' | 'ABILITY_HEAL' | 'ABILITY_RESTORE_ENERGY' | 'ABILITY_MIND_CONTROL' | 'ION_CANNON_TARGETING' | 'FORWARD_BASE_TARGETING' | 'MASS_RETREAT_TARGETING' | 'TERRAIN_EDIT';
 
@@ -276,7 +297,10 @@ export interface GameState {
   mapBounds: MapBounds;
   deletedTiles: string[];
   currentTurn: PlayerId;
-  winner: PlayerId | null;
+  activePlayerIds: PlayerId[];
+  turnOrder: PlayerId[];
+  matchMode: MatchMode;
+  winner: PlayerId[] | null;
   roundNumber: number;
   decks: { [key in PlayerId]: Card[] };
   selectedCardId: string | null;
@@ -297,6 +321,8 @@ export interface GameState {
   playerTalents: { [key in PlayerId]: Talent[] };
   characterActions: { [key in PlayerId]: CharacterAction[] };
   talentChoices: Talent[]; // The two choices currently presented
+  pendingTalentQueue: PlayerId[];
+  pendingTalentResumePlayerId: PlayerId | null;
 
   // Economy & Shop
   credits: { [key in PlayerId]: number };
@@ -310,6 +336,9 @@ export interface GameState {
   // Multiplayer
   isMultiplayer: boolean;
   roomId: string | null;
+  lobbyMapId: string | null;
+  lobbyPlayerCount: number;
+  lobbyMaxPlayers: number;
   myPlayerId: PlayerId | null; // The player ID that THIS client controls
 
   // Developer Mode Flag

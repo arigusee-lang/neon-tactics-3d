@@ -16,6 +16,10 @@ export const COLORS = {
   P1_HOVER: '#99ebff',
   P2: '#ff0066', // Neon Pink for P2
   P2_HOVER: '#ff99cc',
+  P3: '#22c55e', // Neon green for P3
+  P3_HOVER: '#86efac',
+  P4: '#f59e0b', // Amber for P4
+  P4_HOVER: '#fcd34d',
   NEUTRAL: '#808080', // Grey for Neutral Player
   BG: '#050505',
   GRID_LINE: '#003300', // Dark Green

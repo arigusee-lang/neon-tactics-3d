@@ -55,18 +55,52 @@ const PerkNode: React.FC<{ level: number, description: string, active: boolean }
 
 interface CharacterSelectionModalProps {
     playerCharacters: Record<PlayerId, string | null>;
+    activePlayerIds: PlayerId[];
     isMultiplayer?: boolean;
     myPlayerId?: PlayerId | null;
 }
 
-const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playerCharacters, isMultiplayer = false, myPlayerId = null }) => {
-    const [selectionStep, setSelectionStep] = useState<PlayerId>(PlayerId.ONE);
+const getPlayerLabel = (playerId: PlayerId) => {
+    if (playerId === PlayerId.ONE) return 'PLAYER 1';
+    if (playerId === PlayerId.TWO) return 'PLAYER 2';
+    if (playerId === PlayerId.THREE) return 'PLAYER 3';
+    if (playerId === PlayerId.FOUR) return 'PLAYER 4';
+    return 'NEUTRAL';
+};
+
+const getPlayerShortLabel = (playerId: PlayerId) => {
+    if (playerId === PlayerId.ONE) return 'P1';
+    if (playerId === PlayerId.TWO) return 'P2';
+    if (playerId === PlayerId.THREE) return 'P3';
+    if (playerId === PlayerId.FOUR) return 'P4';
+    return 'N';
+};
+
+const getPlayerColor = (playerId: PlayerId) => {
+    if (playerId === PlayerId.ONE) return COLORS.P1;
+    if (playerId === PlayerId.TWO) return COLORS.P2;
+    if (playerId === PlayerId.THREE) return COLORS.P3;
+    if (playerId === PlayerId.FOUR) return COLORS.P4;
+    return COLORS.NEUTRAL;
+};
+
+const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playerCharacters, activePlayerIds, isMultiplayer = false, myPlayerId = null }) => {
+    const selectionOrder = useMemo(
+        () => activePlayerIds.filter((playerId) => playerId !== PlayerId.NEUTRAL),
+        [activePlayerIds]
+    );
+    const [selectionIndex, setSelectionIndex] = useState(0);
     const [selectedCharId, setSelectedCharId] = useState<string | null>(CHARACTERS[0].id);
 
-    const activeSelectionStep = isMultiplayer ? (myPlayerId || PlayerId.ONE) : selectionStep;
+    const activeSelectionStep = isMultiplayer ? (myPlayerId || selectionOrder[0] || PlayerId.ONE) : (selectionOrder[selectionIndex] || PlayerId.ONE);
     const localLockedCharacter = myPlayerId ? playerCharacters[myPlayerId] : null;
-    const remotePlayerId = myPlayerId === PlayerId.ONE ? PlayerId.TWO : myPlayerId === PlayerId.TWO ? PlayerId.ONE : null;
-    const remoteLockedCharacter = remotePlayerId ? playerCharacters[remotePlayerId] : null;
+    const otherPlayerIds = selectionOrder.filter((playerId) => playerId !== myPlayerId);
+    const allOtherPlayersLocked = otherPlayerIds.every((playerId) => !!playerCharacters[playerId]);
+    const allPlayersLocked = selectionOrder.every((playerId) => !!playerCharacters[playerId]);
+
+    useEffect(() => {
+        setSelectionIndex(0);
+    }, [selectionOrder]);
 
     useEffect(() => {
         if (isMultiplayer && localLockedCharacter) {
@@ -77,10 +111,10 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
     const activeCharacter = CHARACTERS.find(c => c.id === selectedCharId);
     const confirmButtonLabel = useMemo(() => {
         if (!isMultiplayer) return 'Confirm Selection';
-        if (localLockedCharacter && remoteLockedCharacter) return 'Starting Match...';
-        if (localLockedCharacter) return 'Waiting For Opponent';
+        if (allPlayersLocked) return 'Starting Match...';
+        if (localLockedCharacter) return 'Waiting For Other Players';
         return 'Lock In Selection';
-    }, [isMultiplayer, localLockedCharacter, remoteLockedCharacter]);
+    }, [allPlayersLocked, isMultiplayer, localLockedCharacter]);
 
     const handleConfirm = () => {
         if (!selectedCharId) return;
@@ -91,15 +125,15 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
             return;
         }
 
-        if (selectionStep === PlayerId.ONE) {
-            setSelectionStep(PlayerId.TWO);
+        if (selectionIndex < selectionOrder.length - 1) {
+            setSelectionIndex((prev) => prev + 1);
             setSelectedCharId(CHARACTERS[0].id);
         } else {
             gameService.finalizeCharacterSelection();
         }
     };
 
-    const playerName = activeSelectionStep === PlayerId.ONE ? "PLAYER 1" : "PLAYER 2";
+    const playerName = getPlayerLabel(activeSelectionStep);
 
     return (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -133,31 +167,34 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
                                     {/* Selection Highlight (Current User) */}
                                     {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-green-500" />}
 
-                                    {/* Confirmed Selection Frame (P1) */}
-                                    {playerCharacters[PlayerId.ONE] === char.id && (
-                                        <div
-                                            className="absolute inset-0 border-2 pointer-events-none z-20"
-                                            style={{
-                                                borderColor: COLORS.P1,
-                                                boxShadow: `inset 0 0 20px ${COLORS.P1}`
-                                            }}
-                                        >
-                                            <div className="absolute top-0 right-0 text-black text-[9px] font-bold px-1 rounded-bl" style={{ backgroundColor: COLORS.P1 }}>P1</div>
-                                        </div>
-                                    )}
-
-                                    {/* Confirmed Selection Frame (P2) */}
-                                    {playerCharacters[PlayerId.TWO] === char.id && (
-                                        <div
-                                            className="absolute inset-0 border-2 pointer-events-none z-20"
-                                            style={{
-                                                borderColor: COLORS.P2,
-                                                boxShadow: `inset 0 0 20px ${COLORS.P2}`
-                                            }}
-                                        >
-                                            <div className="absolute bottom-0 right-0 text-black text-[9px] font-bold px-1 rounded-tl" style={{ backgroundColor: COLORS.P2 }}>P2</div>
-                                        </div>
-                                    )}
+                                    {selectionOrder
+                                        .filter((playerId) => playerCharacters[playerId] === char.id)
+                                        .map((playerId, index, matches) => {
+                                            const playerColor = getPlayerColor(playerId);
+                                            return (
+                                                <div
+                                                    key={`${char.id}-${playerId}`}
+                                                    className="absolute inset-0 border-2 pointer-events-none z-20"
+                                                    style={{
+                                                        borderColor: playerColor,
+                                                        boxShadow: `inset 0 0 20px ${playerColor}`
+                                                    }}
+                                                >
+                                                    <div
+                                                        className="absolute text-black text-[9px] font-bold px-1"
+                                                        style={{
+                                                            backgroundColor: playerColor,
+                                                            top: 0,
+                                                            right: index * 28,
+                                                            borderBottomLeftRadius: 4,
+                                                            borderBottomRightRadius: index === matches.length - 1 ? 0 : 4
+                                                        }}
+                                                    >
+                                                        {getPlayerShortLabel(playerId)}
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
 
                                     <div className="text-xs font-bold uppercase tracking-widest relative z-10">{char.name}</div>
                                     <div className="text-[9px] opacity-50 mt-1 truncate relative z-10">{char.description}</div>
@@ -194,7 +231,7 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
                             <div className="mt-auto w-full max-w-xs">
                                 <button
                                     onClick={handleConfirm}
-                                    disabled={isMultiplayer && !!localLockedCharacter && !!remoteLockedCharacter}
+                                    disabled={isMultiplayer && !!localLockedCharacter && allOtherPlayersLocked}
                                     className="w-full py-3 rounded bg-green-600 hover:bg-green-500 text-white font-bold text-sm uppercase tracking-widest transition-all shadow-lg shadow-green-900/20 hover:shadow-green-500/30 active:scale-[0.98]"
                                 >
                                     {confirmButtonLabel}
@@ -203,9 +240,9 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
                                 {isMultiplayer && (
                                     <div className="mt-3 text-center text-[10px] text-gray-400 uppercase tracking-widest">
                                         {localLockedCharacter
-                                            ? (remoteLockedCharacter
+                                            ? (allOtherPlayersLocked
                                                 ? 'All pilots locked. Synchronizing battlefield.'
-                                                : 'Selection locked. Awaiting opponent uplink.')
+                                                : 'Selection locked. Awaiting allied and hostile uplinks.')
                                             : 'Choose your commander and lock the slot.'}
                                     </div>
                                 )}

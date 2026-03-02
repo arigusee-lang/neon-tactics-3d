@@ -2,9 +2,8 @@ import React from 'react';
 import { AppStatus, PlayerId } from '../types';
 
 interface WinScreenProps {
-  winner: PlayerId | null;
-  myPlayerId: PlayerId | null;
-  isMultiplayer: boolean;
+  winner: PlayerId[] | null;
+  perspectivePlayerId: PlayerId | null;
   isDevMode: boolean;
   roundNumber: number;
   onRestartCurrentMap: () => void;
@@ -13,15 +12,14 @@ interface WinScreenProps {
 
 const WinScreen: React.FC<WinScreenProps> = ({
   winner,
-  myPlayerId,
-  isMultiplayer,
+  perspectivePlayerId,
   isDevMode,
   roundNumber,
   onRestartCurrentMap,
   onAbortToMenu
 }) => {
-  const canRestartCurrentMap = !isMultiplayer && !isDevMode;
-  const isVictory = winner !== null && (!isMultiplayer || myPlayerId === winner);
+  const canRestartCurrentMap = !isDevMode;
+  const isVictory = winner !== null && !!perspectivePlayerId && winner.includes(perspectivePlayerId);
   const title = isVictory ? 'Victory' : 'Defeat';
   const accentClass = isVictory
     ? 'border-emerald-500/60 text-emerald-300 shadow-[0_0_35px_rgba(16,185,129,0.18)]'
@@ -44,7 +42,9 @@ const WinScreen: React.FC<WinScreenProps> = ({
         </div>
 
         <div className="mb-8 border-l-2 border-neutral-800 pl-4 text-sm leading-6 text-neutral-300">
-          {winner ? `${winner} controls the battlefield.` : 'Match terminated.'}
+          {winner
+            ? (isVictory ? 'Battlefield control established.' : 'Battlefield control lost.')
+            : 'Match terminated.'}
         </div>
 
         <div className="flex flex-col gap-3">

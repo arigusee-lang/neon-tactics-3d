@@ -47,6 +47,10 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain, mapBou
                 ctx.fillStyle = '#004f5f'; // Dark Cyan for P1 Zone
             } else if (tileData?.landingZone === PlayerId.TWO) {
                 ctx.fillStyle = '#5f002f'; // Dark Pink for P2 Zone
+            } else if (tileData?.landingZone === PlayerId.THREE) {
+                ctx.fillStyle = '#365314'; // Dark Lime for P3 Zone
+            } else if (tileData?.landingZone === PlayerId.FOUR) {
+                ctx.fillStyle = '#7c2d12'; // Dark Amber for P4 Zone
             } else {
                 ctx.fillStyle = '#113311'; // Default Dark Green
             }
@@ -71,6 +75,8 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain, mapBou
             let color = '#888888';
             if (unit.playerId === PlayerId.ONE) color = COLORS.P1;
             if (unit.playerId === PlayerId.TWO) color = COLORS.P2;
+            if (unit.playerId === PlayerId.THREE) color = COLORS.P3;
+            if (unit.playerId === PlayerId.FOUR) color = COLORS.P4;
             if (unit.type === 'WALL') color = '#00ff00'; // Walls specifically bright green
 
             ctx.fillStyle = color;
@@ -176,10 +182,25 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain, mapBou
                     style={{ 
                         left: tooltip.x, 
                         top: tooltip.y,
-                        borderColor: tooltip.unit.playerId === PlayerId.ONE ? COLORS.P1 : tooltip.unit.playerId === PlayerId.TWO ? COLORS.P2 : '#888'
+                        borderColor:
+                            tooltip.unit.playerId === PlayerId.ONE ? COLORS.P1 :
+                            tooltip.unit.playerId === PlayerId.TWO ? COLORS.P2 :
+                            tooltip.unit.playerId === PlayerId.THREE ? COLORS.P3 :
+                            tooltip.unit.playerId === PlayerId.FOUR ? COLORS.P4 :
+                            '#888'
                     }}
                 >
-                    <div className="font-bold text-white uppercase mb-0.5" style={{ color: tooltip.unit.playerId === PlayerId.ONE ? COLORS.P1 : tooltip.unit.playerId === PlayerId.TWO ? COLORS.P2 : '#aaa' }}>
+                    <div
+                        className="font-bold text-white uppercase mb-0.5"
+                        style={{
+                            color:
+                                tooltip.unit.playerId === PlayerId.ONE ? COLORS.P1 :
+                                tooltip.unit.playerId === PlayerId.TWO ? COLORS.P2 :
+                                tooltip.unit.playerId === PlayerId.THREE ? COLORS.P3 :
+                                tooltip.unit.playerId === PlayerId.FOUR ? COLORS.P4 :
+                                '#aaa'
+                        }}
+                    >
                         {CARD_CONFIG[tooltip.unit.type]?.name || tooltip.unit.type}
                     </div>
                     <div className="flex gap-2 text-gray-400">

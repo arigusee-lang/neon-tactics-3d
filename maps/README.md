@@ -9,7 +9,8 @@ Each map JSON can now include:
 ```json
 {
   "description": "Optional text shown in the map picker.",
-  "players": 2
+  "players": 2,
+  "mode": "duel"
 }
 ```
 
@@ -22,12 +23,26 @@ Each map JSON can now include:
 
 If `players` is omitted, the game currently defaults it to `2`.
 
+`mode` supports:
+
+- `"duel"`
+- `"team_2v1"`
+- `"team_2v2"`
+- `"ffa"`
+
+Each map should define exactly one mode. If `mode` is omitted, the game currently falls back to:
+
+- `duel` for 2-player maps
+- `team_2v1` for 3-player maps
+- `team_2v2` for 4-player maps
+
 ## Core Map Shape
 
 ```json
 {
   "description": "Optional text",
   "players": 2,
+  "mode": "duel",
   "mapSize": { "x": 12, "y": 12 },
   "mapOrigin": { "x": 10, "z": 10 },
   "deletedTiles": [],

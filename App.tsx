@@ -19,6 +19,30 @@ import { COLORS, CHARACTERS } from './constants';
 import { groupCards } from './utils/cardUtils';
 import { clampTerrainBrushSize, isBrushEnabledTerrainTool } from './utils/terrainBrush';
 
+const getPlayerColor = (playerId: PlayerId) => {
+    if (playerId === PlayerId.ONE) return COLORS.P1;
+    if (playerId === PlayerId.TWO) return COLORS.P2;
+    if (playerId === PlayerId.THREE) return COLORS.P3;
+    if (playerId === PlayerId.FOUR) return COLORS.P4;
+    return COLORS.NEUTRAL;
+};
+
+const getPlayerLabel = (playerId: PlayerId) => {
+    if (playerId === PlayerId.ONE) return 'PLAYER 1';
+    if (playerId === PlayerId.TWO) return 'PLAYER 2';
+    if (playerId === PlayerId.THREE) return 'PLAYER 3';
+    if (playerId === PlayerId.FOUR) return 'PLAYER 4';
+    return 'NEUTRAL';
+};
+
+const getPlayerShortLabel = (playerId: PlayerId) => {
+    if (playerId === PlayerId.ONE) return 'P1';
+    if (playerId === PlayerId.TWO) return 'P2';
+    if (playerId === PlayerId.THREE) return 'P3';
+    if (playerId === PlayerId.FOUR) return 'P4';
+    return 'N';
+};
+
 // Simple Effect Icon Component
 const EffectIcon: React.FC<{ effect: Effect, alignRight?: boolean }> = ({ effect, alignRight }) => {
     return (
@@ -289,8 +313,9 @@ const App: React.FC = () => {
 
     const currentPlayerDeck = gameState.decks[gameState.currentTurn];
     const controlledPlayerId = gameState.isMultiplayer ? gameState.myPlayerId : gameState.currentTurn;
+    const winScreenPerspectivePlayerId = gameState.isMultiplayer ? gameState.myPlayerId : PlayerId.ONE;
     const isLocalTurn = !gameState.isMultiplayer || gameState.myPlayerId === gameState.currentTurn;
-    const playerColor = gameState.currentTurn === PlayerId.ONE ? COLORS.P1 : (gameState.currentTurn === PlayerId.TWO ? COLORS.P2 : COLORS.NEUTRAL);
+    const playerColor = getPlayerColor(gameState.currentTurn);
     const selectedUnit = gameState.units.find(u => u.id === gameState.selectedUnitId) || null;
     const isPlaying = gameState.appStatus === AppStatus.PLAYING || gameState.appStatus === AppStatus.TALENT_SELECTION || gameState.appStatus === AppStatus.SHOP;
     const showInventoryBar = !gameState.isMultiplayer || isLocalTurn;
@@ -302,6 +327,9 @@ const App: React.FC = () => {
     const massRetreatText = gameState.interactionState.mode === 'MASS_RETREAT_TARGETING'
         ? ` | RETREAT ZONE: ${massRetreatZoneSize}x${massRetreatZoneSize}`
         : '';
+    const hudPlayerIds = gameState.isDevMode
+        ? [...gameState.activePlayerIds, PlayerId.NEUTRAL]
+        : gameState.activePlayerIds;
 
     return (
         <div className="relative w-full h-screen bg-black overflow-hidden font-mono">
@@ -331,6 +359,9 @@ const App: React.FC = () => {
                     onRestartCurrentMap={() => gameService.restartCurrentMap()}
                     availableMaps={gameState.availableMaps}
                     roomId={gameState.roomId}
+                    lobbyMapId={gameState.lobbyMapId}
+                    lobbyPlayerCount={gameState.lobbyPlayerCount}
+                    lobbyMaxPlayers={gameState.lobbyMaxPlayers}
                     isMultiplayer={gameState.isMultiplayer}
                     isDevMode={gameState.isDevMode}
                 />
@@ -340,6 +371,7 @@ const App: React.FC = () => {
             {gameState.appStatus === AppStatus.CHARACTER_SELECTION && (
                 <CharacterSelectionModal
                     playerCharacters={gameState.playerCharacters}
+                    activePlayerIds={gameState.activePlayerIds}
                     isMultiplayer={gameState.isMultiplayer}
                     myPlayerId={gameState.myPlayerId}
                 />
@@ -384,8 +416,7 @@ const App: React.FC = () => {
             {gameState.appStatus === AppStatus.GAME_OVER && (
                 <WinScreen
                     winner={gameState.winner}
-                    myPlayerId={gameState.myPlayerId}
-                    isMultiplayer={gameState.isMultiplayer}
+                    perspectivePlayerId={winScreenPerspectivePlayerId}
                     isDevMode={gameState.isDevMode}
                     roundNumber={gameState.roundNumber}
                     onRestartCurrentMap={() => gameService.restartCurrentMap()}
@@ -398,108 +429,46 @@ const App: React.FC = () => {
                     <div className="absolute top-4 left-1/2 transform -translate-x-1/2 pointer-events-none w-full max-w-2xl flex flex-col items-center gap-2 z-20">
                         {/* HUD Top Bar */}
                         <div className="flex items-center gap-4 w-full justify-center">
-
-                            {gameState.isDevMode ? (
-                                <div className="bg-transparent border border-green-900 px-6 py-2 rounded-full shadow-[0_0_15px_rgba(0,255,0,0.2)] flex items-center gap-6 backdrop-blur-sm pointer-events-auto">
-                                    {/* Level Counter (Left) */}
-                                    <div className="flex flex-col items-center justify-center px-4 border-r border-slate-700/50">
-                                        <div className="text-[8px] text-green-500/70 font-bold uppercase tracking-wider leading-none mb-0.5">LEVEL</div>
-                                        <div className="text-lg font-mono font-bold text-white leading-none">{gameState.roundNumber.toString().padStart(2, '0')}</div>
-                                    </div>
-
-                                    {/* Player List (Right) */}
-                                    <div className="flex items-center gap-6">
-                                        {/* Player 1 */}
-                                        <div
-                                            onClick={() => gameService.debugSetTurn(PlayerId.ONE)}
-                                            className={`relative group text-sm font-bold tracking-widest transition-colors cursor-pointer ${gameState.currentTurn === PlayerId.ONE ? 'text-cyan-400 drop-shadow-[0_0_5px_cyan]' : 'text-slate-600 hover:text-slate-400'}`}
-                                        >
-                                            PLAYER 1
-                                            <PlayerTooltip
-                                                characterId={gameState.playerCharacters[PlayerId.ONE]}
-                                                talents={gameState.playerTalents[PlayerId.ONE]}
-                                                actions={gameState.characterActions[PlayerId.ONE]}
-                                                alignRight={false}
-                                            />
-                                        </div>
-
-                                        {/* Player 2 */}
-                                        <div
-                                            onClick={() => gameService.debugSetTurn(PlayerId.TWO)}
-                                            className={`relative group text-sm font-bold tracking-widest transition-colors cursor-pointer ${gameState.currentTurn === PlayerId.TWO ? 'text-pink-400 drop-shadow-[0_0_5px_magenta]' : 'text-slate-600 hover:text-slate-400'}`}
-                                        >
-                                            PLAYER 2
-                                            <PlayerTooltip
-                                                characterId={gameState.playerCharacters[PlayerId.TWO]}
-                                                talents={gameState.playerTalents[PlayerId.TWO]}
-                                                actions={gameState.characterActions[PlayerId.TWO]}
-                                                alignRight={false}
-                                            />
-                                        </div>
-
-                                        {/* Neutral */}
-                                        <div
-                                            onClick={() => gameService.debugSetTurn(PlayerId.NEUTRAL)}
-                                            className={`relative group text-sm font-bold tracking-widest transition-colors cursor-pointer ${gameState.currentTurn === PlayerId.NEUTRAL ? 'text-gray-300 drop-shadow-[0_0_5px_gray]' : 'text-slate-600 hover:text-slate-400'}`}
-                                        >
-                                            NEUTRAL
-                                            <PlayerTooltip
-                                                characterId={gameState.playerCharacters[PlayerId.NEUTRAL]}
-                                                talents={gameState.playerTalents[PlayerId.NEUTRAL]}
-                                                actions={gameState.characterActions[PlayerId.NEUTRAL]}
-                                                alignRight={true}
-                                            />
-                                        </div>
-                                    </div>
+                            <div className="bg-transparent border border-green-900 px-6 py-2 rounded-full shadow-[0_0_15px_rgba(0,255,0,0.2)] flex items-center gap-6 backdrop-blur-sm pointer-events-auto">
+                                <div className="flex flex-col items-center justify-center px-4 border-r border-slate-700/50">
+                                    <div className="text-[8px] text-green-500/70 font-bold uppercase tracking-wider leading-none mb-0.5">LEVEL</div>
+                                    <div className="text-lg font-mono font-bold text-white leading-none">{gameState.roundNumber.toString().padStart(2, '0')}</div>
                                 </div>
-                            ) : (
-                                <>
-                                    {/* Player 1 Effects */}
-                                    <div className="flex gap-1 justify-end min-w-[80px] pointer-events-auto">
-                                        {gameState.playerEffects[PlayerId.ONE].map(e => (
-                                            <EffectIcon key={e.id} effect={e} alignRight />
-                                        ))}
-                                    </div>
 
-                                    <div className="bg-transparent border border-green-900 px-6 py-2 rounded-full shadow-[0_0_15px_rgba(0,255,0,0.2)] flex items-center gap-6 backdrop-blur-sm pointer-events-auto">
+                                <div className="flex flex-wrap items-start justify-center gap-5 max-w-[52rem]">
+                                    {hudPlayerIds.map((playerId, index) => {
+                                        const isActive = gameState.currentTurn === playerId;
+                                        const playerColorValue = getPlayerColor(playerId);
+                                        const effects = gameState.playerEffects[playerId];
 
-                                        {/* Player 1 Label + Talent Tooltip */}
-                                        <div className={`relative group text-sm font-bold tracking-widest transition-colors cursor-help ${gameState.currentTurn === PlayerId.ONE ? 'text-cyan-400 drop-shadow-[0_0_5px_cyan]' : 'text-slate-600'}`}>
-                                            PLAYER 1
-                                            <PlayerTooltip
-                                                characterId={gameState.playerCharacters[PlayerId.ONE]}
-                                                talents={gameState.playerTalents[PlayerId.ONE]}
-                                                actions={gameState.characterActions[PlayerId.ONE]}
-                                                alignRight={false}
-                                            />
-                                        </div>
+                                        return (
+                                            <div key={playerId} className="flex min-w-[76px] flex-col items-center gap-1">
+                                                <div
+                                                    onClick={gameState.isDevMode ? () => gameService.debugSetTurn(playerId) : undefined}
+                                                    className={`relative group text-sm font-bold tracking-widest transition-colors ${gameState.isDevMode ? 'cursor-pointer hover:text-slate-400' : 'cursor-help'} ${isActive ? '' : 'text-slate-600'}`}
+                                                    style={isActive ? { color: playerColorValue, textShadow: `0 0 5px ${playerColorValue}` } : undefined}
+                                                >
+                                                    {getPlayerLabel(playerId)}
+                                                    <PlayerTooltip
+                                                        characterId={gameState.playerCharacters[playerId]}
+                                                        talents={gameState.playerTalents[playerId]}
+                                                        actions={gameState.characterActions[playerId]}
+                                                        alignRight={index >= hudPlayerIds.length - 2}
+                                                    />
+                                                </div>
 
-                                        {/* Level Counter */}
-                                        <div className="flex flex-col items-center justify-center px-4 border-l border-r border-slate-700/50">
-                                            <div className="text-[8px] text-green-500/70 font-bold uppercase tracking-wider leading-none mb-0.5">LEVEL</div>
-                                            <div className="text-lg font-mono font-bold text-white leading-none">{gameState.roundNumber.toString().padStart(2, '0')}</div>
-                                        </div>
-
-                                        {/* Player 2 Label + Talent Tooltip */}
-                                        <div className={`relative group text-sm font-bold tracking-widest transition-colors cursor-help ${gameState.currentTurn === PlayerId.TWO ? 'text-pink-400 drop-shadow-[0_0_5px_magenta]' : 'text-slate-600'}`}>
-                                            PLAYER 2
-                                            <PlayerTooltip
-                                                characterId={gameState.playerCharacters[PlayerId.TWO]}
-                                                talents={gameState.playerTalents[PlayerId.TWO]}
-                                                actions={gameState.characterActions[PlayerId.TWO]}
-                                                alignRight={true}
-                                            />
-                                        </div>
-                                    </div>
-
-                                    {/* Player 2 Effects */}
-                                    <div className="flex gap-1 justify-start min-w-[80px] pointer-events-auto">
-                                        {gameState.playerEffects[PlayerId.TWO].map(e => (
-                                            <EffectIcon key={e.id} effect={e} />
-                                        ))}
-                                    </div>
-                                </>
-                            )}
+                                                {effects.length > 0 && (
+                                                    <div className="flex gap-1 justify-center">
+                                                        {effects.map((effect) => (
+                                                            <EffectIcon key={effect.id} effect={effect} alignRight={index >= hudPlayerIds.length - 2} />
+                                                        ))}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                         </div>
 
                         <div className="flex items-center gap-2">
@@ -527,7 +496,7 @@ const App: React.FC = () => {
                                 </button>
                             ) : (
                                 <div className="pointer-events-none bg-gray-900/70 border border-gray-700 text-gray-300 text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded">
-                                    OPPONENT TURN
+                                    WAITING FOR TURN
                                 </div>
                             )}
                         </div>
@@ -605,8 +574,8 @@ const App: React.FC = () => {
                                         <div key={log.id} className="text-[10px] font-mono break-words leading-tight border-l-2 border-green-500/50 pl-2 py-0.5 drop-shadow-sm text-shadow">
                                             <span className="text-gray-400 mr-2">[{log.timestamp}]</span>
                                             {log.playerId && (
-                                                <span className={`mr-2 font-bold ${log.playerId === PlayerId.ONE ? 'text-cyan-400' : 'text-pink-400'}`}>
-                                                    [{log.playerId === PlayerId.ONE ? 'P1' : 'P2'}]
+                                                <span className="mr-2 font-bold" style={{ color: getPlayerColor(log.playerId) }}>
+                                                    [{getPlayerShortLabel(log.playerId)}]
                                                 </span>
                                             )}
                                             <span className="text-green-300/90 font-semibold">{log.message}</span>

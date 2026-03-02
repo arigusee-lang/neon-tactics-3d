@@ -77,6 +77,26 @@ const MapEditor: React.FC<MapEditorProps> = ({ activeTool }) => {
             )
         },
         {
+            id: 'SET_P3_SPAWN',
+            label: 'P3 Zone',
+            icon: (
+                <svg viewBox="0 0 24 24" className="w-6 h-6 fill-none stroke-current stroke-2">
+                    <rect x="4" y="4" width="16" height="16" strokeDasharray="4 2" />
+                    <text x="12" y="16" fontSize="10" textAnchor="middle" fill="currentColor" stroke="none">P3</text>
+                </svg>
+            )
+        },
+        {
+            id: 'SET_P4_SPAWN',
+            label: 'P4 Zone',
+            icon: (
+                <svg viewBox="0 0 24 24" className="w-6 h-6 fill-none stroke-current stroke-2">
+                    <rect x="4" y="4" width="16" height="16" strokeDasharray="4 2" />
+                    <text x="12" y="16" fontSize="10" textAnchor="middle" fill="currentColor" stroke="none">P4</text>
+                </svg>
+            )
+        },
+        {
             id: 'PLACE_COLLECTIBLE',
             label: 'Money ($50)',
             icon: (

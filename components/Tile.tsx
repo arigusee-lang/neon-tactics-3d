@@ -178,6 +178,8 @@ const Tile: React.FC<TileProps> = React.memo(({
     let zoneColor = null;
     if (landingZone === PlayerId.ONE) zoneColor = COLORS.P1;
     else if (landingZone === PlayerId.TWO) zoneColor = COLORS.P2;
+    else if (landingZone === PlayerId.THREE) zoneColor = COLORS.P3;
+    else if (landingZone === PlayerId.FOUR) zoneColor = COLORS.P4;
 
     return (
         <group position={[position[0], position[1] + baseHeight, position[2]]}>

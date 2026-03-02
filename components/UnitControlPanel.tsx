@@ -180,9 +180,18 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
     if (!unit) return null;
 
     const config = CARD_CONFIG[unit.type];
-    const isP1 = unit.playerId === PlayerId.ONE;
-    const isNeutral = unit.playerId === PlayerId.NEUTRAL;
-    const mainColor = isP1 ? COLORS.P1 : isNeutral ? COLORS.NEUTRAL : COLORS.P2;
+    const mainColor =
+        unit.playerId === PlayerId.ONE ? COLORS.P1 :
+        unit.playerId === PlayerId.TWO ? COLORS.P2 :
+        unit.playerId === PlayerId.THREE ? COLORS.P3 :
+        unit.playerId === PlayerId.FOUR ? COLORS.P4 :
+        COLORS.NEUTRAL;
+    const ownerLabel =
+        unit.playerId === PlayerId.ONE ? 'PLAYER 1' :
+        unit.playerId === PlayerId.TWO ? 'PLAYER 2' :
+        unit.playerId === PlayerId.THREE ? 'PLAYER 3' :
+        unit.playerId === PlayerId.FOUR ? 'PLAYER 4' :
+        'NEUTRAL';
 
     // Calculate HP percentage
     const hpPercent = (unit.stats.hp / unit.stats.maxHp) * 100;
@@ -204,11 +213,11 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                         className="px-4 py-3 bg-green-900/30 border-b border-green-500/50 flex justify-between items-center cursor-move select-none group"
                     >
                         <div className="flex items-center gap-2">
-                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: mainColor, boxShadow: `0 0 8px ${mainColor}` }} />
+                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: mainColor, boxShadow: `0 0 8px ${mainColor}` }} />
                             <h2 className="text-xs font-bold text-white uppercase tracking-[0.15em]">{config?.name || 'UNKNOWN UNIT'}</h2>
                         </div>
                         <div className="text-[9px] font-bold px-2 py-0.5 rounded bg-black/60 border border-green-900/50" style={{ color: mainColor }}>
-                            {isP1 ? 'PLAYER 1' : isNeutral ? 'NEUTRAL' : 'PLAYER 2'}
+                            {ownerLabel}
                         </div>
                     </div>
 

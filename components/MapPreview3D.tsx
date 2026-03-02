@@ -11,6 +11,8 @@ interface MapPreview3DProps {
 const getTerrainColor = (terrain?: TerrainData): string => {
   if (terrain?.landingZone === PlayerId.ONE) return '#14532d';
   if (terrain?.landingZone === PlayerId.TWO) return '#1e3a8a';
+  if (terrain?.landingZone === PlayerId.THREE) return '#4d7c0f';
+  if (terrain?.landingZone === PlayerId.FOUR) return '#9a3412';
   if (terrain?.type === 'PLATFORM') return '#6b7280';
   if (terrain?.type === 'RAMP') return '#4b5563';
   return '#1f2937';
@@ -19,6 +21,8 @@ const getTerrainColor = (terrain?: TerrainData): string => {
 const getUnitColor = (unit: Unit): string => {
   if (unit.playerId === PlayerId.ONE) return '#22c55e';
   if (unit.playerId === PlayerId.TWO) return '#60a5fa';
+  if (unit.playerId === PlayerId.THREE) return '#a3e635';
+  if (unit.playerId === PlayerId.FOUR) return '#fbbf24';
   return '#f59e0b';
 };
 

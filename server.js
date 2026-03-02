@@ -1,6 +1,7 @@
 import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
+import fs from 'fs';
 
 const app = express();
 const httpServer = createServer(app);
@@ -39,14 +40,49 @@ let gameState = {
   // ... initial state
 };
 
+function loadMapPlayerCounts() {
+  const counts = {};
+  const mapsDir = path.join(__dirname, 'maps');
+
+  if (!fs.existsSync(mapsDir)) {
+    return counts;
+  }
+
+  fs.readdirSync(mapsDir)
+    .filter((fileName) => fileName.endsWith('.json'))
+    .forEach((fileName) => {
+      try {
+        const raw = fs.readFileSync(path.join(mapsDir, fileName), 'utf8');
+        const parsed = JSON.parse(raw);
+        const mapId = fileName.replace(/\.json$/i, '');
+        const players = parsed?.players;
+        counts[mapId] = players === 3 || players === 4 ? players : 2;
+      } catch (error) {
+        const mapId = fileName.replace(/\.json$/i, '');
+        counts[mapId] = 2;
+      }
+    });
+
+  return counts;
+}
+
+const MAP_PLAYER_COUNTS = loadMapPlayerCounts();
+
+function getLobbyCapacity(mapId) {
+  const count = MAP_PLAYER_COUNTS[mapId];
+  return count === 3 || count === 4 ? count : 2;
+}
+
 // Lobby management
 // Keep an explicit simulation authority socket so the transport layer can evolve
 // independently from the current 2-player P1/P2 game rules.
-const lobbies = {}; // { roomId: { players: [socketId], authoritySocketId: string, gameState: any, mapId: string, currentTurn: string, started: boolean } }
+const lobbies = {}; // { roomId: { players: [socketId], authoritySocketId: string, gameState: any, mapId: string, currentTurn: string, turnOrder: string[], maxPlayers: number, started: boolean } }
 
 const PLAYER_ONE = 'P1';
 const PLAYER_TWO = 'P2';
-const PLAYER_IDS = [PLAYER_ONE, PLAYER_TWO];
+const PLAYER_THREE = 'P3';
+const PLAYER_FOUR = 'P4';
+const PLAYER_IDS = [PLAYER_ONE, PLAYER_TWO, PLAYER_THREE, PLAYER_FOUR];
 
 const AUTHORITATIVE_ACTIONS = new Set([
   'SYNC_STATE',
@@ -119,17 +155,25 @@ function getPlayerIdForSocket(lobby, socketId) {
   const index = lobby.players.indexOf(socketId);
   if (index === 0) return PLAYER_ONE;
   if (index === 1) return PLAYER_TWO;
+  if (index === 2) return PLAYER_THREE;
+  if (index === 3) return PLAYER_FOUR;
   return null;
 }
 
-function getNextTurn(currentTurn) {
-  return currentTurn === PLAYER_ONE ? PLAYER_TWO : PLAYER_ONE;
+function getNextTurn(currentTurn, turnOrder = PLAYER_IDS) {
+  const currentIndex = turnOrder.indexOf(currentTurn);
+  if (currentIndex === -1 || turnOrder.length === 0) {
+    return turnOrder[0] || PLAYER_ONE;
+  }
+  return turnOrder[(currentIndex + 1) % turnOrder.length];
 }
 
 function createEmptyCharacterSelections() {
   return {
     [PLAYER_ONE]: null,
     [PLAYER_TWO]: null,
+    [PLAYER_THREE]: null,
+    [PLAYER_FOUR]: null,
     NEUTRAL: null
   };
 }
@@ -138,6 +182,18 @@ function getLobbyPlayerIds(lobby) {
   return lobby.players
     .map((socketId) => getPlayerIdForSocket(lobby, socketId))
     .filter(Boolean);
+}
+
+function emitLobbyState(roomId, lobby) {
+  io.to(roomId).emit('lobby_state', {
+    roomId,
+    mapId: lobby.mapId || 'MAP_1',
+    players: [...lobby.players],
+    playerIds: getLobbyPlayerIds(lobby),
+    maxPlayers: lobby.maxPlayers || 2,
+    started: !!lobby.started,
+    authoritySocketId: lobby.authoritySocketId || null
+  });
 }
 
 function removePlayerFromLobby(socket, roomId, lobby, departureMessage = 'Opponent disconnected') {
@@ -163,10 +219,11 @@ function removePlayerFromLobby(socket, roomId, lobby, departureMessage = 'Oppone
 
   lobby.authoritySocketId = lobby.players[0];
   lobby.started = false;
-  lobby.currentTurn = PLAYER_ONE;
+  lobby.currentTurn = lobby.turnOrder?.[0] || PLAYER_ONE;
   lobby.gameState = null;
   lobby.selectedCharacters = createEmptyCharacterSelections();
 
+  emitLobbyState(roomId, lobby);
   io.to(roomId).emit('error_message', departureMessage);
 }
 
@@ -176,6 +233,8 @@ io.on('connection', (socket) => {
   // 1. Create Lobby
   socket.on('create_lobby', (payload = {}) => {
     const mapId = typeof payload?.mapId === 'string' ? payload.mapId : 'MAP_1';
+    const maxPlayers = getLobbyCapacity(mapId);
+    const turnOrder = PLAYER_IDS.slice(0, maxPlayers);
     const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
     lobbies[roomId] = {
       players: [socket.id],
@@ -183,10 +242,13 @@ io.on('connection', (socket) => {
       gameState: null,
       selectedCharacters: createEmptyCharacterSelections(),
       mapId,
-      currentTurn: PLAYER_ONE,
+      currentTurn: turnOrder[0] || PLAYER_ONE,
+      turnOrder,
+      maxPlayers,
       started: false
     };
     socket.join(roomId);
+    emitLobbyState(roomId, lobbies[roomId]);
     socket.emit('lobby_created', { roomId, mapId, authoritySocketId: socket.id });
     console.log(`Lobby created: ${roomId} by ${socket.id} | map=${mapId}`);
   });
@@ -194,22 +256,25 @@ io.on('connection', (socket) => {
   // 2. Join Lobby
   socket.on('join_lobby', (roomId) => {
     const lobby = lobbies[roomId];
-    if (lobby && lobby.players.length < 2) {
+    if (lobby && lobby.players.length < lobby.maxPlayers) {
       lobby.selectedCharacters = createEmptyCharacterSelections();
       lobby.gameState = null;
       lobby.players.push(socket.id);
-      lobby.started = true;
-      lobby.currentTurn = PLAYER_ONE;
+      lobby.started = lobby.players.length === lobby.maxPlayers;
+      lobby.currentTurn = lobby.turnOrder?.[0] || PLAYER_ONE;
       socket.join(roomId);
+      emitLobbyState(roomId, lobby);
 
-      // Notify both players that game is ready
-      io.to(roomId).emit('game_start', {
-        roomId,
-        players: lobby.players,
-        mapId: lobby.mapId || 'MAP_1',
-        authoritySocketId: lobby.authoritySocketId
-      });
-      console.log(`Player ${socket.id} joined lobby ${roomId}`);
+      if (lobby.started) {
+        io.to(roomId).emit('game_start', {
+          roomId,
+          players: lobby.players,
+          mapId: lobby.mapId || 'MAP_1',
+          authoritySocketId: lobby.authoritySocketId,
+          turnOrder: lobby.turnOrder
+        });
+        console.log(`Player ${socket.id} joined lobby ${roomId} (${lobby.players.length}/${lobby.maxPlayers})`);
+      }
     } else {
       socket.emit('error_message', 'Lobby not found or full');
     }
@@ -349,7 +414,7 @@ io.on('connection', (socket) => {
 
     const turnBefore = lobby.currentTurn;
     if (action === 'SKIP_TURN') {
-      lobby.currentTurn = getNextTurn(lobby.currentTurn);
+      lobby.currentTurn = getNextTurn(lobby.currentTurn, lobby.turnOrder);
     }
 
     io.to(lobby.authoritySocketId).emit('authoritative_command', {

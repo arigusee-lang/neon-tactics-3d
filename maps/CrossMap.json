@@ -1,6 +1,7 @@
 {
   "description": "Wide cross-shaped arena with large landing zones and a central lane.",
   "players": 2,
+  "mode": "duel",
   "terrain": {
     "17,11": {
       "type": "NORMAL",

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import MapPreview3D from './MapPreview3D';
-import { AppStatus, MapMetadata } from '../types';
+import { AppStatus, EmptyMapConfig, MapMetadata, MatchMode } from '../types';
 import { gameService } from '../services/gameService';
 import { BOARD_SIZE } from '../constants';
 
@@ -11,6 +11,9 @@ interface MainMenuProps {
   onRestartCurrentMap: () => void;
   availableMaps: MapMetadata[];
   roomId: string | null;
+  lobbyMapId: string | null;
+  lobbyPlayerCount: number;
+  lobbyMaxPlayers: number;
   isMultiplayer: boolean;
   isDevMode: boolean;
 }
@@ -24,6 +27,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
   onRestartCurrentMap,
   availableMaps,
   roomId,
+  lobbyMapId,
+  lobbyPlayerCount,
+  lobbyMaxPlayers,
   isMultiplayer,
   isDevMode
 }) => {
@@ -35,6 +41,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [selectedSoloMap, setSelectedSoloMap] = useState('MAP_1');
   const [selectedDevMap, setSelectedDevMap] = useState('EMPTY');
   const [selectedMultiplayerMap, setSelectedMultiplayerMap] = useState('CrossMap');
+  const [emptyPlayerCount, setEmptyPlayerCount] = useState<2 | 3 | 4>(2);
+  const [emptyMode, setEmptyMode] = useState<MatchMode>('duel');
 
   const isTopLevelMenuStatus = status === AppStatus.MENU || status === AppStatus.MAP_SELECTION;
   const canRestartCurrentMap = !isMultiplayer && !isDevMode;
@@ -49,11 +57,19 @@ const MainMenu: React.FC<MainMenuProps> = ({
       {
         id: 'EMPTY',
         description: 'Blank sandbox generated from the selected dimensions.',
-        players: 'dev' as const
+        players: 'dev' as const,
+        mode: 'duel' as const
       },
       ...soloMaps
     ];
   }, [soloMaps]);
+
+  const emptyMapConfig = useMemo<EmptyMapConfig>(() => ({
+    players: emptyPlayerCount,
+    mode: emptyMode
+  }), [emptyMode, emptyPlayerCount]);
+  const emptyMinWidth = emptyPlayerCount > 2 ? 6 : 4;
+  const emptyMinDepth = emptyPlayerCount > 2 ? 7 : 6;
 
   const multiplayerMaps = useMemo(() => {
     return availableMaps.filter((map) => map.id === 'CrossMap');
@@ -71,6 +87,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
     return multiplayerMaps.find((map) => map.id === selectedMultiplayerMap) || null;
   }, [multiplayerMaps, selectedMultiplayerMap]);
 
+  const activeLobbyMapMeta = useMemo(() => {
+    if (!lobbyMapId) return selectedMultiplayerMapMeta;
+    return availableMaps.find((map) => map.id === lobbyMapId) || selectedMultiplayerMapMeta;
+  }, [availableMaps, lobbyMapId, selectedMultiplayerMapMeta]);
+
+  const hasPendingLobby = !!roomId && lobbyMaxPlayers > 0;
+  const remainingLobbySlots = hasPendingLobby ? Math.max(0, lobbyMaxPlayers - lobbyPlayerCount) : 0;
+
   const selectedPreview = useMemo(() => {
     if (menuView === 'SOLO_MAPS') {
       return gameService.getMapPreviewData(selectedSoloMap);
@@ -78,15 +102,16 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
     if (menuView === 'DEV_MAPS') {
       const customSize = selectedDevMap === 'EMPTY' ? { x: fieldWidth, y: fieldDepth } : undefined;
-      return gameService.getMapPreviewData(selectedDevMap, customSize);
+      const config = selectedDevMap === 'EMPTY' ? emptyMapConfig : undefined;
+      return gameService.getMapPreviewData(selectedDevMap, customSize, config);
     }
 
     if (menuView === 'MULTIPLAYER') {
-      return gameService.getMapPreviewData(selectedMultiplayerMap);
+      return gameService.getMapPreviewData(lobbyMapId || selectedMultiplayerMap);
     }
 
     return null;
-  }, [fieldDepth, fieldWidth, menuView, selectedDevMap, selectedMultiplayerMap, selectedSoloMap]);
+  }, [emptyMapConfig, fieldDepth, fieldWidth, lobbyMapId, menuView, selectedDevMap, selectedMultiplayerMap, selectedSoloMap]);
 
   useEffect(() => {
     if (status === AppStatus.MENU) {
@@ -125,6 +150,27 @@ const MainMenu: React.FC<MainMenuProps> = ({
     }
   }, [multiplayerMaps, selectedMultiplayerMap]);
 
+  useEffect(() => {
+    if (emptyPlayerCount === 2 && emptyMode !== 'duel') {
+      setEmptyMode('duel');
+      return;
+    }
+
+    if (emptyPlayerCount === 3 && emptyMode !== 'team_2v1' && emptyMode !== 'ffa') {
+      setEmptyMode('team_2v1');
+      return;
+    }
+
+    if (emptyPlayerCount === 4 && emptyMode !== 'team_2v2' && emptyMode !== 'ffa') {
+      setEmptyMode('team_2v2');
+    }
+  }, [emptyMode, emptyPlayerCount]);
+
+  useEffect(() => {
+    setFieldWidth((prev) => Math.max(emptyMinWidth, Math.min(BOARD_SIZE, prev)));
+    setFieldDepth((prev) => Math.max(emptyMinDepth, Math.min(BOARD_SIZE, prev)));
+  }, [emptyMinDepth, emptyMinWidth]);
+
   const enterMultiplayerMenu = () => {
     setMenuView('MULTIPLAYER');
     setIsGeneratingRoomCode(false);
@@ -142,16 +188,38 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
   const startSelectedDevMap = () => {
     if (selectedDevMap === 'EMPTY') {
-      gameService.beginMatchSetup('EMPTY', true, { x: fieldWidth, y: fieldDepth });
+      gameService.beginMatchSetup('EMPTY', true, { x: fieldWidth, y: fieldDepth }, emptyMapConfig);
       return;
     }
 
     gameService.beginMatchSetup(selectedDevMap, true);
   };
 
+  const getModeLabel = (mode: MatchMode) => {
+    switch (mode) {
+      case 'team_2v1':
+        return 'P1+P2 vs P3';
+      case 'team_2v2':
+        return 'P1+P2 vs P3+P4';
+      case 'ffa':
+        return 'Free For All';
+      default:
+        return 'P1 vs P2';
+    }
+  };
+
   const createMultiplayerLobby = () => {
+    if (hasPendingLobby) return;
     setIsGeneratingRoomCode(true);
     gameService.createLobby(selectedMultiplayerMap);
+  };
+
+  const getLobbyStatusLabel = () => {
+    if (isGeneratingRoomCode && !roomId) return 'Generating room uplink...';
+    if (!hasPendingLobby) return 'No active lobby';
+    if (remainingLobbySlots === 0) return 'Lobby full. Initializing match...';
+    if (remainingLobbySlots === 1) return 'Waiting for 1 more player';
+    return `Waiting for ${remainingLobbySlots} more players`;
   };
 
   const renderMapListItem = (
@@ -213,8 +281,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   }
 
   return (
-    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-auto p-4">
-      <div className={`relative w-full overflow-hidden rounded-xl border border-green-500/50 bg-black/70 p-8 shadow-[0_0_50px_rgba(0,255,0,0.2)] backdrop-blur-sm ${isMapBrowserView ? 'max-w-6xl' : 'max-w-md'}`}>
+    <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-auto p-3 md:p-4">
+      <div className={`relative w-full overflow-hidden rounded-xl border border-green-500/50 bg-black/70 shadow-[0_0_50px_rgba(0,255,0,0.2)] backdrop-blur-sm ${isMapBrowserView ? 'max-w-6xl max-h-[calc(100vh-1.5rem)] md:max-h-[calc(100vh-2rem)]' : 'max-w-md'} ${isMapBrowserView ? 'p-5 md:p-6' : 'p-8'}`}>
         <div
           className="absolute inset-0 opacity-20 pointer-events-none"
           style={{
@@ -224,7 +292,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           }}
         />
 
-        <div className="relative z-10">
+        <div className={`relative z-10 ${isMapBrowserView ? 'max-h-[calc(100vh-3.5rem)] overflow-y-auto pr-1 md:max-h-[calc(100vh-4rem)]' : ''}`}>
           <h1 className="text-center text-4xl font-black uppercase tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-green-400 to-cyan-400 drop-shadow-[0_0_10px_rgba(0,255,0,0.5)] md:text-5xl">
             Neon Tactics
             <span className="mt-2 block text-sm font-mono tracking-[0.5em] text-green-500/80">SIMULATION LINK</span>
@@ -301,7 +369,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 </div>
 
                 <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-                  <div className="flex min-h-[520px] flex-col rounded-2xl border border-white/10 bg-black/35 p-4">
+                  <div className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-black/35 p-4 lg:max-h-[calc(100vh-16rem)]">
                     <div className="mb-3 text-[10px] font-mono uppercase tracking-[0.35em] text-gray-400">
                       Map List
                     </div>
@@ -326,7 +394,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                           <input
                             type="number"
                             value={fieldWidth}
-                            onChange={(e) => setFieldWidth(Math.max(4, Math.min(BOARD_SIZE, parseInt(e.target.value, 10) || 10)))}
+                            onChange={(e) => setFieldWidth(Math.max(emptyMinWidth, Math.min(BOARD_SIZE, parseInt(e.target.value, 10) || 10)))}
                             className="w-16 border border-yellow-500/30 bg-black/50 p-2 text-center text-xs text-yellow-300 outline-none focus:border-yellow-500"
                             placeholder="X"
                           />
@@ -334,10 +402,62 @@ const MainMenu: React.FC<MainMenuProps> = ({
                           <input
                             type="number"
                             value={fieldDepth}
-                            onChange={(e) => setFieldDepth(Math.max(4, Math.min(BOARD_SIZE, parseInt(e.target.value, 10) || 10)))}
+                            onChange={(e) => setFieldDepth(Math.max(emptyMinDepth, Math.min(BOARD_SIZE, parseInt(e.target.value, 10) || 10)))}
                             className="w-16 border border-yellow-500/30 bg-black/50 p-2 text-center text-xs text-yellow-300 outline-none focus:border-yellow-500"
                             placeholder="Y"
                           />
+                        </div>
+                        <div className="mt-1 text-[10px] font-mono text-yellow-200/60">
+                          Minimum size: {emptyMinWidth} x {emptyMinDepth}
+                        </div>
+
+                        <div className="mt-4 grid gap-3">
+                          <div>
+                            <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.22em] text-yellow-200/80">
+                              Player Count
+                            </div>
+                            <div className="flex gap-2">
+                              {[2, 3, 4].map((count) => (
+                                <button
+                                  key={count}
+                                  onClick={() => setEmptyPlayerCount(count as 2 | 3 | 4)}
+                                  className={`flex-1 border px-3 py-2 text-[11px] font-mono font-bold uppercase tracking-[0.18em] transition-colors ${
+                                    emptyPlayerCount === count
+                                      ? 'border-yellow-300 bg-yellow-500/20 text-yellow-100'
+                                      : 'border-yellow-500/20 bg-black/30 text-yellow-300/70 hover:border-yellow-400/40'
+                                  }`}
+                                >
+                                  {count}P
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div>
+                            <div className="mb-2 text-[10px] font-mono uppercase tracking-[0.22em] text-yellow-200/80">
+                              Match Mode
+                            </div>
+                            <div className="grid gap-2">
+                              {(emptyPlayerCount === 2
+                                ? [{ value: 'duel', label: 'P1 vs P2' }]
+                                : emptyPlayerCount === 3
+                                  ? [{ value: 'team_2v1', label: 'P1+P2 vs P3' }, { value: 'ffa', label: 'Free For All' }]
+                                  : [{ value: 'team_2v2', label: 'P1+P2 vs P3+P4' }, { value: 'ffa', label: 'Free For All' }]
+                              ).map((option) => (
+                                <button
+                                  key={option.value}
+                                  onClick={() => setEmptyMode(option.value as MatchMode)}
+                                  className={`border px-3 py-2 text-left text-[11px] font-mono font-bold uppercase tracking-[0.14em] transition-colors ${
+                                    emptyMode === option.value
+                                      ? 'border-yellow-300 bg-yellow-500/20 text-yellow-100'
+                                      : 'border-yellow-500/20 bg-black/30 text-yellow-300/70 hover:border-yellow-400/40'
+                                  }`}
+                                >
+                                  {option.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -362,25 +482,30 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     </div>
                   </div>
 
-                  <div className="flex min-h-[520px] flex-col rounded-2xl border border-cyan-500/20 bg-black/35 p-4">
+                  <div className="flex min-h-0 flex-col rounded-2xl border border-cyan-500/20 bg-black/35 p-4 lg:max-h-[calc(100vh-16rem)]">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <div className="text-[10px] font-mono uppercase tracking-[0.35em] text-cyan-300/80">
                           3D Preview
                         </div>
                         <div className="mt-2 text-2xl font-black uppercase tracking-[0.18em] text-white">
-                          {menuView === 'DEV_MAPS' ? selectedDevMapMeta?.id : selectedSoloMapMeta?.id}
+                          {menuView === 'DEV_MAPS' ? (selectedPreview?.id || selectedDevMapMeta?.id) : selectedSoloMapMeta?.id}
                         </div>
                       </div>
                       <div className="rounded-full border border-cyan-400/30 px-3 py-1 text-[10px] font-mono uppercase tracking-[0.24em] text-cyan-200/75">
-                        {(menuView === 'DEV_MAPS' ? selectedDevMapMeta : selectedSoloMapMeta)?.players === 'dev'
+                        {(menuView === 'DEV_MAPS' ? (selectedPreview || selectedDevMapMeta) : selectedSoloMapMeta)?.players === 'dev'
                           ? 'Solo / Dev'
-                          : `${(menuView === 'DEV_MAPS' ? selectedDevMapMeta : selectedSoloMapMeta)?.players || 2} Players`}
+                          : `${(menuView === 'DEV_MAPS' ? (selectedPreview || selectedDevMapMeta) : selectedSoloMapMeta)?.players || 2} Players`}
                       </div>
                     </div>
 
                     <div className="mb-4 text-sm leading-relaxed text-gray-300">
-                      {(menuView === 'DEV_MAPS' ? selectedDevMapMeta : selectedSoloMapMeta)?.description || 'No map description provided.'}
+                      {(menuView === 'DEV_MAPS' ? (selectedPreview || selectedDevMapMeta) : selectedSoloMapMeta)?.description || 'No map description provided.'}
+                      {menuView === 'DEV_MAPS' && selectedDevMap === 'EMPTY' && (
+                        <div className="mt-3 text-xs font-mono uppercase tracking-[0.18em] text-cyan-300/75">
+                          {getModeLabel(emptyMode)}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex-1">
@@ -396,7 +521,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                 <div className="mb-4 text-center text-sm font-mono text-purple-300">MULTIPLAYER UPLINK</div>
 
                 <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
-                  <div className="flex min-h-[520px] flex-col rounded-2xl border border-white/10 bg-black/35 p-4">
+                  <div className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-black/35 p-4 lg:max-h-[calc(100vh-16rem)]">
                     <div className="mb-3 text-[10px] font-mono uppercase tracking-[0.35em] text-gray-400">
                       Hostable Maps
                     </div>
@@ -409,9 +534,14 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
                     <button
                       onClick={createMultiplayerLobby}
-                      className="mt-4 border border-purple-400/60 bg-purple-600/15 px-4 py-3 font-mono text-sm font-bold uppercase tracking-[0.28em] text-purple-100 transition-colors hover:border-purple-300 hover:bg-purple-500/20"
+                      disabled={hasPendingLobby}
+                      className={`mt-4 border px-4 py-3 font-mono text-sm font-bold uppercase tracking-[0.28em] transition-colors ${
+                        hasPendingLobby
+                          ? 'cursor-not-allowed border-purple-900/60 bg-purple-950/20 text-purple-300/40'
+                          : 'border-purple-400/60 bg-purple-600/15 text-purple-100 hover:border-purple-300 hover:bg-purple-500/20'
+                      }`}
                     >
-                      Create Lobby
+                      {hasPendingLobby ? 'Lobby Active' : 'Create Lobby'}
                     </button>
 
                     <div className="mt-4 rounded-xl border border-purple-500/30 bg-purple-950/15 px-3 py-3 text-center text-xs font-mono text-purple-100">
@@ -427,41 +557,71 @@ const MainMenu: React.FC<MainMenuProps> = ({
                         value={roomCodeInput}
                         onChange={(e) => setRoomCodeInput(e.target.value.toUpperCase())}
                         placeholder="ENTER ROOM CODE"
-                        className="w-2/3 border border-purple-500/30 bg-black/50 p-3 text-center font-mono uppercase text-purple-300 outline-none focus:border-purple-500"
+                        disabled={hasPendingLobby}
+                        className="w-2/3 border border-purple-500/30 bg-black/50 p-3 text-center font-mono uppercase text-purple-300 outline-none focus:border-purple-500 disabled:cursor-not-allowed disabled:opacity-40"
                       />
                       <button
                         onClick={joinRoom}
-                        className="w-1/3 border border-purple-500/50 bg-purple-900/40 font-mono font-bold text-purple-300 transition-colors hover:border-purple-400 hover:bg-purple-600/20 hover:text-white"
+                        disabled={hasPendingLobby}
+                        className="w-1/3 border border-purple-500/50 bg-purple-900/40 font-mono font-bold text-purple-300 transition-colors hover:border-purple-400 hover:bg-purple-600/20 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         JOIN
                       </button>
                     </div>
 
-                    <button
-                      onClick={() => setMenuView('START')}
-                      className="mt-4 border border-gray-500/50 bg-gray-900/40 px-4 py-3 font-mono text-sm font-bold uppercase tracking-[0.22em] text-gray-300 transition-colors hover:border-gray-400 hover:bg-gray-700/20 hover:text-white"
-                    >
-                      Back
-                    </button>
+                    {hasPendingLobby ? (
+                      <button
+                        onClick={onAbortToMenu}
+                        className="mt-4 border border-red-500/50 bg-red-900/30 px-4 py-3 font-mono text-sm font-bold uppercase tracking-[0.22em] text-red-200 transition-colors hover:border-red-400 hover:bg-red-700/20 hover:text-white"
+                      >
+                        Leave Lobby
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => setMenuView('START')}
+                        className="mt-4 border border-gray-500/50 bg-gray-900/40 px-4 py-3 font-mono text-sm font-bold uppercase tracking-[0.22em] text-gray-300 transition-colors hover:border-gray-400 hover:bg-gray-700/20 hover:text-white"
+                      >
+                        Back
+                      </button>
+                    )}
                   </div>
 
-                  <div className="flex min-h-[520px] flex-col rounded-2xl border border-purple-500/20 bg-black/35 p-4">
+                  <div className="flex min-h-0 flex-col rounded-2xl border border-purple-500/20 bg-black/35 p-4 lg:max-h-[calc(100vh-16rem)]">
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <div className="text-[10px] font-mono uppercase tracking-[0.35em] text-purple-300/80">
                           Locked Multiplayer Pool
                         </div>
                         <div className="mt-2 text-2xl font-black uppercase tracking-[0.18em] text-white">
-                          {selectedMultiplayerMapMeta?.id || 'NO MAP'}
+                          {activeLobbyMapMeta?.id || selectedMultiplayerMapMeta?.id || 'NO MAP'}
                         </div>
                       </div>
                       <div className="rounded-full border border-purple-400/30 px-3 py-1 text-[10px] font-mono uppercase tracking-[0.24em] text-purple-200/75">
-                        2 Players
+                        {activeLobbyMapMeta?.players === 'dev' ? 'Dev Only' : `${activeLobbyMapMeta?.players || 2} Players`}
                       </div>
                     </div>
 
                     <div className="mb-4 text-sm leading-relaxed text-gray-300">
-                      {selectedMultiplayerMapMeta?.description || 'Multiplayer is currently restricted to the CrossMap rotation.'}
+                      {activeLobbyMapMeta?.description || 'Multiplayer is currently restricted to the CrossMap rotation.'}
+                    </div>
+
+                    <div className="mb-4 rounded-xl border border-purple-500/30 bg-purple-950/15 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-[10px] font-mono uppercase tracking-[0.3em] text-purple-300/80">
+                          Lobby Status
+                        </div>
+                        <div className="rounded-full border border-purple-400/20 px-3 py-1 text-[10px] font-mono uppercase tracking-[0.2em] text-purple-100/80">
+                          {hasPendingLobby ? `${lobbyPlayerCount}/${lobbyMaxPlayers}` : '--/--'}
+                        </div>
+                      </div>
+                      <div className="mt-3 text-sm font-mono text-purple-100">
+                        {getLobbyStatusLabel()}
+                      </div>
+                      {hasPendingLobby && (
+                        <div className="mt-2 text-[11px] font-mono uppercase tracking-[0.18em] text-purple-300/65">
+                          Room {roomId} | {activeLobbyMapMeta?.id || selectedMultiplayerMap}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex-1">
