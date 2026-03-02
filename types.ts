@@ -89,7 +89,7 @@ export interface MapPreviewData extends MapMetadata {
 
 export interface TilePulse {
   key: string;
-  kind: 'SABOTAGE';
+  kind: 'SABOTAGE' | 'ION_CANNON';
 }
 
 export interface UnitStats {

@@ -52,14 +52,34 @@ const MuzzleFlash = ({ position, color }: { position: Vector3, color: string }) 
 };
 
 // Impact Explosion Effect
-const Impact = ({ position, color }: { position: Vector3, color: string }) => {
+const Impact = ({
+    position,
+    color,
+    innerRadius = 0.1,
+    outerRadius = 0.18,
+    expansion = 3.4,
+    sparkSpeed = 0.11,
+    sparkCount = 5,
+    lightIntensity = 1.5,
+    lightDistance = 1.6
+}: {
+    position: Vector3,
+    color: string,
+    innerRadius?: number,
+    outerRadius?: number,
+    expansion?: number,
+    sparkSpeed?: number,
+    sparkCount?: number,
+    lightIntensity?: number,
+    lightDistance?: number
+}) => {
     const ringRef = useRef<THREE.Mesh>(null);
     const sparksRef = useRef<Group>(null);
 
     useFrame((state, delta) => {
         // Expand Ring
         if (ringRef.current) {
-            ringRef.current.scale.multiplyScalar(1 + delta * 5);
+            ringRef.current.scale.multiplyScalar(1 + delta * expansion);
             ringRef.current.rotation.z += delta * 2;
             (ringRef.current.material as THREE.MeshBasicMaterial).opacity -= delta * 3;
         }
@@ -73,16 +93,16 @@ const Impact = ({ position, color }: { position: Vector3, color: string }) => {
     });
 
     const sparks = useMemo(() => {
-        return new Array(6).fill(0).map((_, i) => ({
-            velocity: new Vector3((Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.2, (Math.random() - 0.5) * 0.2)
+        return new Array(sparkCount).fill(0).map(() => ({
+            velocity: new Vector3((Math.random() - 0.5) * sparkSpeed, (Math.random() - 0.5) * sparkSpeed, (Math.random() - 0.5) * sparkSpeed)
         }));
-    }, []);
+    }, [sparkCount, sparkSpeed]);
 
     return (
         <group position={position}>
             {/* Energy Ring */}
             <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]}>
-                <ringGeometry args={[0.2, 0.3, 16]} />
+                <ringGeometry args={[innerRadius, outerRadius, 16]} />
                 <meshBasicMaterial color={color} transparent opacity={1} side={THREE.DoubleSide} />
             </mesh>
             {/* Sparks */}
@@ -94,6 +114,7 @@ const Impact = ({ position, color }: { position: Vector3, color: string }) => {
                     </mesh>
                 ))}
             </group>
+            <pointLight position={[0, 0.18, 0]} color={color} intensity={lightIntensity} distance={lightDistance} decay={2} />
         </group>
     );
 };
@@ -171,6 +192,72 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
     const beamGlowThickness = 0.08;
 
     const displayColor = isMedic ? '#00ff00' : color;
+    const impactProfile = useMemo(() => {
+        if (isTower) {
+            return {
+                innerRadius: 0.18,
+                outerRadius: 0.3,
+                expansion: 5,
+                sparkSpeed: 0.18,
+                sparkCount: 6,
+                lightIntensity: 2.8,
+                lightDistance: 2.8
+            };
+        }
+
+        switch (type) {
+            case EUnitType.SOLDIER:
+                return {
+                    innerRadius: 0.09,
+                    outerRadius: 0.16,
+                    expansion: 3.1,
+                    sparkSpeed: 0.08,
+                    sparkCount: 4,
+                    lightIntensity: 1.2,
+                    lightDistance: 1.4
+                };
+            case EUnitType.BOX:
+                return {
+                    innerRadius: 0.07,
+                    outerRadius: 0.13,
+                    expansion: 2.8,
+                    sparkSpeed: 0.06,
+                    sparkCount: 3,
+                    lightIntensity: 0.9,
+                    lightDistance: 1.1
+                };
+            case EUnitType.SNIPER:
+                return {
+                    innerRadius: 0.06,
+                    outerRadius: 0.11,
+                    expansion: 2.5,
+                    sparkSpeed: 0.05,
+                    sparkCount: 3,
+                    lightIntensity: 1.1,
+                    lightDistance: 1.2
+                };
+            case EUnitType.HEAVY:
+                return {
+                    innerRadius: 0.11,
+                    outerRadius: 0.19,
+                    expansion: 3.5,
+                    sparkSpeed: 0.09,
+                    sparkCount: 5,
+                    lightIntensity: 1.5,
+                    lightDistance: 1.8
+                };
+            default:
+                return {
+                    innerRadius: 0.1,
+                    outerRadius: 0.18,
+                    expansion: 3.4,
+                    sparkSpeed: 0.08,
+                    sparkCount: 4,
+                    lightIntensity: 1.2,
+                    lightDistance: 1.5
+                };
+        }
+    }, [isTower, type]);
 
     useFrame((state, delta) => {
         // FLUX TOWER LOGIC: Instant Beam
@@ -255,7 +342,7 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
             )}
 
             {/* Impact */}
-            {phase === 'impact' && <Impact position={end} color={displayColor} />}
+            {phase === 'impact' && <Impact position={end} color={displayColor} {...impactProfile} />}
         </group>,
         scene
     );

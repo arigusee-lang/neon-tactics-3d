@@ -1991,7 +1991,7 @@ class GameService {
         }, 1200);
     }
 
-    private triggerTilePulse(key: string, kind: 'SABOTAGE') {
+    private triggerTilePulse(key: string, kind: 'SABOTAGE' | 'ION_CANNON') {
         this.state.tilePulse = { key, kind };
         this.notify();
         this.replicateAuthoritativeState();
@@ -2001,7 +2001,7 @@ class GameService {
             this.state.tilePulse = null;
             this.notify();
             this.replicateAuthoritativeState();
-        }, 900);
+        }, kind === 'ION_CANNON' ? 1100 : 900);
     }
 
     private processStructures(playerId: PlayerId) {
@@ -3104,9 +3104,15 @@ class GameService {
 
         this.consumeActionCard(playerId, UnitType.ION_CANNON, this.state.selectedCardId);
         this.log(`> ORBITAL STRIKE INBOUND AT ${x},${z}`, playerId);
-        this.applyAreaDamage({ x, z }, 1.5, 50, 'ORBITAL_STRIKE');
-        this.checkWinCondition(); // Check after damage application
+        this.triggerTilePulse(`${x},${z}`, 'ION_CANNON');
         this.finalizeInteraction();
+
+        window.setTimeout(() => {
+            this.applyAreaDamage({ x, z }, 1.5, 50, 'ORBITAL_STRIKE');
+            this.checkWinCondition();
+            this.notify();
+            this.replicateAuthoritativeState();
+        }, 420);
     }
 
     private handleForwardBasePlacement(x: number, z: number, isRemote: boolean = false, forcedPlayerId?: PlayerId) {

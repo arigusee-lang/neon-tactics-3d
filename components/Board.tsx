@@ -128,8 +128,9 @@ const EnergyCellModel: React.FC = () => {
     );
 }
 
-const TilePulseEffect: React.FC<{ position: [number, number, number]; kind: 'SABOTAGE'; }> = ({ position, kind }) => {
+const TilePulseEffect: React.FC<{ position: [number, number, number]; kind: 'SABOTAGE' | 'ION_CANNON'; }> = ({ position, kind }) => {
     const ringRef = useRef<THREE.Mesh>(null);
+    const beamRef = useRef<THREE.Mesh>(null);
     const labelRef = useRef<HTMLDivElement>(null);
     const startTimeRef = useRef<number | null>(null);
 
@@ -139,34 +140,64 @@ const TilePulseEffect: React.FC<{ position: [number, number, number]; kind: 'SAB
         }
 
         const elapsed = state.clock.elapsedTime - (startTimeRef.current || state.clock.elapsedTime);
-        const progress = Math.min(elapsed / 0.85, 1);
+        const duration = kind === 'ION_CANNON' ? 1.05 : 0.85;
+        const progress = Math.min(elapsed / duration, 1);
 
         if (ringRef.current) {
-            ringRef.current.scale.setScalar(0.7 + (progress * 1.8));
+            const baseScale = kind === 'ION_CANNON' ? 1.3 : 0.7;
+            const scaleGrowth = kind === 'ION_CANNON' ? 2.8 : 1.8;
+            ringRef.current.scale.setScalar(baseScale + (progress * scaleGrowth));
             const material = ringRef.current.material as THREE.MeshBasicMaterial;
-            material.opacity = (1 - progress) * 0.75;
+            material.opacity = (1 - progress) * (kind === 'ION_CANNON' ? 0.92 : 0.75);
+        }
+
+        if (beamRef.current) {
+            beamRef.current.scale.set(1, 0.45 + ((1 - progress) * 2.2), 1);
+            beamRef.current.position.y = 2.2 + ((1 - progress) * 2.8);
+            const material = beamRef.current.material as THREE.MeshBasicMaterial;
+            material.opacity = kind === 'ION_CANNON'
+                ? Math.max(0, (1 - progress) * 0.78)
+                : 0;
         }
 
         if (labelRef.current) {
             labelRef.current.style.opacity = `${1 - progress}`;
-            labelRef.current.style.transform = `translateY(${-progress * 18}px) scale(${1 + ((1 - progress) * 0.06)})`;
+            labelRef.current.style.transform = `translateY(${-progress * (kind === 'ION_CANNON' ? 26 : 18)}px) scale(${1 + ((1 - progress) * 0.08)})`;
         }
     });
 
-    const color = kind === 'SABOTAGE' ? '#ef4444' : '#ffffff';
-    const label = kind === 'SABOTAGE' ? 'ZONE DISABLED' : 'PULSE';
+    const color = kind === 'ION_CANNON' ? '#facc15' : '#ef4444';
+    const label = kind === 'ION_CANNON' ? 'ORBITAL STRIKE' : 'ZONE DISABLED';
+    const labelClass = kind === 'ION_CANNON'
+        ? 'border-amber-300/80 bg-amber-500/15 text-amber-100 shadow-[0_0_18px_rgba(250,204,21,0.4)]'
+        : 'border-red-400/70 bg-red-500/15 text-red-300 shadow-[0_0_16px_rgba(239,68,68,0.35)]';
 
     return (
         <group position={position}>
+            {kind === 'ION_CANNON' && (
+                <>
+                    <mesh ref={beamRef} position={[0, 3.2, 0]} raycast={() => null}>
+                        <cylinderGeometry args={[0.2, 0.5, 5.5, 18, 1, true]} />
+                        <meshBasicMaterial color="#fde68a" transparent opacity={0.78} side={THREE.DoubleSide} />
+                    </mesh>
+                    <pointLight position={[0, 1.9, 0]} color="#facc15" intensity={5.5} distance={6} decay={2} />
+                </>
+            )}
             <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} raycast={() => null}>
-                <ringGeometry args={[0.35, 0.62, 24]} />
+                <ringGeometry args={kind === 'ION_CANNON' ? [0.7, 1.55, 32] : [0.35, 0.62, 24]} />
                 <meshBasicMaterial color={color} transparent opacity={0.75} side={THREE.DoubleSide} />
             </mesh>
-            <pointLight position={[0, 0.35, 0]} color={color} intensity={2.4} distance={2.6} decay={2} />
-            <Html position={[0, 0.45, 0]} center pointerEvents="none">
+            <pointLight
+                position={[0, kind === 'ION_CANNON' ? 0.5 : 0.35, 0]}
+                color={color}
+                intensity={kind === 'ION_CANNON' ? 4.2 : 2.4}
+                distance={kind === 'ION_CANNON' ? 4.8 : 2.6}
+                decay={2}
+            />
+            <Html position={[0, kind === 'ION_CANNON' ? 0.72 : 0.45, 0]} center pointerEvents="none">
                 <div
                     ref={labelRef}
-                    className="rounded border border-red-400/70 bg-red-500/15 px-2 py-0.5 text-[10px] font-black tracking-[0.18em] text-red-300 shadow-[0_0_16px_rgba(239,68,68,0.35)] backdrop-blur-sm"
+                    className={`rounded border px-2 py-0.5 text-[10px] font-black tracking-[0.18em] backdrop-blur-sm ${labelClass}`}
                     style={{ opacity: 1, transform: 'translateY(0px) scale(1)' }}
                 >
                     {label}
