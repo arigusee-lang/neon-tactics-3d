@@ -14,6 +14,7 @@ import DebugPointerInfo from './components/DebugPointerInfo';
 import WinScreen from './components/WinScreen';
 import RulebookModal from './components/RulebookModal';
 import { gameService } from './services/gameService';
+import { soundService } from './services/soundService';
 import { GameState, PlayerId, AppStatus, Effect, UnitType, Talent } from './types';
 import { COLORS, CHARACTERS } from './constants';
 import { groupCards } from './utils/cardUtils';
@@ -188,8 +189,14 @@ const App: React.FC = () => {
     const [isProtocolMinimized, setIsProtocolMinimized] = useState(true);
     const [isLogMinimized, setIsLogMinimized] = useState(true);
     const [isDebugPointerVisible, setIsDebugPointerVisible] = useState(true);
+    const [soundEnabled, setSoundEnabled] = useState(() => soundService.isEnabled());
     const logEndRef = useRef<HTMLDivElement>(null);
     const gameStateRef = useRef<GameState | null>(null);
+    const previousTurnRef = useRef<PlayerId | null>(null);
+    const previousStatusRef = useRef<AppStatus | null>(null);
+    const previousSelectedUnitRef = useRef<string | null>(null);
+    const previousWinnerRef = useRef<string | null>(null);
+    const processedLogIdsRef = useRef<Set<string>>(new Set());
 
     useEffect(() => {
         const unsubscribe = gameService.subscribe(setGameState);
@@ -201,10 +208,128 @@ const App: React.FC = () => {
     }, [gameState]);
 
     useEffect(() => {
+        const handleDocumentClick = (event: MouseEvent) => {
+            const target = event.target;
+            if (!(target instanceof Element)) return;
+
+            const button = target.closest('button, [role="button"]');
+            if (!button) return;
+            if (button instanceof HTMLButtonElement && button.disabled) return;
+
+            soundService.playUiClick();
+        };
+
+        document.addEventListener('click', handleDocumentClick, true);
+        return () => document.removeEventListener('click', handleDocumentClick, true);
+    }, []);
+
+    useEffect(() => {
         if (logEndRef.current) {
             logEndRef.current.scrollIntoView({ behavior: 'smooth' });
         }
     }, [gameState?.actionLog]);
+
+    useEffect(() => {
+        if (!gameState) return;
+
+        const processedIds = processedLogIdsRef.current;
+        const nextProcessedIds = new Set<string>();
+
+        if (processedIds.size === 0 && gameState.actionLog.length > 0) {
+            gameState.actionLog.forEach((entry) => {
+                nextProcessedIds.add(entry.id);
+            });
+            processedLogIdsRef.current = nextProcessedIds;
+            return;
+        }
+
+        gameState.actionLog.forEach((entry) => {
+            nextProcessedIds.add(entry.id);
+
+            if (processedIds.has(entry.id)) {
+                return;
+            }
+
+            const message = entry.message.toUpperCase();
+            const isErrorCue =
+                message.includes('FAILED')
+                || message.includes('INVALID')
+                || message.includes('INSUFFICIENT')
+                || message.includes('ACCESS DENIED')
+                || message.includes('COMMAND REJECTED')
+                || message.includes('CANNOT ')
+                || message.includes('NO VALID')
+                || message.includes('OUT OF RANGE')
+                || message.includes('BLOCKED')
+                || message.includes('COOLDOWN ACTIVE')
+                || message.includes('ACTION LOCKED')
+                || message.includes('ABORTED');
+
+            if (message.includes('ATTACK DEFLECTED')) {
+                soundService.playShieldDeflect();
+                return;
+            }
+
+            if (isErrorCue) {
+                soundService.playError();
+            }
+        });
+
+        processedLogIdsRef.current = nextProcessedIds;
+    }, [gameState]);
+
+    useEffect(() => {
+        if (!gameState) return;
+
+        const previousTurn = previousTurnRef.current;
+        const previousStatus = previousStatusRef.current;
+        const previousSelectedUnit = previousSelectedUnitRef.current;
+        const previousWinner = previousWinnerRef.current;
+        const winnerKey = gameState.winner ? gameState.winner.join('|') : null;
+        const perspectivePlayer = gameState.isMultiplayer ? gameState.myPlayerId : PlayerId.ONE;
+        const isLocalTurn = !gameState.isMultiplayer || gameState.myPlayerId === gameState.currentTurn;
+
+        if (
+            previousTurn !== null
+            && previousTurn !== gameState.currentTurn
+            && gameState.appStatus === AppStatus.PLAYING
+        ) {
+            soundService.playTurnChange(isLocalTurn);
+        }
+
+        if (
+            previousSelectedUnit !== gameState.selectedUnitId
+            && gameState.selectedUnitId
+        ) {
+            soundService.playUnitSelect();
+        }
+
+        if (
+            previousStatus !== null
+            && previousStatus !== gameState.appStatus
+            && gameState.appStatus === AppStatus.TALENT_SELECTION
+        ) {
+            soundService.playReward();
+        }
+
+        if (
+            previousWinner !== winnerKey
+            && winnerKey
+            && perspectivePlayer
+        ) {
+            const won = gameState.winner?.includes(perspectivePlayer) ?? false;
+            if (won) {
+                soundService.playVictory();
+            } else {
+                soundService.playDefeat();
+            }
+        }
+
+        previousTurnRef.current = gameState.currentTurn;
+        previousStatusRef.current = gameState.appStatus;
+        previousSelectedUnitRef.current = gameState.selectedUnitId;
+        previousWinnerRef.current = winnerKey;
+    }, [gameState]);
 
     useEffect(() => {
         const wheelOptions: AddEventListenerOptions = { passive: false, capture: true };
@@ -330,9 +455,38 @@ const App: React.FC = () => {
     const hudPlayerIds = gameState.isDevMode
         ? [...gameState.activePlayerIds, PlayerId.NEUTRAL]
         : gameState.activePlayerIds;
+    const toggleSound = () => {
+        const nextEnabled = !soundEnabled;
+        soundService.setEnabled(nextEnabled);
+        setSoundEnabled(nextEnabled);
+        if (nextEnabled) {
+            soundService.playReward();
+        }
+    };
+    const toggleLogMinimized = () => {
+        const nextValue = !isLogMinimized;
+        setIsLogMinimized(nextValue);
+        soundService.playPanelToggle(!nextValue);
+    };
+    const toggleProtocolMinimized = () => {
+        const nextValue = !isProtocolMinimized;
+        setIsProtocolMinimized(nextValue);
+        soundService.playPanelToggle(!nextValue);
+    };
 
     return (
         <div className="relative w-full h-screen bg-black overflow-hidden font-mono">
+            <button
+                onClick={toggleSound}
+                className={`absolute top-4 right-4 z-30 pointer-events-auto rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.24em] transition-colors ${
+                    soundEnabled
+                        ? 'border-cyan-400/60 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-400/15 hover:text-white'
+                        : 'border-gray-600/60 bg-black/35 text-gray-400 hover:border-gray-400 hover:text-gray-200'
+                }`}
+            >
+                {soundEnabled ? 'SFX ON' : 'SFX OFF'}
+            </button>
+
             {gameState.isDevMode && isDebugPointerVisible && <DebugPointerInfo gameState={gameState} />}
 
             <div className="absolute inset-0 z-0">
@@ -561,14 +715,14 @@ const App: React.FC = () => {
                             className={`rounded-xl border border-green-500/60 shadow-[0_0_20px_rgba(0,255,0,0.1)] overflow-hidden transition-all duration-300 flex flex-col bg-black/40 ${isLogMinimized ? 'h-10 flex-none' : 'shrink min-h-0 max-h-48'}`}
                         >
                             <div
-                                onClick={() => setIsLogMinimized(!isLogMinimized)}
+                                onClick={toggleLogMinimized}
                                 className="flex items-center justify-between px-4 py-2 bg-black/40 hover:bg-black/60 cursor-pointer border-b border-green-500/30 flex-none h-10"
                             >
                                 <h2 className="text-xs font-bold text-white uppercase tracking-widest drop-shadow-md">Action Log</h2>
                                 <span className="font-mono text-[10px] text-green-300">{isLogMinimized ? '[+]' : '[-]'}</span>
                             </div>
 
-                            <div className={`p-2 overflow-y-auto flex-1 ${isLogMinimized ? 'hidden' : 'block'}`}>
+                            <div className={`p-2 overflow-y-auto game-scrollbar flex-1 ${isLogMinimized ? 'hidden' : 'block'}`}>
                                 <div className="flex flex-col gap-1">
                                     {gameState.actionLog.map((log, i) => (
                                         <div key={log.id} className="text-[10px] font-mono break-words leading-tight border-l-2 border-green-500/50 pl-2 py-0.5 drop-shadow-sm text-shadow">
@@ -591,14 +745,14 @@ const App: React.FC = () => {
                             className={`rounded-xl border border-green-500/60 shadow-[0_0_20px_rgba(0,255,0,0.1)] text-green-400 overflow-hidden transition-all duration-300 flex flex-col flex-none bg-black/40 ${isProtocolMinimized ? 'h-10' : 'max-h-[20rem]'}`}
                         >
                             <div
-                                onClick={() => setIsProtocolMinimized(!isProtocolMinimized)}
+                                onClick={toggleProtocolMinimized}
                                 className="flex items-center justify-between px-4 py-2 bg-black/40 hover:bg-black/60 cursor-pointer border-b border-green-500/30 h-10"
                             >
                                 <h2 className="text-xs font-bold text-white uppercase tracking-widest drop-shadow-md">System Protocol</h2>
                                 <span className="font-mono text-[10px] text-green-300">{isProtocolMinimized ? '[+]' : '[-]'}</span>
                             </div>
 
-                            <div className={`p-4 pt-3 flex flex-col gap-4 overflow-y-auto ${isProtocolMinimized ? 'hidden' : 'block'}`}>
+                            <div className={`p-4 pt-3 flex flex-col gap-4 overflow-y-auto game-scrollbar ${isProtocolMinimized ? 'hidden' : 'block'}`}>
                                 <div>
                                     <h3 className="text-[10px] text-green-500 font-bold uppercase mb-1 border-b border-green-800/50 pb-0.5">Visual Uplink</h3>
                                     <div className="flex items-center justify-between mt-2">
@@ -608,6 +762,19 @@ const App: React.FC = () => {
                                             className={`w-12 h-5 rounded-full border border-green-500/50 relative transition-all duration-300 ${gameState.lightMode === 'LIGHT' ? 'bg-green-500/30' : 'bg-black/50'}`}
                                         >
                                             <div className={`absolute top-0.5 w-3.5 h-3.5 rounded-full bg-green-400 transition-all duration-300 ${gameState.lightMode === 'LIGHT' ? 'left-7 shadow-[0_0_10px_rgba(74,222,128,0.8)]' : 'left-1'}`} />
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-3">
+                                        <span className="text-[11px] text-gray-300 uppercase tracking-tighter">Audio Feedback</span>
+                                        <button
+                                            onClick={toggleSound}
+                                            className={`rounded border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] transition-colors ${
+                                                soundEnabled
+                                                    ? 'border-cyan-400/50 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-400/15'
+                                                    : 'border-gray-700 bg-black/40 text-gray-400 hover:border-gray-500'
+                                            }`}
+                                        >
+                                            {soundEnabled ? 'Enabled' : 'Muted'}
                                         </button>
                                     </div>
                                 </div>

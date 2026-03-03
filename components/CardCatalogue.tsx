@@ -226,7 +226,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                     </div>
 
                     {/* Scrollable Content */}
-                    <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
+                    <div className="flex-1 overflow-y-auto p-6 game-scrollbar">
 
                         {/* Units Section */}
                         <div className="mb-8">
@@ -329,7 +329,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                             </div>
 
                             {/* Details Content */}
-                            <div className="flex-1 p-5 flex flex-col overflow-y-auto">
+                            <div className="flex-1 p-5 flex flex-col overflow-y-auto game-scrollbar">
                                 <h2 className="text-lg font-bold text-white uppercase tracking-wider mb-1 leading-none">{selectedConfig.name}</h2>
                                 <div className={`text-[10px] font-mono mb-4 ${selectedConfig.category === CardCategory.ACTION ? 'text-purple-400' : 'text-cyan-400'}`}>
                                     {selectedConfig.category} CLASS
@@ -390,7 +390,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                                 </div>
                             </div>
 
-                            <div className="flex-1 p-5 flex flex-col overflow-y-auto">
+                            <div className="flex-1 p-5 flex flex-col overflow-y-auto game-scrollbar">
                                 <h2 className="text-lg font-bold text-white uppercase tracking-wider mb-1 leading-none">{selectedAbility.name}</h2>
                                 <div className="text-[10px] font-mono mb-4 text-yellow-400">
                                     SYSTEM MODULE
@@ -434,7 +434,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                                 </div>
                             </div>
 
-                            <div className="flex-1 p-5 flex flex-col overflow-y-auto">
+                            <div className="flex-1 p-5 flex flex-col overflow-y-auto game-scrollbar">
                                 <h2 className="text-lg font-bold text-white uppercase tracking-wider mb-1 leading-none">{selectedTalent.name}</h2>
                                 <div className="text-[10px] font-mono mb-4 text-blue-400">
                                     SYSTEM PERK
@@ -465,7 +465,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                                 </div>
                             </div>
 
-                            <div className="flex-1 p-5 flex flex-col overflow-y-auto">
+                            <div className="flex-1 p-5 flex flex-col overflow-y-auto game-scrollbar">
                                 <h2 className="text-lg font-bold text-white uppercase tracking-wider mb-1 leading-none">{selectedCollectible.name}</h2>
                                 <div className="text-[10px] font-mono mb-4 text-pink-400">
                                     PICKUP
@@ -491,22 +491,6 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                     )}
                 </div>
             </div>
-
-            <style>{`
-                .custom-scrollbar::-webkit-scrollbar {
-                    width: 4px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-track {
-                    background: rgba(0,0,0,0.2);
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb {
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 2px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                    background: rgba(255, 255, 255, 0.2);
-                }
-            `}</style>
         </div>
     );
 };

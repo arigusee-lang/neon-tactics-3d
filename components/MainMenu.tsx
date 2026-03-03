@@ -292,7 +292,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
           }}
         />
 
-        <div className={`relative z-10 ${isMapBrowserView ? 'max-h-[calc(100vh-3.5rem)] overflow-y-auto pr-1 md:max-h-[calc(100vh-4rem)]' : ''}`}>
+        <div className={`relative z-10 ${isMapBrowserView ? 'max-h-[calc(100vh-3.5rem)] overflow-y-auto game-scrollbar pr-1 md:max-h-[calc(100vh-4rem)]' : ''}`}>
           <h1 className="text-center text-4xl font-black uppercase tracking-tighter text-transparent bg-clip-text bg-gradient-to-br from-green-400 to-cyan-400 drop-shadow-[0_0_10px_rgba(0,255,0,0.5)] md:text-5xl">
             Neon Tactics
             <span className="mt-2 block text-sm font-mono tracking-[0.5em] text-green-500/80">SIMULATION LINK</span>
@@ -374,7 +374,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                       Map List
                     </div>
 
-                    <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+                    <div className="flex-1 space-y-3 overflow-y-auto game-scrollbar pr-1">
                       {(menuView === 'DEV_MAPS' ? devMapOptions : soloMaps).map((map) =>
                         renderMapListItem(
                           map,
@@ -526,7 +526,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                       Hostable Maps
                     </div>
 
-                    <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+                    <div className="flex-1 space-y-3 overflow-y-auto game-scrollbar pr-1">
                       {multiplayerMaps.map((map) =>
                         renderMapListItem(map, selectedMultiplayerMap, setSelectedMultiplayerMap, 'purple')
                       )}

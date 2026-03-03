@@ -150,7 +150,7 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
                         </h2>
                     </div>
 
-                    <div className="flex-1 overflow-y-auto custom-scrollbar">
+                    <div className="flex-1 overflow-y-auto game-scrollbar">
                         {CHARACTERS.map(char => {
                             const isSelected = selectedCharId === char.id;
                             return (
@@ -261,7 +261,7 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
                             </h2>
                         </div>
 
-                        <div className="flex-1 p-6 overflow-y-auto custom-scrollbar">
+                        <div className="flex-1 p-6 overflow-y-auto game-scrollbar">
                             {activeCharacter.perks.map((perk) => (
                                 <PerkNode
                                     key={perk.level}
@@ -275,22 +275,6 @@ const CharacterSelectionModal: React.FC<CharacterSelectionModalProps> = ({ playe
                 )}
 
             </div>
-
-            <style>{`
-                .custom-scrollbar::-webkit-scrollbar {
-                    width: 4px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-track {
-                    background: rgba(0,0,0,0.2);
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb {
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 2px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                    background: rgba(255, 255, 255, 0.2);
-                }
-            `}</style>
         </div>
     );
 };

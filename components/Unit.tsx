@@ -25,6 +25,7 @@ import RepairBotModel from './RepairBotModel';
 import SpikeModel from './SpikeModel';
 import ScoutDroneModel from './ScoutDroneModel';
 import { gameService } from '../services/gameService';
+import { soundService } from '../services/soundService';
 
 interface UnitProps {
     data: UnitType;
@@ -177,6 +178,7 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
     const { scene } = useThree();
     const meshRef = useRef<THREE.Group>(null);
     const laserRef = useRef<THREE.Mesh>(null); // For Flux Tower instant beam
+    const impactPlayedRef = useRef(false);
     const [phase, setPhase] = useState<'muzzle' | 'flying' | 'impact'>('muzzle');
     const progress = useRef(0);
     const lifeTime = useRef(0); // For Flux Tower beam fade
@@ -192,6 +194,7 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
     const beamGlowThickness = 0.08;
 
     const displayColor = isMedic ? '#00ff00' : color;
+    const soundKind: 'beam' | 'tower' | 'support' = isTower ? 'tower' : isMedic ? 'support' : 'beam';
     const impactProfile = useMemo(() => {
         if (isTower) {
             return {
@@ -272,10 +275,10 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
                     (laserRef.current.material as THREE.MeshBasicMaterial).opacity = opacity;
                 }
 
-                // Show impact briefly
-                if (lifeTime.current > 0.1 && phase !== 'impact') {
-                    setPhase('impact');
-                }
+            }
+            // Show impact briefly even though the tower beam itself is rendered as a Line.
+            if (lifeTime.current > 0.1 && phase !== 'impact') {
+                setPhase('impact');
             }
             return;
         }
@@ -301,6 +304,17 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
             meshRef.current.lookAt(end);
         }
     });
+
+    useEffect(() => {
+        soundService.playProjectileLaunch(soundKind);
+    }, [soundKind]);
+
+    useEffect(() => {
+        if (phase === 'impact' && !impactPlayedRef.current) {
+            impactPlayedRef.current = true;
+            soundService.playProjectileImpact(soundKind);
+        }
+    }, [phase, soundKind]);
 
     return createPortal(
         <group>
@@ -448,6 +462,9 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
     const supportPulseTextRef = useRef<HTMLDivElement>(null);
 
     const processingStep = useRef(false);
+    const prevTeleportingRef = useRef(false);
+    const prevExplodingRef = useRef(false);
+    const prevIsDyingRef = useRef(false);
 
     const size = data.stats.size || 1;
     const sizeOffset = ((size - 1) * (TILE_SIZE + TILE_SPACING)) / 2;
@@ -528,6 +545,27 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             setAttackTargetPos(null);
         }
     }, [data.status.attackTargetId]);
+
+    useEffect(() => {
+        if (isTeleporting && !prevTeleportingRef.current) {
+            soundService.playTeleport();
+        }
+        prevTeleportingRef.current = isTeleporting;
+    }, [isTeleporting]);
+
+    useEffect(() => {
+        if (isExploding && !prevExplodingRef.current) {
+            soundService.playExplosion();
+        }
+        prevExplodingRef.current = isExploding;
+    }, [isExploding]);
+
+    useEffect(() => {
+        if (isDying && !prevIsDyingRef.current && data.type === EUnitType.ARC_PORTAL) {
+            soundService.playPortalCollapse();
+        }
+        prevIsDyingRef.current = isDying;
+    }, [data.type, isDying]);
 
     // Track Mind Control Target Position
     useEffect(() => {

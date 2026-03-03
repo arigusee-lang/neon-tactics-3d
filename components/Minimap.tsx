@@ -162,7 +162,7 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain, mapBou
                 <span className="font-mono text-[10px] text-green-300">{isMinimized ? '[+]' : '[-]'}</span>
             </div>
 
-            <div className={`p-2 flex-1 overflow-auto flex items-center justify-center bg-transparent ${isMinimized ? 'hidden' : 'block'}`}>
+            <div className={`p-2 flex-1 overflow-auto game-scrollbar flex items-center justify-center bg-transparent ${isMinimized ? 'hidden' : 'block'}`}>
                 {/* Scrollable Container */}
                 <div className="relative border border-green-900/50 bg-black/20 shadow-inner">
                     <canvas 

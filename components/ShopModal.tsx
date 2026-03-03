@@ -236,7 +236,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
                     </div>
 
                     {/* Scrollable Content */}
-                    <div className="flex-1 overflow-y-auto p-6 custom-scrollbar space-y-6">
+                    <div className="flex-1 overflow-y-auto p-6 game-scrollbar space-y-6">
                         {/* SECTION: AVAILABLE */}
                         <div>
                             <div className="flex justify-between items-center mb-3">
@@ -332,7 +332,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
                             </div>
 
                             {/* Details Content */}
-                            <div className="flex-1 p-5 flex flex-col overflow-y-auto">
+                            <div className="flex-1 p-5 flex flex-col overflow-y-auto game-scrollbar">
                                 <h2 className="text-lg font-bold text-white uppercase tracking-wider mb-1 leading-none">{selectedConfig.name}</h2>
                                 <div className={`text-[10px] font-mono mb-4 ${selectedConfig.category === CardCategory.ACTION ? 'text-purple-400' : 'text-green-400'}`}>
                                     {selectedConfig.category} CLASS
@@ -421,22 +421,6 @@ const ShopModal: React.FC<ShopModalProps> = ({
                     )}
                 </div>
             </div>
-
-            <style>{`
-                .custom-scrollbar::-webkit-scrollbar {
-                    width: 4px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-track {
-                    background: rgba(0,0,0,0.2);
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb {
-                    background: rgba(255, 255, 255, 0.1);
-                    border-radius: 2px;
-                }
-                .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-                    background: rgba(255, 255, 255, 0.2);
-                }
-            `}</style>
         </div>
     );
 };

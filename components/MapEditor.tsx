@@ -146,7 +146,7 @@ const MapEditor: React.FC<MapEditorProps> = ({ activeTool }) => {
             </div>
 
             <div className={`flex flex-col flex-1 min-h-0 ${isMinimized ? 'hidden' : 'flex'}`}>
-                <div className="p-4 overflow-y-auto flex-1">
+                <div className="p-4 overflow-y-auto game-scrollbar flex-1">
                     <div className="grid grid-cols-2 gap-3">
                         {tools.map(tool => {
                             const isActive = activeTool === tool.id;
