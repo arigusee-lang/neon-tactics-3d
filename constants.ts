@@ -10,6 +10,7 @@ export const ELEVATION_HEIGHT = 0.5; // Visual height per elevation level (Match
 export const INITIAL_CREDITS = 500;
 export const MAX_INVENTORY_CAPACITY = 30;
 export const INCOME_PER_TURN = 0; // Disabled in favor of milestone injections
+export const TURN_TIMER_SECONDS = 60;
 
 export const COLORS = {
   P1: '#00ccff', // Cyan for P1

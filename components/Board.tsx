@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { TILE_SIZE, TILE_SPACING, BOARD_OFFSET, COLORS, CARD_CONFIG, ELEVATION_HEIGHT } from '../constants';
+import { TILE_SIZE, TILE_SPACING, BOARD_OFFSET, COLORS, CARD_CONFIG, ELEVATION_HEIGHT, BUILDING_TYPES } from '../constants';
 import { gameService } from '../services/gameService';
 import Tile from './Tile';
 import { Unit, PlayerId, Position, CardCategory, InteractionState, TerrainData, Collectible, MapBounds, TilePulse } from '../types';
@@ -478,7 +478,9 @@ const Board: React.FC<BoardProps> = ({
             placementFootprint.add(key);
 
             const targetUnit = getUnitAt(x, z);
-            const isValid = targetUnit && arePlayersHostile(interactionState.playerId, targetUnit.playerId);
+            const isValid = targetUnit
+                && arePlayersHostile(interactionState.playerId, targetUnit.playerId)
+                && !BUILDING_TYPES.includes(targetUnit.type);
 
             isPlacementValid = !!isValid;
             highlightColor = isPlacementValid ? '#00ffff' : '#ff0000';

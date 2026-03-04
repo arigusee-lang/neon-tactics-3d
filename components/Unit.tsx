@@ -35,23 +35,6 @@ interface UnitProps {
 
 // --- COMBAT EFFECTS COMPONENTS ---
 
-// Muzzle Flash Effect
-const MuzzleFlash = ({ position, color }: { position: Vector3, color: string }) => {
-    const ref = useRef<THREE.Mesh>(null);
-    useFrame((state, delta) => {
-        if (ref.current) {
-            ref.current.scale.multiplyScalar(1.2);
-            (ref.current.material as THREE.MeshBasicMaterial).opacity -= delta * 10;
-        }
-    });
-    return (
-        <mesh position={position} ref={ref}>
-            <sphereGeometry args={[0.3, 8, 8]} />
-            <meshBasicMaterial color={color} transparent opacity={0.8} />
-        </mesh>
-    );
-};
-
 // Impact Explosion Effect
 const Impact = ({
     position,
@@ -178,23 +161,31 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
     const { scene } = useThree();
     const meshRef = useRef<THREE.Group>(null);
     const laserRef = useRef<THREE.Mesh>(null); // For Flux Tower instant beam
-    const impactPlayedRef = useRef(false);
-    const [phase, setPhase] = useState<'muzzle' | 'flying' | 'impact'>('muzzle');
+    const [phase, setPhase] = useState<'flying' | 'impact'>('flying');
     const progress = useRef(0);
     const lifeTime = useRef(0); // For Flux Tower beam fade
 
     // Projectile visual properties
     const isTower = type === EUnitType.TOWER;
     const isMedic = type === EUnitType.MEDIC;
+    const useTracerStyle = [
+        EUnitType.SOLDIER,
+        EUnitType.HEAVY,
+        EUnitType.MEDIC,
+        EUnitType.HACKER,
+        EUnitType.SNIPER,
+        EUnitType.BOX
+    ].includes(type);
+    const travelDistance = useMemo(() => start.distanceTo(end), [start, end]);
 
     // Standard Projectile settings
-    const beamLength = 1.2;
-    const beamSpeed = 25;
-    const beamThickness = 0.04;
-    const beamGlowThickness = 0.08;
+    const beamLength = useTracerStyle ? 0.45 : 0.9;
+    const beamSpeed = useTracerStyle ? 42 : 32;
+    const beamThickness = useTracerStyle ? 0.022 : 0.03;
+    const beamGlowThickness = useTracerStyle ? 0.05 : 0.06;
+    const travelDuration = Math.max(0.055, Math.min(0.22, travelDistance / beamSpeed));
 
     const displayColor = isMedic ? '#00ff00' : color;
-    const soundKind: 'beam' | 'tower' | 'support' = isTower ? 'tower' : isMedic ? 'support' : 'beam';
     const impactProfile = useMemo(() => {
         if (isTower) {
             return {
@@ -284,16 +275,8 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
         }
 
         // STANDARD PROJECTILE LOGIC
-        // 1. Muzzle Phase
-        if (phase === 'muzzle') {
-            setPhase('flying');
-            return;
-        }
-
-        // 2. Flying Phase
         if (phase === 'flying' && meshRef.current) {
-            const speed = beamSpeed * delta;
-            progress.current += speed;
+            progress.current += delta / travelDuration;
 
             if (progress.current >= 1) {
                 progress.current = 1;
@@ -305,22 +288,8 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
         }
     });
 
-    useEffect(() => {
-        soundService.playProjectileLaunch(soundKind);
-    }, [soundKind]);
-
-    useEffect(() => {
-        if (phase === 'impact' && !impactPlayedRef.current) {
-            impactPlayedRef.current = true;
-            soundService.playProjectileImpact(soundKind);
-        }
-    }, [phase, soundKind]);
-
     return createPortal(
         <group>
-            {/* Muzzle Flash */}
-            {((isTower && lifeTime.current < 0.1) || (!isTower && progress.current < 0.2)) && <MuzzleFlash position={start} color={displayColor} />}
-
             {/* FLUX TOWER BEAM */}
             {isTower && (
                 <group position={start}>
@@ -342,16 +311,33 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
             {/* STANDARD PROJECTILE */}
             {!isTower && phase === 'flying' && (
                 <group ref={meshRef} position={start}>
-                    {/* Core Beam */}
-                    <mesh rotation={[Math.PI / 2, 0, 0]}>
-                        <cylinderGeometry args={[beamThickness, beamThickness, beamLength, 8]} />
-                        <meshBasicMaterial color="#ffffff" />
-                    </mesh>
-                    {/* Outer Glow */}
-                    <mesh rotation={[Math.PI / 2, 0, 0]}>
-                        <cylinderGeometry args={[beamGlowThickness, beamGlowThickness, beamLength * 0.9, 8]} />
-                        <meshBasicMaterial color={displayColor} transparent opacity={0.6} />
-                    </mesh>
+                    {useTracerStyle ? (
+                        <>
+                            <Line
+                                points={[new Vector3(0, 0, -beamLength), new Vector3(0, 0, beamLength * 0.15)]}
+                                color={displayColor}
+                                lineWidth={2.2}
+                                transparent
+                                opacity={0.95}
+                            />
+                            <mesh position={[0, 0, beamLength * 0.18]}>
+                                <sphereGeometry args={[beamGlowThickness * 1.1, 8, 8]} />
+                                <meshBasicMaterial color="#ffffff" />
+                            </mesh>
+                            <pointLight position={[0, 0, 0]} color={displayColor} intensity={0.9} distance={1.2} decay={2} />
+                        </>
+                    ) : (
+                        <>
+                            <mesh rotation={[Math.PI / 2, 0, 0]}>
+                                <cylinderGeometry args={[beamThickness, beamThickness, beamLength, 8]} />
+                                <meshBasicMaterial color="#ffffff" />
+                            </mesh>
+                            <mesh rotation={[Math.PI / 2, 0, 0]}>
+                                <cylinderGeometry args={[beamGlowThickness, beamGlowThickness, beamLength * 0.9, 8]} />
+                                <meshBasicMaterial color={displayColor} transparent opacity={0.6} />
+                            </mesh>
+                        </>
+                    )}
                 </group>
             )}
 
@@ -452,7 +438,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
     const [hovered, setHovered] = useState(false);
     const [isMoving, setIsMoving] = useState(false);
     const [supportPulseAmount, setSupportPulseAmount] = useState<number | null>(null);
-    const [supportPulseKind, setSupportPulseKind] = useState<'HEAL' | 'ENERGY' | null>(null);
+    const [supportPulseKind, setSupportPulseKind] = useState<'HEAL' | 'ENERGY' | 'DAMAGE' | null>(null);
 
     const [attackTargetPos, setAttackTargetPos] = useState<Vector3 | null>(null);
     const [mindControlTargetPos, setMindControlTargetPos] = useState<Vector3 | null>(null);
@@ -478,7 +464,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
     const isTeleporting = data.status.isTeleporting || false;
     const isExploding = data.status.isExploding || false;
 
-    const isFrozen = data.effects.some(e => e.name === 'CRYO STASIS');
+    const isFrozen = data.effects.some(e => e.name === 'CRYO STASIS' || e.name === 'SYSTEM FREEZE');
     const hasShield = data.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
     const hasEnergy = data.stats.maxEnergy > 0;
     const isIndestructible = data.type === EUnitType.PORTAL;
@@ -592,8 +578,9 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
     useEffect(() => {
         const healAmount = data.status.healPulseAmount || 0;
         const energyAmount = data.status.energyPulseAmount || 0;
-        const nextKind = healAmount > 0 ? 'HEAL' : energyAmount > 0 ? 'ENERGY' : null;
-        const nextAmount = healAmount > 0 ? healAmount : energyAmount > 0 ? energyAmount : null;
+        const damageAmount = data.status.damagePulseAmount || 0;
+        const nextKind = damageAmount > 0 ? 'DAMAGE' : healAmount > 0 ? 'HEAL' : energyAmount > 0 ? 'ENERGY' : null;
+        const nextAmount = damageAmount > 0 ? damageAmount : healAmount > 0 ? healAmount : energyAmount > 0 ? energyAmount : null;
 
         if (!nextKind || !nextAmount) return;
 
@@ -608,7 +595,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
         }, 1200);
 
         return () => window.clearTimeout(timeoutId);
-    }, [data.status.healPulseAmount, data.status.energyPulseAmount]);
+    }, [data.status.damagePulseAmount, data.status.healPulseAmount, data.status.energyPulseAmount]);
 
 
     useEffect(() => {
@@ -761,13 +748,21 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
     const baseHeight = getUnitBaseHeight(data.position.x, data.position.z);
     const ringY = -baseHeight + 0.05;
     const frozenY = (size / 2) - 0.5;
-    const supportPulseColor = supportPulseKind === 'ENERGY' ? '#a855f7' : '#34d399';
+    const supportPulseColor = supportPulseKind === 'ENERGY'
+        ? '#a855f7'
+        : supportPulseKind === 'DAMAGE'
+            ? '#fb7185'
+            : '#34d399';
     const supportPulseClassName = supportPulseKind === 'ENERGY'
         ? 'rounded border border-purple-300/70 bg-purple-500/15 px-2 py-0.5 text-[11px] font-black text-purple-300 shadow-[0_0_16px_rgba(168,85,247,0.35)] backdrop-blur-sm'
-        : 'rounded border border-emerald-300/70 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-black text-emerald-300 shadow-[0_0_16px_rgba(52,211,153,0.35)] backdrop-blur-sm';
+        : supportPulseKind === 'DAMAGE'
+            ? 'rounded border border-rose-300/70 bg-rose-500/15 px-2 py-0.5 text-[11px] font-black text-rose-300 shadow-[0_0_16px_rgba(251,113,133,0.35)] backdrop-blur-sm'
+            : 'rounded border border-emerald-300/70 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-black text-emerald-300 shadow-[0_0_16px_rgba(52,211,153,0.35)] backdrop-blur-sm';
     const supportPulseLabel = supportPulseKind === 'ENERGY'
         ? `+${supportPulseAmount} EN`
-        : `+${supportPulseAmount} HP`;
+        : supportPulseKind === 'DAMAGE'
+            ? `-${supportPulseAmount}`
+            : `+${supportPulseAmount} HP`;
 
     const projectileStartOffset = data.type === EUnitType.TOWER
         ? new Vector3(0, 2.3, 0)

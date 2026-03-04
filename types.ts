@@ -177,6 +177,7 @@ export interface UnitStatus {
   isExploding?: boolean;
   healPulseAmount?: number | null;
   energyPulseAmount?: number | null;
+  damagePulseAmount?: number | null;
   attackTargetId?: string | null;     // Transient: For current animation frame
   autoAttackTargetId?: string | null; // Persistent: For "Nemesis" logic
   neutralHasAttacked?: boolean;
@@ -302,6 +303,8 @@ export interface GameState {
   matchMode: MatchMode;
   winner: PlayerId[] | null;
   roundNumber: number;
+  turnStartedAt: number;
+  turnOvertimeDamageApplied: number;
   decks: { [key in PlayerId]: Card[] };
   selectedCardId: string | null;
   selectedUnitId: string | null;

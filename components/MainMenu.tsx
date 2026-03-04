@@ -47,6 +47,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const isTopLevelMenuStatus = status === AppStatus.MENU || status === AppStatus.MAP_SELECTION;
   const canRestartCurrentMap = !isMultiplayer && !isDevMode;
   const isMapBrowserView = menuView === 'SOLO_MAPS' || menuView === 'DEV_MAPS' || menuView === 'MULTIPLAYER';
+  const isPauseView = status === AppStatus.PAUSED;
 
   const soloMaps = useMemo(() => {
     return availableMaps.filter((map) => map.players === 2 || map.players === 'dev');
@@ -282,7 +283,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-auto p-3 md:p-4">
-      <div className={`relative w-full overflow-hidden rounded-xl border border-green-500/50 bg-black/70 shadow-[0_0_50px_rgba(0,255,0,0.2)] backdrop-blur-sm ${isMapBrowserView ? 'max-w-6xl max-h-[calc(100vh-1.5rem)] md:max-h-[calc(100vh-2rem)]' : 'max-w-md'} ${isMapBrowserView ? 'p-5 md:p-6' : 'p-8'}`}>
+      <div className={`relative w-full overflow-hidden rounded-xl border border-green-500/50 bg-black/70 shadow-[0_0_50px_rgba(0,255,0,0.2)] backdrop-blur-sm ${isMapBrowserView ? 'max-w-6xl max-h-[calc(100vh-1.5rem)] md:max-h-[calc(100vh-2rem)]' : isPauseView ? 'max-w-sm' : 'max-w-md'} ${isMapBrowserView ? 'p-5 md:p-6' : isPauseView ? 'p-6' : 'p-8'}`}>
         <div
           className="absolute inset-0 opacity-20 pointer-events-none"
           style={{

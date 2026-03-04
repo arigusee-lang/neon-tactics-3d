@@ -1,6 +1,6 @@
 
 import { GameState, PlayerId, Unit, PlacePayload, UnitType, Card, Position, CardCategory, LogEntry, InteractionMode, AppStatus, Effect, Talent, TerrainData, TerrainTool, ShopItem, UnitStats, DebugClickTraceEntry, DebugClickResult, DebugPointerMeta, MapBounds, MapMetadata, MapPlayerSupport, MapPreviewData, ALL_PLAYER_IDS, CONTESTED_PLAYER_IDS, MatchMode, EmptyMapConfig } from '../types';
-import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS } from '../constants';
+import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS, TURN_TIMER_SECONDS } from '../constants';
 import { findPath } from '../utils/pathfinding';
 import { clampTerrainBrushSize, getTerrainBrushFootprint, isBrushEnabledTerrainTool } from '../utils/terrainBrush';
 import { canTraverseTerrainEdge, getStepDirection } from '../utils/terrainTraversal';
@@ -137,6 +137,7 @@ class GameService {
     private listeners: Set<Listener> = new Set();
     private discovered: Set<string> = new Set();
     private socket: Socket | null = null;
+    private turnTimerIntervalId: number | null = null;
     private authoritySocketId: string | null = null;
     private lastPreviewSignature: string | null = null;
     private lastPreviewPathKey: string = '';
@@ -176,10 +177,114 @@ class GameService {
     constructor() {
         this.state = this.getInitialState();
         this.connect();
+        this.startTurnTimerLoop();
+    }
+
+    private startTurnTimerLoop() {
+        if (this.turnTimerIntervalId !== null) return;
+        this.turnTimerIntervalId = window.setInterval(() => {
+            this.processTurnTimerTick();
+        }, 250);
     }
 
     private isSyncAuthority(): boolean {
         return !!this.socket?.id && !!this.authoritySocketId && this.socket.id === this.authoritySocketId;
+    }
+
+    private resetTurnTimer(startedAt: number = Date.now()) {
+        this.state.turnStartedAt = startedAt;
+        this.state.turnOvertimeDamageApplied = 0;
+    }
+
+    private shouldProcessTurnTimer() {
+        if (this.state.isDevMode || this.state.winner) return false;
+        if (!this.isContestedPlayer(this.state.currentTurn)) return false;
+        if (!this.state.activePlayerIds.includes(this.state.currentTurn)) return false;
+        if (![AppStatus.PLAYING, AppStatus.SHOP, AppStatus.PAUSED].includes(this.state.appStatus)) return false;
+        if (this.state.isMultiplayer && !this.isSyncAuthority()) return false;
+        return true;
+    }
+
+    private applyTurnTimerDamage(playerId: PlayerId, damage: number) {
+        if (damage <= 0) return;
+
+        const portalIdx = this.state.units.findIndex((unit) =>
+            unit.playerId === playerId
+            && unit.type === UnitType.ARC_PORTAL
+            && !unit.status.isDying
+        );
+
+        if (portalIdx === -1) return;
+
+        const portal = this.state.units[portalIdx];
+        const nextHp = Math.max(0, portal.stats.hp - damage);
+
+        this.state.units[portalIdx] = {
+            ...portal,
+            stats: {
+                ...portal.stats,
+                hp: nextHp
+            }
+        };
+
+        this.triggerDamagePulses([{ unitId: portal.id, amount: damage }]);
+
+        if (this.state.turnOvertimeDamageApplied === 0) {
+            this.log(`> TURN TIMER EXPIRED: ${playerId} MAIN TAKING OVERTIME DAMAGE`, playerId);
+        }
+
+        if (nextHp === 0) {
+            this.state.units[portalIdx] = {
+                ...this.state.units[portalIdx],
+                status: {
+                    ...this.state.units[portalIdx].status,
+                    isDying: true
+                }
+            };
+
+            window.setTimeout(() => {
+                this.removeUnit(portal.id);
+            }, 1500);
+        }
+    }
+
+    private processTurnTimerTick() {
+        if (!this.shouldProcessTurnTimer()) return;
+
+        const overtimeMs = Date.now() - this.state.turnStartedAt - (TURN_TIMER_SECONDS * 1000);
+        const overtimeDamageTarget = Math.max(0, Math.floor(overtimeMs / 1000));
+        const pendingDamage = overtimeDamageTarget - this.state.turnOvertimeDamageApplied;
+
+        if (pendingDamage <= 0) return;
+
+        this.applyTurnTimerDamage(this.state.currentTurn, pendingDamage);
+        this.state.turnOvertimeDamageApplied = overtimeDamageTarget;
+        this.notify();
+        this.replicateAuthoritativeState();
+    }
+
+    private getAttackImpactDelay(attacker: Unit, target: Unit): number {
+        const attackerCenterX = attacker.position.x + ((attacker.stats.size - 1) / 2);
+        const attackerCenterZ = attacker.position.z + ((attacker.stats.size - 1) / 2);
+        const targetCenterX = target.position.x + ((target.stats.size - 1) / 2);
+        const targetCenterZ = target.position.z + ((target.stats.size - 1) / 2);
+        const worldDistance = Math.hypot(
+            targetCenterX - attackerCenterX,
+            targetCenterZ - attackerCenterZ
+        ) * (TILE_SIZE + TILE_SPACING);
+
+        const projectileSpeed = [
+            UnitType.SOLDIER,
+            UnitType.HEAVY,
+            UnitType.MEDIC,
+            UnitType.HACKER,
+            UnitType.SNIPER,
+            UnitType.BOX,
+            UnitType.REPAIR_BOT
+        ].includes(attacker.type) ? 42 : 32;
+
+        const delayMs = (worldDistance / projectileSpeed) * 1000;
+        return Math.max(55, Math.min(220, Math.round(delayMs)));
     }
 
     private createPerPlayerRecord<T>(factory: (playerId: PlayerId) => T): Record<PlayerId, T> {
@@ -652,6 +757,8 @@ class GameService {
             mapBounds: this.state.mapBounds,
             deletedTiles: [...this.state.deletedTiles],
             currentTurn: this.state.currentTurn,
+            turnStartedAt: this.state.turnStartedAt,
+            turnOvertimeDamageApplied: this.state.turnOvertimeDamageApplied,
             activePlayerIds: [...this.state.activePlayerIds],
             turnOrder: [...this.state.turnOrder],
             matchMode: this.state.matchMode,
@@ -789,6 +896,12 @@ class GameService {
                 if (data.currentTurn) {
                     this.state.currentTurn = data.currentTurn;
                 }
+                if (typeof data.turnStartedAt === 'number') {
+                    this.state.turnStartedAt = data.turnStartedAt;
+                }
+                if (typeof data.turnOvertimeDamageApplied === 'number') {
+                    this.state.turnOvertimeDamageApplied = data.turnOvertimeDamageApplied;
+                }
                 if (data.appStatus) {
                     this.state.appStatus = data.appStatus;
                 }
@@ -909,6 +1022,8 @@ class GameService {
             matchMode: 'duel',
             winner: null,
             roundNumber: 1,
+            turnStartedAt: Date.now(),
+            turnOvertimeDamageApplied: 0,
             units: [],
             collectibles: [],
             revealedTiles: Array.from(this.discovered),
@@ -1890,6 +2005,8 @@ class GameService {
             interactionState: { mode: 'NORMAL' },
             systemMessage: isDevMode ? "DEV MODE ACTIVE: INFINITE RESOURCES" : "MATCH STARTED. PLAYER 1 ACTIVE.",
             currentTurn: PlayerId.ONE,
+            turnStartedAt: Date.now(),
+            turnOvertimeDamageApplied: 0,
             activePlayerIds,
             turnOrder,
             matchMode,
@@ -2241,6 +2358,45 @@ class GameService {
             };
             this.notify();
             this.replicateAuthoritativeState();
+        }, 1200);
+    }
+
+    private triggerDamagePulses(pulses: Array<{ unitId: string; amount: number }>) {
+        if (pulses.length === 0) return;
+
+        const appliedUnitIds = new Set<string>();
+
+        this.state.units = this.state.units.map((unit) => {
+            const pulse = pulses.find((entry) => entry.unitId === unit.id && entry.amount > 0);
+            if (!pulse) return unit;
+
+            appliedUnitIds.add(unit.id);
+            return {
+                ...unit,
+                status: {
+                    ...unit.status,
+                    damagePulseAmount: pulse.amount
+                }
+            };
+        });
+
+        if (appliedUnitIds.size === 0) return;
+
+        window.setTimeout(() => {
+            this.state.units = this.state.units.map((unit) => {
+                if (!appliedUnitIds.has(unit.id)) return unit;
+                return {
+                    ...unit,
+                    status: {
+                        ...unit.status,
+                        damagePulseAmount: null
+                    }
+                };
+            });
+            this.notify();
+            if (this.state.isMultiplayer && this.isSyncAuthority()) {
+                this.replicateAuthoritativeState();
+            }
         }, 1200);
     }
 
@@ -2987,7 +3143,9 @@ class GameService {
             }
             if (card.type === UnitType.SYSTEM_FREEZE) {
                 const enemyUnits = this.state.units.filter((unit) =>
-                    this.isContestedPlayer(unit.playerId) && this.arePlayersHostile(playerId, unit.playerId)
+                    this.isContestedPlayer(unit.playerId)
+                    && this.arePlayersHostile(playerId, unit.playerId)
+                    && !BUILDING_TYPES.includes(unit.type)
                 );
 
                 enemyUnits.forEach(u => {
@@ -3527,6 +3685,11 @@ class GameService {
 
         if (!this.arePlayersHostile(source.playerId, target.playerId)) {
             this.log(`> TARGET INVALID: HOSTILE ONLY`, source.playerId);
+            return;
+        }
+
+        if (BUILDING_TYPES.includes(target.type)) {
+            this.log(`> TARGET INVALID: STRUCTURES IMMUNE`, source.playerId);
             return;
         }
 
@@ -4291,6 +4454,7 @@ class GameService {
             .filter(target =>
                 target.id !== attacker.id &&
                 target.playerId !== PlayerId.NEUTRAL &&
+                !BUILDING_TYPES.includes(target.type) &&
                 !target.status.isDying &&
                 !this.isInvulnerable(target) &&
                 !this.checkUnitFrozen(target)
@@ -4441,13 +4605,14 @@ class GameService {
                 autoAttackTargetId: isEnemyPlayer ? targetId : null
             }
         };
-        this.state.units = activeUnits;
-        this.notify();
+	        this.state.units = activeUnits;
+	        this.notify();
 
-        setTimeout(() => {
-            this.resolveAttack(attackerId, targetId);
-        }, 600);
-    }
+            const impactDelay = this.getAttackImpactDelay(attacker, target);
+	        setTimeout(() => {
+	            this.resolveAttack(attackerId, targetId);
+	        }, impactDelay);
+	    }
 
     private checkAttackValidity(attacker: Unit, target: Unit): { isValid: boolean, reason?: string } {
         const distance = this.getUnitFootprintDistance(attacker, target);
@@ -4460,9 +4625,10 @@ class GameService {
         return { isValid: true };
     }
 
-    private resolveAttack(attackerId: string, targetId: string) {
-        const attackerIdx = this.state.units.findIndex(u => u.id === attackerId);
-        const targetIdx = this.state.units.findIndex(u => u.id === targetId);
+	    private resolveAttack(attackerId: string, targetId: string) {
+	        const attackerIdx = this.state.units.findIndex(u => u.id === attackerId);
+	        const targetIdx = this.state.units.findIndex(u => u.id === targetId);
+            let directDamagePulse: { unitId: string; amount: number } | null = null;
 
         if (attackerIdx === -1) return;
 
@@ -4504,10 +4670,11 @@ class GameService {
                 }
                 const newHp = Math.max(0, target.stats.hp - damage);
 
-                updatedUnits[targetIdx] = {
-                    ...target,
-                    stats: { ...target.stats, hp: newHp }
-                };
+	                updatedUnits[targetIdx] = {
+	                    ...target,
+	                    stats: { ...target.stats, hp: newHp }
+	                };
+                    directDamagePulse = { unitId: target.id, amount: damage };
 
                 const remainingAttacks = attacker.stats.maxAttacks - updatedUnits[attackerIdx].status.attacksUsed;
                 this.log(`> ${attacker.type} FIRES ON ${target.type}: -${damage} HP${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
@@ -4551,15 +4718,19 @@ class GameService {
             updatedUnits[attackerIdx].status.autoAttackTargetId = null;
         }
 
-        this.state.units = updatedUnits;
-        this.notify();
-        this.replicateAuthoritativeState();
-    }
+	        this.state.units = updatedUnits;
+            if (directDamagePulse) {
+                this.triggerDamagePulses([directDamagePulse]);
+            }
+	        this.notify();
+	        this.replicateAuthoritativeState();
+	    }
 
-    private applyAreaDamage(center: Position, radius: number, damage: number, sourceUnitId: string, excludeUnitId?: string) {
-        const hitUnits = this.state.units.map(u => {
-            if (u.id === sourceUnitId) return u;
-            if (excludeUnitId && u.id === excludeUnitId) return u;
+	    private applyAreaDamage(center: Position, radius: number, damage: number, sourceUnitId: string, excludeUnitId?: string) {
+            const damagePulses: Array<{ unitId: string; amount: number }> = [];
+	        const hitUnits = this.state.units.map(u => {
+	            if (u.id === sourceUnitId) return u;
+	            if (excludeUnitId && u.id === excludeUnitId) return u;
 
             const isInvulnerable = u.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
             if (isInvulnerable) return u;
@@ -4568,16 +4739,20 @@ class GameService {
             const dz = u.position.z - center.z;
             const dist = Math.sqrt(dx * dx + dz * dz);
 
-            if (dist <= radius) {
-                const newHp = Math.max(0, u.stats.hp - damage);
-                this.log(`> BLAST HIT ${u.type}: -${damage} HP`);
-                return { ...u, stats: { ...u.stats, hp: newHp } };
-            }
-            return u;
-        });
+	            if (dist <= radius) {
+	                const newHp = Math.max(0, u.stats.hp - damage);
+	                this.log(`> BLAST HIT ${u.type}: -${damage} HP`);
+                    damagePulses.push({ unitId: u.id, amount: damage });
+	                return { ...u, stats: { ...u.stats, hp: newHp } };
+	            }
+	            return u;
+	        });
 
-        this.state.units = hitUnits;
-        const deadUnitIds = hitUnits
+	        this.state.units = hitUnits;
+            if (damagePulses.length > 0) {
+                this.triggerDamagePulses(damagePulses);
+            }
+	        const deadUnitIds = hitUnits
             .filter(u => u.stats.hp === 0 && !u.status.isDying)
             .map(u => u.id);
 
@@ -5253,6 +5428,7 @@ class GameService {
         this.state.pendingTalentResumePlayerId = null;
         this.state.appStatus = AppStatus.PLAYING;
         this.state.currentTurn = resumePlayer;
+        this.resetTurnTimer();
         this.state.selectedCardId = this.state.decks[resumePlayer]?.[0]?.id || null;
         this.state.selectedUnitId = null;
         this.state.previewPath = [];
@@ -5379,6 +5555,8 @@ class GameService {
                     ...this.state,
                     units: refreshedUnits,
                     currentTurn: nextTurn,
+                    turnStartedAt: Date.now(),
+                    turnOvertimeDamageApplied: 0,
                     roundNumber: nextRound,
                     selectedCardId: this.state.decks[nextTurn][0]?.id || null,
                     selectedUnitId: null,
@@ -5439,6 +5617,8 @@ class GameService {
             ...this.state,
             units: refreshedUnits,
             currentTurn: playerId,
+            turnStartedAt: Date.now(),
+            turnOvertimeDamageApplied: 0,
             selectedCardId: this.state.decks[playerId]?.[0]?.id || null,
             selectedUnitId: null,
             interactionState: { mode: 'NORMAL' }

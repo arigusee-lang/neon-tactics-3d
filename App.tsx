@@ -16,7 +16,7 @@ import RulebookModal from './components/RulebookModal';
 import { gameService } from './services/gameService';
 import { soundService } from './services/soundService';
 import { GameState, PlayerId, AppStatus, Effect, UnitType, Talent } from './types';
-import { COLORS, CHARACTERS } from './constants';
+import { COLORS, CHARACTERS, TURN_TIMER_SECONDS } from './constants';
 import { groupCards } from './utils/cardUtils';
 import { clampTerrainBrushSize, isBrushEnabledTerrainTool } from './utils/terrainBrush';
 
@@ -42,6 +42,12 @@ const getPlayerShortLabel = (playerId: PlayerId) => {
     if (playerId === PlayerId.THREE) return 'P3';
     if (playerId === PlayerId.FOUR) return 'P4';
     return 'N';
+};
+
+const formatTimerValue = (totalSeconds: number) => {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
 // Simple Effect Icon Component
@@ -186,6 +192,7 @@ const CharacterActionBar: React.FC<{ actions: any[], playerId: PlayerId, current
 
 const App: React.FC = () => {
     const [gameState, setGameState] = useState<GameState | null>(null);
+    const [timerNow, setTimerNow] = useState(() => Date.now());
     const [isProtocolMinimized, setIsProtocolMinimized] = useState(true);
     const [isLogMinimized, setIsLogMinimized] = useState(true);
     const [isDebugPointerVisible, setIsDebugPointerVisible] = useState(true);
@@ -201,6 +208,14 @@ const App: React.FC = () => {
     useEffect(() => {
         const unsubscribe = gameService.subscribe(setGameState);
         return () => unsubscribe();
+    }, []);
+
+    useEffect(() => {
+        const intervalId = window.setInterval(() => {
+            setTimerNow(Date.now());
+        }, 250);
+
+        return () => window.clearInterval(intervalId);
     }, []);
 
     useEffect(() => {
@@ -445,6 +460,16 @@ const App: React.FC = () => {
     const isPlaying = gameState.appStatus === AppStatus.PLAYING || gameState.appStatus === AppStatus.TALENT_SELECTION || gameState.appStatus === AppStatus.SHOP;
     const showInventoryBar = !gameState.isMultiplayer || isLocalTurn;
     const showUnitControlPanel = !gameState.isMultiplayer || isLocalTurn;
+    const showTurnTimer = !gameState.isDevMode
+        && !gameState.winner
+        && gameState.activePlayerIds.includes(gameState.currentTurn)
+        && (gameState.appStatus === AppStatus.PLAYING || gameState.appStatus === AppStatus.SHOP || gameState.appStatus === AppStatus.PAUSED);
+    const turnElapsedMs = Math.max(0, timerNow - gameState.turnStartedAt);
+    const turnRemainingSeconds = Math.max(0, Math.ceil(((TURN_TIMER_SECONDS * 1000) - turnElapsedMs) / 1000));
+    const turnOvertimeSeconds = Math.max(0, Math.floor((turnElapsedMs - (TURN_TIMER_SECONDS * 1000)) / 1000));
+    const turnTimerLabel = turnOvertimeSeconds > 0
+        ? `OVERTIME ${formatTimerValue(turnOvertimeSeconds)}`
+        : `TURN ${formatTimerValue(turnRemainingSeconds)}`;
     const terrainTool = gameState.interactionState.terrainTool;
     const terrainBrushSize = clampTerrainBrushSize(gameState.interactionState.terrainBrushSize ?? 1);
     const terrainImpactText = isBrushEnabledTerrainTool(terrainTool) ? ` | IMPACT ZONE: ${terrainBrushSize}x${terrainBrushSize}` : '';
@@ -584,12 +609,23 @@ const App: React.FC = () => {
                         {/* HUD Top Bar */}
                         <div className="flex items-center gap-4 w-full justify-center">
                             <div className="bg-transparent border border-green-900 px-6 py-2 rounded-full shadow-[0_0_15px_rgba(0,255,0,0.2)] flex items-center gap-6 backdrop-blur-sm pointer-events-auto">
-                                <div className="flex flex-col items-center justify-center px-4 border-r border-slate-700/50">
-                                    <div className="text-[8px] text-green-500/70 font-bold uppercase tracking-wider leading-none mb-0.5">LEVEL</div>
-                                    <div className="text-lg font-mono font-bold text-white leading-none">{gameState.roundNumber.toString().padStart(2, '0')}</div>
-                                </div>
+	                                <div className="flex flex-col items-center justify-center px-4 border-r border-slate-700/50">
+	                                    <div className="text-[8px] text-green-500/70 font-bold uppercase tracking-wider leading-none mb-0.5">LEVEL</div>
+	                                    <div className="text-lg font-mono font-bold text-white leading-none">{gameState.roundNumber.toString().padStart(2, '0')}</div>
+	                                </div>
 
-                                <div className="flex flex-wrap items-start justify-center gap-5 max-w-[52rem]">
+                                    {showTurnTimer && (
+                                        <div className={`flex flex-col items-center justify-center px-4 border-r border-slate-700/50 ${turnOvertimeSeconds > 0 ? 'text-red-300' : 'text-cyan-200'}`}>
+                                            <div className={`text-[8px] font-bold uppercase tracking-wider leading-none mb-0.5 ${turnOvertimeSeconds > 0 ? 'text-red-400/80' : 'text-cyan-300/80'}`}>
+                                                {turnOvertimeSeconds > 0 ? 'MAIN DAMAGE' : 'TURN TIMER'}
+                                            </div>
+                                            <div className={`text-lg font-mono font-bold leading-none ${turnOvertimeSeconds > 0 ? 'text-red-200 drop-shadow-[0_0_8px_rgba(248,113,113,0.45)]' : 'text-white'}`}>
+                                                {turnTimerLabel}
+                                            </div>
+                                        </div>
+                                    )}
+
+	                                <div className="flex flex-wrap items-start justify-center gap-5 max-w-[52rem]">
                                     {hudPlayerIds.map((playerId, index) => {
                                         const isActive = gameState.currentTurn === playerId;
                                         const playerColorValue = getPlayerColor(playerId);
