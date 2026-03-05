@@ -31,9 +31,31 @@ interface UnitProps {
     data: UnitType;
     isSelected: boolean;
     appStatus: AppStatus;
+    showNameLabel: boolean;
+    showLevelLabel: boolean;
 }
 
 // --- COMBAT EFFECTS COMPONENTS ---
+
+const MuzzleFlash = ({ position, color }: { position: Vector3, color: string }) => {
+    const ref = useRef<THREE.Mesh>(null);
+
+    useFrame((_, delta) => {
+        if (!ref.current) return;
+        ref.current.scale.multiplyScalar(1 + delta * 8);
+        (ref.current.material as THREE.MeshBasicMaterial).opacity = Math.max(
+            0,
+            (ref.current.material as THREE.MeshBasicMaterial).opacity - (delta * 8)
+        );
+    });
+
+    return (
+        <mesh position={position} ref={ref}>
+            <sphereGeometry args={[0.3, 8, 8]} />
+            <meshBasicMaterial color={color} transparent opacity={0.8} />
+        </mesh>
+    );
+};
 
 // Impact Explosion Effect
 const Impact = ({
@@ -147,21 +169,26 @@ const LightningStrike: React.FC<{ target: Vector3, color: string }> = ({ target,
 
 // Melee Impact Wrapper
 const MeleeImpact: React.FC<{ position: Vector3, delay: number, color: string }> = ({ position, delay, color }) => {
+    const { scene } = useThree();
     const [show, setShow] = useState(false);
     useEffect(() => {
         const t = setTimeout(() => setShow(true), delay * 1000);
         return () => clearTimeout(t);
     }, [delay]);
     if (!show) return null;
-    return <Impact position={position} color={color} />;
+    return createPortal(
+        <Impact position={position} color={color} />,
+        scene
+    );
 };
 
 // Main Projectile Component
-const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, type: EUnitType }> = ({ start, end, color, type }) => {
+const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, type: EUnitType, showImpact?: boolean }> = ({ start, end, color, type, showImpact = true }) => {
     const { scene } = useThree();
     const meshRef = useRef<THREE.Group>(null);
     const laserRef = useRef<THREE.Mesh>(null); // For Flux Tower instant beam
-    const [phase, setPhase] = useState<'flying' | 'impact'>('flying');
+    const isLegacyTitanShot = type === EUnitType.TITAN;
+    const [phase, setPhase] = useState<'muzzle' | 'flying' | 'impact'>(isLegacyTitanShot ? 'muzzle' : 'flying');
     const progress = useRef(0);
     const lifeTime = useRef(0); // For Flux Tower beam fade
 
@@ -240,6 +267,16 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
                     lightIntensity: 1.5,
                     lightDistance: 1.8
                 };
+            case EUnitType.TITAN:
+                return {
+                    innerRadius: 0.16,
+                    outerRadius: 0.28,
+                    expansion: 4.6,
+                    sparkSpeed: 0.14,
+                    sparkCount: 7,
+                    lightIntensity: 2.3,
+                    lightDistance: 2.6
+                };
             default:
                 return {
                     innerRadius: 0.1,
@@ -275,6 +312,11 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
         }
 
         // STANDARD PROJECTILE LOGIC
+        if (phase === 'muzzle') {
+            setPhase('flying');
+            return;
+        }
+
         if (phase === 'flying' && meshRef.current) {
             progress.current += delta / travelDuration;
 
@@ -290,6 +332,10 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
 
     return createPortal(
         <group>
+            {((isTower && lifeTime.current < 0.1) || isLegacyTitanShot && phase === 'muzzle') && (
+                <MuzzleFlash position={start} color={displayColor} />
+            )}
+
             {/* FLUX TOWER BEAM */}
             {isTower && (
                 <group position={start}>
@@ -342,7 +388,7 @@ const ProjectileEffect: React.FC<{ start: Vector3, end: Vector3, color: string, 
             )}
 
             {/* Impact */}
-            {phase === 'impact' && <Impact position={end} color={displayColor} {...impactProfile} />}
+            {phase === 'impact' && showImpact && <Impact position={end} color={displayColor} {...impactProfile} />}
         </group>,
         scene
     );
@@ -430,7 +476,7 @@ const DynamicMindControlLink: React.FC<{ start: Vector3, targetId: string }> = (
 
 // --- MAIN UNIT COMPONENT ---
 
-const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
+const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel, showLevelLabel }) => {
     const groupRef = useRef<Group>(null);
     const internalRef = useRef<Group>(null);
     const bodyRef = useRef<Group>(null);
@@ -705,7 +751,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             case EUnitType.ARC_PORTAL: return <ArcPortalModelV2 color={playerColor} isDying={isDying} />;
             case EUnitType.WALL: return <WallModel color={playerColor} isDying={isDying} />;
             case EUnitType.TOWER: return <TowerModel color={playerColor} isDying={isDying} />;
-            case EUnitType.TITAN: return <TitanModel color={playerColor} isDying={isDying} />;
+            case EUnitType.TITAN: return <TitanModel color={playerColor} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;
             case EUnitType.SUICIDE_DRONE: return <SuicideDroneModel color={playerColor} isDying={isDying} isExploding={isExploding} />;
             case EUnitType.CONE: return <ApexBladeModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;
             case EUnitType.CONE: return <ApexBladeModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;
@@ -763,12 +809,36 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
         : supportPulseKind === 'DAMAGE'
             ? `-${supportPulseAmount}`
             : `+${supportPulseAmount} HP`;
+    const unitNameLabel = CARD_CONFIG[data.type]?.name ?? data.type.replaceAll('_', ' ');
 
     const projectileStartOffset = data.type === EUnitType.TOWER
         ? new Vector3(0, 2.3, 0)
         : (data.type === EUnitType.LIGHT_TANK || data.type === EUnitType.HEAVY_TANK)
             ? new Vector3(0, 0.5, 0)
             : new Vector3(0, 0.8, 0);
+    const dualProjectileStarts = useMemo(() => {
+        if ((data.type !== EUnitType.TITAN && data.type !== EUnitType.HEAVY_TANK) || !attackTargetPos) return [];
+
+        const shooterHeight = data.type === EUnitType.HEAVY_TANK ? 0.55 : 0.8;
+        const muzzleForwardDistance = data.type === EUnitType.HEAVY_TANK ? 1.15 : 0.8;
+        const muzzleSeparation = data.type === EUnitType.HEAVY_TANK ? 0.28 : 0.22;
+        const shooter = visualPos.current.clone().add(new Vector3(0, shooterHeight, 0));
+        const forward = attackTargetPos.clone().sub(shooter);
+        forward.y = 0;
+        if (forward.lengthSq() === 0) {
+            forward.set(0, 0, 1);
+        } else {
+            forward.normalize();
+        }
+
+        const right = new Vector3(-forward.z, 0, forward.x).normalize();
+        const muzzleCenter = shooter.clone().add(forward.clone().multiplyScalar(muzzleForwardDistance));
+
+        return [
+            muzzleCenter.clone().add(right.clone().multiplyScalar(-muzzleSeparation)),
+            muzzleCenter.clone().add(right.clone().multiplyScalar(muzzleSeparation))
+        ];
+    }, [attackTargetPos, data.type]);
 
     return (
         <group
@@ -790,6 +860,19 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
                     <MeleeImpact position={attackTargetPos} delay={0.2} color={playerColor} />
                 ) : data.type === EUnitType.SPIKE ? (
                     <LightningStrike target={attackTargetPos} color={playerColor} />
+                ) : (data.type === EUnitType.TITAN || data.type === EUnitType.HEAVY_TANK) ? (
+                    <>
+                        {dualProjectileStarts.map((start, index) => (
+                            <ProjectileEffect
+                                key={`${data.type.toLowerCase()}-shot-${index}`}
+                                start={start}
+                                end={attackTargetPos.clone()}
+                                color={playerColor}
+                                type={data.type}
+                                showImpact={index === 0}
+                            />
+                        ))}
+                    </>
                 ) : (
                     <ProjectileEffect
                         start={visualPos.current.clone().add(projectileStartOffset)}
@@ -832,9 +915,20 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus }) => {
             {!isDying && !isExploding && appStatus === AppStatus.PLAYING && (
                 <Html position={[0, size > 1 ? 2.8 : (data.type === EUnitType.TOWER ? 2.8 : 1.8), 0]} center distanceFactor={12} zIndexRange={[100, 0]}>
                     <div className="flex flex-col items-center pointer-events-none select-none">
-                        <div className="absolute bottom-full mb-0.5 text-[8px] font-black text-white bg-black/60 px-1 rounded border border-gray-700 shadow-sm backdrop-blur-[2px]">
-                            LVL {data.level}
-                        </div>
+                        {(showNameLabel || showLevelLabel) && (
+                            <div className="absolute bottom-full mb-0.5 flex items-center gap-1 whitespace-nowrap">
+                                {showNameLabel && (
+                                    <div className="max-w-[6.5rem] truncate text-[8px] font-black uppercase tracking-[0.08em] text-cyan-100 bg-black/70 px-1.5 py-[1px] rounded border border-cyan-800/70 shadow-sm backdrop-blur-[2px]">
+                                        {unitNameLabel}
+                                    </div>
+                                )}
+                                {showLevelLabel && (
+                                    <div className="text-[8px] font-black text-white bg-black/60 px-1 rounded border border-gray-700 shadow-sm backdrop-blur-[2px]">
+                                        LVL {data.level}
+                                    </div>
+                                )}
+                            </div>
+                        )}
 
                         {!isIndestructible && (
                             <div className="w-14 h-1.5 bg-gray-900 border border-gray-700 rounded-full overflow-hidden mb-0.5 shadow-[0_0_5px_rgba(0,0,0,1)]">

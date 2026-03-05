@@ -72,6 +72,27 @@ Environment:
 - Vite exposes that value through `vite.config.ts`.
 - There are currently no repo-managed secrets that should be copied into documentation.
 
+## Available LSP Servers
+
+Global language servers are installed in this environment for editor/LSP clients:
+
+- TypeScript: `typescript-language-server` (with `typescript`).
+- HTML/CSS/JSON/ESLint: from `vscode-langservers-extracted`.
+- YAML: `yaml-language-server`.
+- Dockerfile: `docker-langserver` (from `dockerfile-language-server-nodejs`).
+
+### LSP Client Wiring
+
+- These servers are meant to be launched by an editor/LSP client over stdio. Use `--stdio` in client command args.
+- On Windows PowerShell, confirm binaries with `Get-Command <name>`. Do not run most of these binaries directly without `--stdio`.
+- TypeScript LSP: command `typescript-language-server`, args `--stdio`.
+- HTML LSP: command `vscode-html-language-server`, args `--stdio`.
+- CSS LSP: command `vscode-css-language-server`, args `--stdio`.
+- JSON LSP: command `vscode-json-language-server`, args `--stdio`.
+- ESLint LSP: command `vscode-eslint-language-server`, args `--stdio`.
+- YAML LSP: command `yaml-language-server`, args `--stdio`.
+- Dockerfile LSP: command `docker-langserver`, args `--stdio`.
+
 ## Local Development
 
 Primary command:

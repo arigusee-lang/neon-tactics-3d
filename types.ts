@@ -291,6 +291,8 @@ export interface GameState {
   appStatus: AppStatus;
   mapId: string; // Identifies the current map
   lightMode: 'DARK' | 'LIGHT';
+  showUnitNameLabels: boolean;
+  showUnitLevelLabels: boolean;
   units: Unit[];
   collectibles: Collectible[];
   revealedTiles: string[];
@@ -342,6 +344,8 @@ export interface GameState {
   lobbyMapId: string | null;
   lobbyPlayerCount: number;
   lobbyMaxPlayers: number;
+  hostAdminEnabled: boolean;
+  isInGameAdmin: boolean;
   myPlayerId: PlayerId | null; // The player ID that THIS client controls
 
   // Developer Mode Flag

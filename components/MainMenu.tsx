@@ -14,6 +14,7 @@ interface MainMenuProps {
   lobbyMapId: string | null;
   lobbyPlayerCount: number;
   lobbyMaxPlayers: number;
+  hostAdminEnabled: boolean;
   isMultiplayer: boolean;
   isDevMode: boolean;
 }
@@ -30,6 +31,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   lobbyMapId,
   lobbyPlayerCount,
   lobbyMaxPlayers,
+  hostAdminEnabled,
   isMultiplayer,
   isDevMode
 }) => {
@@ -41,6 +43,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [selectedSoloMap, setSelectedSoloMap] = useState('MAP_1');
   const [selectedDevMap, setSelectedDevMap] = useState('EMPTY');
   const [selectedMultiplayerMap, setSelectedMultiplayerMap] = useState('CrossMap');
+  const [hostAdminRequested, setHostAdminRequested] = useState(false);
   const [emptyPlayerCount, setEmptyPlayerCount] = useState<2 | 3 | 4>(2);
   const [emptyMode, setEmptyMode] = useState<MatchMode>('duel');
 
@@ -119,6 +122,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
       setMenuView('ROOT');
       setRoomCodeInput('');
       setIsGeneratingRoomCode(false);
+      setHostAdminRequested(false);
     } else if (status === AppStatus.MAP_SELECTION) {
       setMenuView('SOLO_MAPS');
     }
@@ -212,7 +216,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const createMultiplayerLobby = () => {
     if (hasPendingLobby) return;
     setIsGeneratingRoomCode(true);
-    gameService.createLobby(selectedMultiplayerMap);
+    gameService.createLobby(selectedMultiplayerMap, hostAdminRequested);
   };
 
   const getLobbyStatusLabel = () => {
@@ -545,6 +549,28 @@ const MainMenu: React.FC<MainMenuProps> = ({
                       {hasPendingLobby ? 'Lobby Active' : 'Create Lobby'}
                     </button>
 
+                    <label className={`mt-4 flex items-start gap-3 rounded-xl border px-3 py-3 text-left font-mono transition-colors ${
+                      hasPendingLobby
+                        ? 'border-purple-900/40 bg-purple-950/10 text-purple-200/45'
+                        : 'border-purple-500/30 bg-purple-950/15 text-purple-100'
+                    }`}>
+                      <input
+                        type="checkbox"
+                        checked={hasPendingLobby ? hostAdminEnabled : hostAdminRequested}
+                        onChange={(e) => setHostAdminRequested(e.target.checked)}
+                        disabled={hasPendingLobby}
+                        className="mt-0.5 h-4 w-4 border-purple-500/40 bg-black/60 accent-purple-500 disabled:cursor-not-allowed"
+                      />
+                      <span className="flex-1 text-xs leading-relaxed">
+                        <span className="block text-[10px] uppercase tracking-[0.22em] text-purple-300/80">
+                          Host Admin In-Game
+                        </span>
+                        <span>
+                          Lets the host edit HP, energy, and core combat stats for any unit from the unit control pane during the match.
+                        </span>
+                      </span>
+                    </label>
+
                     <div className="mt-4 rounded-xl border border-purple-500/30 bg-purple-950/15 px-3 py-3 text-center text-xs font-mono text-purple-100">
                       Room Code:{' '}
                       <span className="font-bold tracking-widest text-purple-300">
@@ -621,6 +647,11 @@ const MainMenu: React.FC<MainMenuProps> = ({
                       {hasPendingLobby && (
                         <div className="mt-2 text-[11px] font-mono uppercase tracking-[0.18em] text-purple-300/65">
                           Room {roomId} | {activeLobbyMapMeta?.id || selectedMultiplayerMap}
+                        </div>
+                      )}
+                      {hasPendingLobby && hostAdminEnabled && (
+                        <div className="mt-2 text-[11px] font-mono uppercase tracking-[0.18em] text-purple-200/80">
+                          Host admin controls enabled
                         </div>
                       )}
                     </div>

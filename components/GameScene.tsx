@@ -17,6 +17,8 @@ interface GameSceneProps {
   previewPath?: Position[];
   appStatus: AppStatus;
   lightMode: 'DARK' | 'LIGHT';
+  showUnitNameLabels: boolean;
+  showUnitLevelLabels: boolean;
   mapId: string;
   collectibles: Collectible[];
   mapBounds: MapBounds;
@@ -31,6 +33,8 @@ const GameScene: React.FC<GameSceneProps> = ({
   previewPath = [],
   appStatus,
   lightMode,
+  showUnitNameLabels,
+  showUnitLevelLabels,
   mapId,
   collectibles,
   mapBounds
@@ -126,6 +130,8 @@ const GameScene: React.FC<GameSceneProps> = ({
               data={unit}
               isSelected={selectedUnitId === unit.id}
               appStatus={appStatus}
+              showNameLabel={showUnitNameLabels}
+              showLevelLabel={showUnitLevelLabels}
             />
           ))}
 

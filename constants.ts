@@ -47,6 +47,26 @@ export const BUILDING_TYPES = [
   UnitType.ARC_PORTAL
 ];
 
+export const MACHINE_TYPES = [
+  UnitType.BOX,
+  UnitType.SUICIDE_DRONE,
+  UnitType.LIGHT_TANK,
+  UnitType.HEAVY_TANK,
+  UnitType.REPAIR_BOT
+];
+
+export const getUnitClassificationLabel = (unitType: UnitType): 'BUILDING' | 'MACHINE' | 'CREATURE' => {
+  if (BUILDING_TYPES.includes(unitType)) {
+    return 'BUILDING';
+  }
+
+  if (MACHINE_TYPES.includes(unitType)) {
+    return 'MACHINE';
+  }
+
+  return 'CREATURE';
+};
+
 // Visible in catalogue/dev mode, but excluded from normal shop + initial deck generation.
 export const DEV_ONLY_UNITS: UnitType[] = [
   UnitType.PORTAL,
@@ -63,7 +83,7 @@ export const CHARACTERS: Character[] = [
     color: '#00ff00',
     perks: [
       { level: 0, description: 'Unlock access to MEDIC units in the logistics network.', unlocksUnits: [UnitType.MEDIC] },
-      { level: 10, description: 'Enhanced Repair: Medics can repair buildings and heal +Level amount.' },
+      { level: 10, description: 'Enhanced Repair: Medics heal creatures for +Level amount.' },
       { level: 25, description: 'Restore Energy: Medics can restore 50 Energy to a target unit.' },
       { level: 50, description: 'Immortality Shield: Temporary invulnerability (Cooldown: 25 turns).' },
       { level: 100, description: 'TBD: Immortality Field' }
@@ -200,7 +220,7 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
   [UnitType.REPAIR_BOT]: {
     category: CardCategory.UNIT,
     name: 'Repair Bot',
-    description: 'Mobile repair unit. Can repair buildings and units.',
+    description: 'Mobile repair unit. Structural repair ability only works on friendly buildings and machines.',
     cost: 100,
     baseStats: { hp: 120, maxEnergy: 50, attack: 10, range: 1, movement: 4, size: 1, blocksLos: false }
   },

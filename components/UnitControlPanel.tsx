@@ -2,12 +2,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Unit, UnitType, PlayerId, Effect } from '../types';
-import { CARD_CONFIG, COLORS } from '../constants';
+import { CARD_CONFIG, COLORS, getUnitClassificationLabel } from '../constants';
 import { gameService } from '../services/gameService';
 
 interface UnitControlPanelProps {
     unit: Unit | null;
     isDevMode?: boolean;
+    canEditStats?: boolean;
+    canUseActions?: boolean;
     currentRound?: number;
     characterId?: string | null;
 }
@@ -123,7 +125,14 @@ const AbilityButton: React.FC<AbilityButtonProps> = ({ label, icon, cost, descri
     );
 };
 
-const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, currentRound, characterId }) => {
+const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
+    unit,
+    isDevMode,
+    canEditStats,
+    canUseActions = true,
+    currentRound,
+    characterId
+}) => {
     // Draggable State
     const [pos, setPos] = useState(() => {
         const x = typeof window !== 'undefined' ? window.innerWidth - 320 : 0;
@@ -136,6 +145,14 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
 
     // Tooltip State
     const [tooltip, setTooltip] = useState<{ content: React.ReactNode, x: number, y: number, align: 'left' | 'top' } | null>(null);
+    const [hpInput, setHpInput] = useState('');
+    const [maxHpInput, setMaxHpInput] = useState('');
+    const [energyInput, setEnergyInput] = useState('');
+    const [maxEnergyInput, setMaxEnergyInput] = useState('');
+    const [attackInput, setAttackInput] = useState('');
+    const [rangeInput, setRangeInput] = useState('');
+    const [movementInput, setMovementInput] = useState('');
+    const [isStatEditorOpen, setIsStatEditorOpen] = useState(false);
 
     const onMouseDown = (e: React.MouseEvent) => {
         setIsDragging(true);
@@ -177,6 +194,17 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
         setTooltip(null);
     };
 
+    useEffect(() => {
+        setHpInput(unit ? String(unit.stats.hp) : '');
+        setMaxHpInput(unit ? String(unit.stats.maxHp) : '');
+        setEnergyInput(unit ? String(unit.stats.energy) : '');
+        setMaxEnergyInput(unit ? String(unit.stats.maxEnergy) : '');
+        setAttackInput(unit ? String(unit.stats.attack) : '');
+        setRangeInput(unit ? String(unit.stats.range) : '');
+        setMovementInput(unit ? String(unit.stats.movement) : '');
+        setIsStatEditorOpen(false);
+    }, [unit?.id, unit?.stats.attack, unit?.stats.energy, unit?.stats.hp, unit?.stats.maxEnergy, unit?.stats.maxHp, unit?.stats.movement, unit?.stats.range]);
+
     if (!unit) return null;
 
     const config = CARD_CONFIG[unit.type];
@@ -192,11 +220,30 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
         unit.playerId === PlayerId.THREE ? 'PLAYER 3' :
         unit.playerId === PlayerId.FOUR ? 'PLAYER 4' :
         'NEUTRAL';
+    const unitTypeLabel = getUnitClassificationLabel(unit.type);
 
     // Calculate HP percentage
     const hpPercent = (unit.stats.hp / unit.stats.maxHp) * 100;
     const hasEnergy = unit.stats.maxEnergy > 0;
     const energyPercent = hasEnergy ? (unit.stats.energy / unit.stats.maxEnergy) * 100 : 0;
+    const actionsLocked = !canUseActions;
+
+    const parseIntOrUndefined = (value: string) => {
+        const parsed = Number.parseInt(value, 10);
+        return Number.isNaN(parsed) ? undefined : parsed;
+    };
+
+    const applyStatEdits = () => {
+        gameService.setUnitStats(unit.id, {
+            hp: parseIntOrUndefined(hpInput),
+            maxHp: parseIntOrUndefined(maxHpInput),
+            energy: parseIntOrUndefined(energyInput),
+            maxEnergy: parseIntOrUndefined(maxEnergyInput),
+            attack: parseIntOrUndefined(attackInput),
+            range: parseIntOrUndefined(rangeInput),
+            movement: parseIntOrUndefined(movementInput)
+        });
+    };
 
     return (
         <>
@@ -213,8 +260,13 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                         className="px-4 py-3 bg-green-900/30 border-b border-green-500/50 flex justify-between items-center cursor-move select-none group"
                     >
                         <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: mainColor, boxShadow: `0 0 8px ${mainColor}` }} />
-                            <h2 className="text-xs font-bold text-white uppercase tracking-[0.15em]">{config?.name || 'UNKNOWN UNIT'}</h2>
+                            <div className="w-2 h-2 rounded-full" style={{ backgroundColor: mainColor, boxShadow: `0 0 8px ${mainColor}` }} />
+                            <div className="flex flex-col">
+                                <h2 className="text-xs font-bold text-white uppercase tracking-[0.15em]">{config?.name || 'UNKNOWN UNIT'}</h2>
+                                <div className="text-[9px] font-mono uppercase tracking-[0.18em] text-cyan-300/80">
+                                    Type: {unitTypeLabel}
+                                </div>
+                            </div>
                         </div>
                         <div className="text-[9px] font-bold px-2 py-0.5 rounded bg-black/60 border border-green-900/50" style={{ color: mainColor }}>
                             {ownerLabel}
@@ -226,6 +278,59 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
 
                         {/* Status Bars */}
                         <div className="space-y-2.5">
+                            {canEditStats && (
+                                <div className="rounded-lg border border-cyan-500/25 bg-cyan-950/10 p-2.5">
+                                    <button
+                                        onClick={() => setIsStatEditorOpen((current) => !current)}
+                                        className="flex w-full items-center justify-between text-left"
+                                    >
+                                        <span className="text-[9px] font-bold uppercase tracking-[0.22em] text-cyan-300/80">
+                                            {isDevMode ? 'Dev Stat Override' : 'Admin Stat Editor'}
+                                        </span>
+                                        <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-200">
+                                            {isStatEditorOpen ? 'Hide' : 'Show'}
+                                        </span>
+                                    </button>
+
+                                    {isStatEditorOpen && (
+                                        <>
+                                            <div className="mt-3 grid grid-cols-2 gap-2">
+                                                {[
+                                                    { label: 'HP', value: hpInput, onChange: setHpInput, min: 0 },
+                                                    { label: 'MAX HP', value: maxHpInput, onChange: setMaxHpInput, min: 1 },
+                                                    { label: 'EN', value: energyInput, onChange: setEnergyInput, min: 0 },
+                                                    { label: 'MAX EN', value: maxEnergyInput, onChange: setMaxEnergyInput, min: 0 },
+                                                    { label: 'ATK', value: attackInput, onChange: setAttackInput, min: 0 },
+                                                    { label: 'RNG', value: rangeInput, onChange: setRangeInput, min: 0 },
+                                                    { label: 'MOV', value: movementInput, onChange: setMovementInput, min: 0 }
+                                                ].map((field) => (
+                                                    <label key={field.label} className="flex flex-col gap-1">
+                                                        <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-400">{field.label}</span>
+                                                        <input
+                                                            type="number"
+                                                            value={field.value}
+                                                            min={field.min}
+                                                            onChange={(e) => field.onChange(e.target.value)}
+                                                            onKeyDown={(e) => {
+                                                                if (e.key === 'Enter') applyStatEdits();
+                                                            }}
+                                                            className="border border-cyan-500/30 bg-black/60 px-2 py-1 text-xs text-white outline-none focus:border-cyan-400"
+                                                        />
+                                                    </label>
+                                                ))}
+                                            </div>
+
+                                            <button
+                                                onClick={applyStatEdits}
+                                                className="mt-3 w-full border border-cyan-500/40 bg-cyan-500/10 px-2 py-2 text-[10px] font-bold uppercase tracking-[0.18em] text-cyan-200 transition-colors hover:border-cyan-300 hover:bg-cyan-500/20"
+                                            >
+                                                Apply Stats
+                                            </button>
+                                        </>
+                                    )}
+                                </div>
+                            )}
+
                             {/* HP */}
                             <div>
                                 <div className="flex justify-between mb-1 text-[9px] font-bold text-gray-400 tracking-wider">
@@ -371,6 +476,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                         cost={0}
                                         description="Self-destruct; deals 50 DMG to adjacent units."
                                         onClick={() => gameService.triggerSuicide(unit.id)}
+                                        disabled={actionsLocked}
                                         color="#ef4444" // red-500
                                         hotkey="SHIFT+1"
                                         onHover={handleShowTooltip}
@@ -386,6 +492,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                         cost={0}
                                         description="Explosive payload; deals 80 DMG to area."
                                         onClick={() => gameService.triggerDroneExplosion(unit.id)}
+                                        disabled={actionsLocked}
                                         color="#f97316" // orange-500
                                         onHover={handleShowTooltip}
                                         onLeave={handleHideTooltip}
@@ -400,10 +507,10 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                             icon="+"
                                             cost={25}
                                             description={unit.type === UnitType.REPAIR_BOT
-                                                ? "Repair target unit or building for 50 HP."
-                                                : `Heal friendly unit within 2 tiles for ${50 + (characterId === 'NYX' && (currentRound || 0) >= 10 ? unit.level : 0)} HP.${characterId === 'NYX' && (currentRound || 0) >= 10 ? ' Can repair buildings.' : ''}`}
+                                                ? "Repair a friendly building or machine within 2 tiles for 50 HP."
+                                                : `Heal a friendly creature within 2 tiles for ${50 + (characterId === 'NYX' && (currentRound || 0) >= 10 ? unit.level : 0)} HP.`}
                                             onClick={() => gameService.activateHealAbility(unit.id)}
-                                            disabled={unit.stats.energy < 25}
+                                            disabled={actionsLocked || unit.stats.energy < 25}
                                             color="#10b981" // emerald-500
                                             onHover={handleShowTooltip}
                                             onLeave={handleHideTooltip}
@@ -416,7 +523,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                                 cost={25}
                                                 description="Restore 50 Energy to a friendly unit within 2 tiles."
                                                 onClick={() => gameService.activateRestoreEnergyAbility(unit.id)}
-                                                disabled={unit.stats.energy < 25}
+                                                disabled={actionsLocked || unit.stats.energy < 25}
                                                 color="#8b5cf6" // violet-500
                                                 onHover={handleShowTooltip}
                                                 onLeave={handleHideTooltip}
@@ -434,7 +541,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                             cost={25}
                                             description="Teleport to any revealed coordinate."
                                             onClick={() => gameService.activateTeleportAbility(unit.id)}
-                                            disabled={unit.stats.energy < 25}
+                                            disabled={actionsLocked || unit.stats.energy < 25}
                                             color="#22d3ee" // Cyan-400 (Electric Blue/Cyan)
                                             hotkey="T"
                                             onHover={handleShowTooltip}
@@ -447,7 +554,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                             cost={50}
                                             description="Freeze target unit for 2 turns."
                                             onClick={() => gameService.activateFreezeAbility(unit.id)}
-                                            disabled={unit.stats.energy < 50}
+                                            disabled={actionsLocked || unit.stats.energy < 50}
                                             color="#67e8f9" // Cyan-300 (Ice Blue)
                                             hotkey="S"
                                             onHover={handleShowTooltip}
@@ -463,7 +570,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                         cost={50}
                                         description="Deploy 2 Scout Drones nearby."
                                         onClick={() => gameService.activateSummonAbility(unit.id)}
-                                        disabled={unit.stats.energy < 50}
+                                        disabled={actionsLocked || unit.stats.energy < 50}
                                         color="#3b82f6" // blue-500
                                         hotkey="D"
                                         onHover={handleShowTooltip}
@@ -479,7 +586,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({ unit, isDevMode, cu
                                         cost={unit.status.mindControlTargetId ? 0 : 50}
                                         description={unit.status.mindControlTargetId ? "Sever connection to controlled unit." : "Take control of an enemy unit. Effect ends on movement or damage."}
                                         onClick={() => gameService.activateMindControlAbility(unit.id)}
-                                        disabled={!unit.status.mindControlTargetId && unit.stats.energy < 50}
+                                        disabled={actionsLocked || (!unit.status.mindControlTargetId && unit.stats.energy < 50)}
                                         color="#22c55e" // green-500
                                         hotkey="M"
                                         onHover={handleShowTooltip}

@@ -8,18 +8,22 @@ import * as THREE from 'three';
 interface TitanModelProps {
   color: string;
   isDying?: boolean;
+  isAttacking?: boolean;
 }
 
-const TitanModel: React.FC<TitanModelProps> = ({ color, isDying }) => {
+const TitanModel: React.FC<TitanModelProps> = ({ color, isDying, isAttacking }) => {
   const groupRef = useRef<Group>(null);
   const headRef = useRef<Group>(null);
   const radarRef = useRef<THREE.Mesh>(null);
+  const leftBarrelRef = useRef<Group>(null);
+  const rightBarrelRef = useRef<Group>(null);
   
   // Refs for debris parts
   const partsRefs = useRef<Group[]>([]);
   
   const matRefs = useRef<MeshStandardMaterial[]>([]);
   const [deathStartTime, setDeathStartTime] = useState<number | null>(null);
+  const [attackStartTime, setAttackStartTime] = useState<number | null>(null);
 
   // Debris vectors for explosion
   const debris = useMemo(() => {
@@ -40,6 +44,14 @@ const TitanModel: React.FC<TitanModelProps> = ({ color, isDying }) => {
           partsRefs.current.push(grp);
       }
   };
+
+  React.useEffect(() => {
+      if (isAttacking) {
+          setAttackStartTime(Date.now());
+      } else {
+          setAttackStartTime(null);
+      }
+  }, [isAttacking]);
 
   useFrame((state, delta) => {
     const time = state.clock.elapsedTime;
@@ -73,10 +85,47 @@ const TitanModel: React.FC<TitanModelProps> = ({ color, isDying }) => {
             radarRef.current.rotation.y += delta * 2; // Spin radar
             radarRef.current.rotation.z = Math.sin(time) * 0.2; // Wobble
         }
-        
-        // Subtle breathing/bobbing of the gun head
+
+        if (isAttacking && attackStartTime && headRef.current) {
+            const elapsed = (Date.now() - attackStartTime) / 1000;
+            const duration = 0.65;
+            const progress = Math.min(elapsed / duration, 1);
+
+            if (progress < 0.25) {
+                const chargeP = progress / 0.25;
+                headRef.current.position.y = THREE.MathUtils.lerp(0.4, 0.43, chargeP);
+                headRef.current.position.z = THREE.MathUtils.lerp(0, -0.04, chargeP);
+            } else if (progress < 0.45) {
+                const recoilP = (progress - 0.25) / 0.2;
+                headRef.current.position.y = THREE.MathUtils.lerp(0.43, 0.34, recoilP);
+                headRef.current.position.z = THREE.MathUtils.lerp(-0.04, -0.18, recoilP);
+            } else {
+                const recoverP = (progress - 0.45) / 0.55;
+                headRef.current.position.y = THREE.MathUtils.lerp(0.34, 0.4, recoverP);
+                headRef.current.position.z = THREE.MathUtils.lerp(-0.18, 0, recoverP);
+            }
+
+            const barrelKick = progress >= 0.25 && progress < 0.55
+                ? Math.sin(((progress - 0.25) / 0.3) * Math.PI) * 0.06
+                : 0;
+            if (leftBarrelRef.current) {
+                leftBarrelRef.current.position.z = barrelKick;
+            }
+            if (rightBarrelRef.current) {
+                rightBarrelRef.current.position.z = barrelKick;
+            }
+            return;
+        }
+
         if (headRef.current) {
             headRef.current.position.y = 0.4 + Math.sin(time * 0.5) * 0.02;
+            headRef.current.position.z = 0;
+        }
+        if (leftBarrelRef.current) {
+            leftBarrelRef.current.position.z = 0;
+        }
+        if (rightBarrelRef.current) {
+            rightBarrelRef.current.position.z = 0;
         }
     }
   });
@@ -131,7 +180,7 @@ const TitanModel: React.FC<TitanModelProps> = ({ color, isDying }) => {
                 {/* Dual Railguns */}
                 <group position={[0, 0, 0.4]}>
                     {/* Left Barrel */}
-                    <group position={[-0.2, 0, 0]}>
+                    <group ref={leftBarrelRef} position={[-0.2, 0, 0]}>
                         <mesh rotation={[Math.PI/2, 0, 0]} position={[0, 0, 0.4]}>
                             <cylinderGeometry args={[0.08, 0.1, 0.8, 8]} />
                             <meshStandardMaterial ref={addMatRef} color="#333" />
@@ -146,7 +195,7 @@ const TitanModel: React.FC<TitanModelProps> = ({ color, isDying }) => {
                     </group>
 
                     {/* Right Barrel */}
-                    <group position={[0.2, 0, 0]}>
+                    <group ref={rightBarrelRef} position={[0.2, 0, 0]}>
                         <mesh rotation={[Math.PI/2, 0, 0]} position={[0, 0, 0.4]}>
                             <cylinderGeometry args={[0.08, 0.1, 0.8, 8]} />
                             <meshStandardMaterial ref={addMatRef} color="#333" />

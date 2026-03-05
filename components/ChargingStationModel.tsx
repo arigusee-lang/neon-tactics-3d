@@ -2,7 +2,7 @@
 import React, { useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Group, MeshStandardMaterial } from 'three';
-import { Edges, Sparkles } from '@react-three/drei';
+import { Edges } from '@react-three/drei';
 import * as THREE from 'three';
 
 interface ChargingStationModelProps {
@@ -105,17 +105,6 @@ const ChargingStationModel: React.FC<ChargingStationModelProps> = ({ color, isDy
                 <meshStandardMaterial ref={addMatRef} color="#555" />
             </mesh>
         ))}
-
-        {/* Particles */}
-        <Sparkles 
-            count={20} 
-            scale={1.2} 
-            size={4} 
-            speed={2} 
-            opacity={0.8} 
-            color={color}
-            position={[0, 0.6, 0]}
-        />
     </group>
   );
 };

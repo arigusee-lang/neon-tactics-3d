@@ -1,6 +1,6 @@
 
 import { GameState, PlayerId, Unit, PlacePayload, UnitType, Card, Position, CardCategory, LogEntry, InteractionMode, AppStatus, Effect, Talent, TerrainData, TerrainTool, ShopItem, UnitStats, DebugClickTraceEntry, DebugClickResult, DebugPointerMeta, MapBounds, MapMetadata, MapPlayerSupport, MapPreviewData, ALL_PLAYER_IDS, CONTESTED_PLAYER_IDS, MatchMode, EmptyMapConfig } from '../types';
-import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS, TURN_TIMER_SECONDS } from '../constants';
+import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS, TURN_TIMER_SECONDS, getUnitClassificationLabel } from '../constants';
 import { findPath } from '../utils/pathfinding';
 import { clampTerrainBrushSize, getTerrainBrushFootprint, isBrushEnabledTerrainTool } from '../utils/terrainBrush';
 import { canTraverseTerrainEdge, getStepDirection } from '../utils/terrainTraversal';
@@ -132,6 +132,22 @@ interface ShopSyncPayload {
     logMessage?: string;
 }
 
+const FIXED_ATTACK_IMPACT_DELAYS: Partial<Record<UnitType, number>> = {
+    [UnitType.CONE]: 600
+};
+
+const PROJECTILE_ATTACK_SPEEDS: Partial<Record<UnitType, number>> = {
+    [UnitType.SOLDIER]: 42,
+    [UnitType.HEAVY]: 42,
+    [UnitType.MEDIC]: 42,
+    [UnitType.HACKER]: 42,
+    [UnitType.SNIPER]: 42,
+    [UnitType.BOX]: 42,
+    [UnitType.REPAIR_BOT]: 42
+};
+
+const DEFAULT_PROJECTILE_ATTACK_SPEED = 32;
+
 class GameService {
     private state: GameState;
     private listeners: Set<Listener> = new Set();
@@ -148,6 +164,7 @@ class GameService {
     private pendingStartConfig: PendingStartConfig | null = null;
     private readonly authoritativeActions = new Set<string>([
         'SYNC_STATE',
+        'ADMIN_SET_UNIT_STATS',
         'MOVE',
         'ATTACK',
         'SKIP_TURN',
@@ -189,6 +206,14 @@ class GameService {
 
     private isSyncAuthority(): boolean {
         return !!this.socket?.id && !!this.authoritySocketId && this.socket.id === this.authoritySocketId;
+    }
+
+    private updateInGameAdminState() {
+        this.state.isInGameAdmin = !!this.state.hostAdminEnabled && this.isSyncAuthority();
+    }
+
+    private canEditUnitStats() {
+        return !this.state.isMultiplayer || this.state.isDevMode || this.state.isInGameAdmin;
     }
 
     private resetTurnTimer(startedAt: number = Date.now()) {
@@ -264,6 +289,11 @@ class GameService {
     }
 
     private getAttackImpactDelay(attacker: Unit, target: Unit): number {
+        const fixedDelay = FIXED_ATTACK_IMPACT_DELAYS[attacker.type];
+        if (typeof fixedDelay === 'number') {
+            return fixedDelay;
+        }
+
         const attackerCenterX = attacker.position.x + ((attacker.stats.size - 1) / 2);
         const attackerCenterZ = attacker.position.z + ((attacker.stats.size - 1) / 2);
         const targetCenterX = target.position.x + ((target.stats.size - 1) / 2);
@@ -273,15 +303,7 @@ class GameService {
             targetCenterZ - attackerCenterZ
         ) * (TILE_SIZE + TILE_SPACING);
 
-        const projectileSpeed = [
-            UnitType.SOLDIER,
-            UnitType.HEAVY,
-            UnitType.MEDIC,
-            UnitType.HACKER,
-            UnitType.SNIPER,
-            UnitType.BOX,
-            UnitType.REPAIR_BOT
-        ].includes(attacker.type) ? 42 : 32;
+        const projectileSpeed = PROJECTILE_ATTACK_SPEEDS[attacker.type] || DEFAULT_PROJECTILE_ATTACK_SPEED;
 
         const delayMs = (worldDistance / projectileSpeed) * 1000;
         return Math.max(55, Math.min(220, Math.round(delayMs)));
@@ -578,13 +600,15 @@ class GameService {
             console.log('Connected to server:', this.socket?.id);
         });
 
-        this.socket.on('lobby_state', (payload: { roomId: string; mapId?: string; players: string[]; playerIds?: PlayerId[]; maxPlayers: number; started: boolean; authoritySocketId?: string }) => {
+        this.socket.on('lobby_state', (payload: { roomId: string; mapId?: string; players: string[]; playerIds?: PlayerId[]; maxPlayers: number; started: boolean; authoritySocketId?: string; hostAdminEnabled?: boolean }) => {
             this.state.roomId = payload.roomId;
             this.state.lobbyMapId = payload.mapId || null;
             this.state.lobbyPlayerCount = Array.isArray(payload.players) ? payload.players.length : 0;
             this.state.lobbyMaxPlayers = payload.maxPlayers || 0;
+            this.state.hostAdminEnabled = !!payload.hostAdminEnabled;
             this.state.isMultiplayer = true;
             this.authoritySocketId = payload.authoritySocketId || this.authoritySocketId;
+            this.updateInGameAdminState();
 
             const mySocketId = this.socket?.id;
             const myIndex = mySocketId ? payload.players.indexOf(mySocketId) : -1;
@@ -604,28 +628,33 @@ class GameService {
             this.notify();
         });
 
-        this.socket.on('lobby_created', (payload: string | { roomId: string; mapId?: string; authoritySocketId?: string }) => {
+        this.socket.on('lobby_created', (payload: string | { roomId: string; mapId?: string; authoritySocketId?: string; hostAdminEnabled?: boolean }) => {
             const roomId = typeof payload === 'string' ? payload : payload.roomId;
             const mapId = typeof payload === 'string' ? null : (payload.mapId || null);
             const authoritySocketId = typeof payload === 'string' ? null : (payload.authoritySocketId || null);
+            const hostAdminEnabled = typeof payload === 'string' ? false : !!payload.hostAdminEnabled;
             console.log('Lobby Created:', roomId, mapId ? `map=${mapId}` : '');
             this.state.roomId = roomId;
             this.state.isMultiplayer = true;
             this.state.lobbyMapId = mapId;
+            this.state.hostAdminEnabled = hostAdminEnabled;
             this.state.myPlayerId = PlayerId.ONE;
             this.authoritySocketId = authoritySocketId || this.socket?.id || null;
+            this.updateInGameAdminState();
             this.log(`> LOBBY ESTABLISHED: ${roomId}${mapId ? ` [${mapId}]` : ''}`, PlayerId.ONE);
             this.notify();
         });
 
-        this.socket.on('game_start', (data: { roomId: string; players: string[]; mapId?: string; authoritySocketId?: string; turnOrder?: PlayerId[] }) => {
+        this.socket.on('game_start', (data: { roomId: string; players: string[]; mapId?: string; authoritySocketId?: string; hostAdminEnabled?: boolean; turnOrder?: PlayerId[] }) => {
             console.log('Game Start:', data);
             this.state.roomId = data.roomId;
             this.state.isMultiplayer = true;
             this.state.lobbyMapId = data.mapId || null;
             this.state.lobbyPlayerCount = data.players.length;
             this.state.lobbyMaxPlayers = data.turnOrder?.length || data.players.length;
+            this.state.hostAdminEnabled = !!data.hostAdminEnabled;
             this.authoritySocketId = data.authoritySocketId || data.players[0] || null;
+            this.updateInGameAdminState();
 
             // Resolve role from server socket order: fixed slot assignment follows join order.
             const mySocketId = this.socket?.id;
@@ -699,9 +728,9 @@ class GameService {
         });
     }
 
-    public createLobby(mapId: string = 'MAP_1') {
+    public createLobby(mapId: string = 'MAP_1', hostAdminEnabled: boolean = false) {
         if (this.socket) {
-            this.socket.emit('create_lobby', { mapId });
+            this.socket.emit('create_lobby', { mapId, hostAdminEnabled });
         }
     }
 
@@ -714,6 +743,8 @@ class GameService {
             this.state.lobbyMapId = null;
             this.state.lobbyPlayerCount = 0;
             this.state.lobbyMaxPlayers = 0;
+            this.state.hostAdminEnabled = false;
+            this.state.isInGameAdmin = false;
             this.socket.emit('join_lobby', roomId);
         }
     }
@@ -802,6 +833,9 @@ class GameService {
         // because we trust the server/opponent sends valid moves for their turn
 
         switch (action) {
+            case 'ADMIN_SET_UNIT_STATS':
+                this.applyUnitStatsEdit(data.unitId, data, true);
+                break;
             case 'MOVE':
                 // We need to simulate the move. 
                 // data: { unitId, path } -> But confirmMove uses previewPath
@@ -981,7 +1015,7 @@ class GameService {
                 break;
         }
 
-        if (action !== 'SYNC_STATE') {
+        if (action !== 'SYNC_STATE' && action !== 'ADMIN_SET_UNIT_STATS') {
             this.replicateAuthoritativeState();
         }
     }
@@ -1016,6 +1050,8 @@ class GameService {
             appStatus: AppStatus.MENU,
             mapId: 'EMPTY',
             lightMode: 'DARK',
+            showUnitNameLabels: false,
+            showUnitLevelLabels: false,
             currentTurn: PlayerId.ONE,
             activePlayerIds,
             turnOrder: [...activePlayerIds],
@@ -1070,6 +1106,8 @@ class GameService {
             lobbyMapId: null,
             lobbyPlayerCount: 0,
             lobbyMaxPlayers: 0,
+            hostAdminEnabled: false,
+            isInGameAdmin: false,
             myPlayerId: null,
             availableMaps: AVAILABLE_MAPS
         };
@@ -1227,6 +1265,18 @@ class GameService {
     public toggleLightMode() {
         this.state.lightMode = this.state.lightMode === 'DARK' ? 'LIGHT' : 'DARK';
         this.log(`> VISUAL PROTOCOL: ${this.state.lightMode} MODE ENABLED`);
+        this.notify();
+    }
+
+    public toggleUnitLevelLabels() {
+        this.state.showUnitLevelLabels = !this.state.showUnitLevelLabels;
+        this.log(`> VISUAL PROTOCOL: UNIT LEVEL LABELS ${this.state.showUnitLevelLabels ? 'VISIBLE' : 'HIDDEN'}`);
+        this.notify();
+    }
+
+    public toggleUnitNameLabels() {
+        this.state.showUnitNameLabels = !this.state.showUnitNameLabels;
+        this.log(`> VISUAL PROTOCOL: UNIT NAME LABELS ${this.state.showUnitNameLabels ? 'VISIBLE' : 'HIDDEN'}`);
         this.notify();
     }
 
@@ -2060,10 +2110,12 @@ class GameService {
     public restartGame() {
         this.leaveLobby();
         const lightMode = this.state.lightMode;
+        const showUnitNameLabels = this.state.showUnitNameLabels;
+        const showUnitLevelLabels = this.state.showUnitLevelLabels;
         const newState = this.getInitialState();
         this.pendingStartConfig = null;
         this.authoritySocketId = null;
-        this.state = { ...newState, lightMode };
+        this.state = { ...newState, lightMode, showUnitNameLabels, showUnitLevelLabels };
         this.log("REBOOTING SIMULATION...");
         this.notify();
     }
@@ -2972,7 +3024,12 @@ class GameService {
             sourceUnitId: unit.id,
             playerId: unit.playerId
         };
-        this.log(`> NANO-REPAIR READY: SELECT FRIENDLY UNIT`, unit.playerId);
+        this.log(
+            unit.type === UnitType.REPAIR_BOT
+                ? `> STRUCTURAL REPAIR READY: SELECT FRIENDLY BUILDING OR MACHINE`
+                : `> NANO-REPAIR READY: SELECT FRIENDLY CREATURE`,
+            unit.playerId
+        );
         this.notify();
     }
 
@@ -3033,6 +3090,169 @@ class GameService {
         };
         this.log(`> UPLINK ESTABLISHED: SELECT TARGET SYSTEM`, unit.playerId);
         this.notify();
+    }
+
+    public setUnitStats(unitId: string, stats: {
+        hp?: number;
+        maxHp?: number;
+        energy?: number;
+        maxEnergy?: number;
+        attack?: number;
+        range?: number;
+        movement?: number;
+    }) {
+        if (this.state.appStatus !== AppStatus.PLAYING) return;
+        if (!this.canEditUnitStats()) return;
+
+        const unit = this.state.units.find(u => u.id === unitId);
+        if (!unit) return;
+
+        const nextMaxHp = typeof stats.maxHp === 'number'
+            ? Math.max(1, Math.round(stats.maxHp))
+            : undefined;
+        const resolvedMaxHp = nextMaxHp ?? unit.stats.maxHp;
+        const nextHp = typeof stats.hp === 'number'
+            ? Math.max(0, Math.min(resolvedMaxHp, Math.round(stats.hp)))
+            : undefined;
+        const nextMaxEnergy = typeof stats.maxEnergy === 'number'
+            ? Math.max(0, Math.round(stats.maxEnergy))
+            : undefined;
+        const resolvedMaxEnergy = nextMaxEnergy ?? unit.stats.maxEnergy;
+        const nextEnergy = typeof stats.energy === 'number'
+            ? Math.max(0, Math.min(resolvedMaxEnergy, Math.round(stats.energy)))
+            : undefined;
+        const nextAttack = typeof stats.attack === 'number'
+            ? Math.max(0, Math.round(stats.attack))
+            : undefined;
+        const nextRange = typeof stats.range === 'number'
+            ? Math.max(0, Math.round(stats.range))
+            : undefined;
+        const nextMovement = typeof stats.movement === 'number'
+            ? Math.max(0, Math.round(stats.movement))
+            : undefined;
+
+        if (
+            typeof nextHp === 'undefined' &&
+            typeof nextMaxHp === 'undefined' &&
+            typeof nextEnergy === 'undefined' &&
+            typeof nextMaxEnergy === 'undefined' &&
+            typeof nextAttack === 'undefined' &&
+            typeof nextRange === 'undefined' &&
+            typeof nextMovement === 'undefined'
+        ) {
+            return;
+        }
+
+        if (this.state.isMultiplayer) {
+            this.dispatchAction('ADMIN_SET_UNIT_STATS', {
+                unitId,
+                ...(typeof nextHp === 'number' ? { hp: nextHp } : {}),
+                ...(typeof nextMaxHp === 'number' ? { maxHp: nextMaxHp } : {}),
+                ...(typeof nextEnergy === 'number' ? { energy: nextEnergy } : {}),
+                ...(typeof nextMaxEnergy === 'number' ? { maxEnergy: nextMaxEnergy } : {}),
+                ...(typeof nextAttack === 'number' ? { attack: nextAttack } : {}),
+                ...(typeof nextRange === 'number' ? { range: nextRange } : {}),
+                ...(typeof nextMovement === 'number' ? { movement: nextMovement } : {})
+            });
+            return;
+        }
+
+        this.applyUnitStatsEdit(unitId, {
+            hp: nextHp,
+            maxHp: nextMaxHp,
+            energy: nextEnergy,
+            maxEnergy: nextMaxEnergy,
+            attack: nextAttack,
+            range: nextRange,
+            movement: nextMovement
+        });
+    }
+
+    private applyUnitStatsEdit(unitId: string, stats: {
+        hp?: number;
+        maxHp?: number;
+        energy?: number;
+        maxEnergy?: number;
+        attack?: number;
+        range?: number;
+        movement?: number;
+    }, isRemote: boolean = false) {
+        const unitIndex = this.state.units.findIndex(u => u.id === unitId);
+        if (unitIndex === -1) return;
+
+        const unit = this.state.units[unitIndex];
+        const nextMaxHp = typeof stats.maxHp === 'number'
+            ? Math.max(1, Math.round(stats.maxHp))
+            : unit.stats.maxHp;
+        const nextMaxEnergy = typeof stats.maxEnergy === 'number'
+            ? Math.max(0, Math.round(stats.maxEnergy))
+            : unit.stats.maxEnergy;
+        const nextHp = typeof stats.hp === 'number'
+            ? Math.max(0, Math.min(nextMaxHp, Math.round(stats.hp)))
+            : Math.max(0, Math.min(nextMaxHp, unit.stats.hp));
+        const nextEnergy = typeof stats.energy === 'number'
+            ? Math.max(0, Math.min(nextMaxEnergy, Math.round(stats.energy)))
+            : Math.max(0, Math.min(nextMaxEnergy, unit.stats.energy));
+        const nextAttack = typeof stats.attack === 'number'
+            ? Math.max(0, Math.round(stats.attack))
+            : unit.stats.attack;
+        const nextRange = typeof stats.range === 'number'
+            ? Math.max(0, Math.round(stats.range))
+            : unit.stats.range;
+        const nextMovement = typeof stats.movement === 'number'
+            ? Math.max(0, Math.round(stats.movement))
+            : unit.stats.movement;
+
+        if (
+            nextHp === unit.stats.hp &&
+            nextMaxHp === unit.stats.maxHp &&
+            nextEnergy === unit.stats.energy &&
+            nextMaxEnergy === unit.stats.maxEnergy &&
+            nextAttack === unit.stats.attack &&
+            nextRange === unit.stats.range &&
+            nextMovement === unit.stats.movement
+        ) return;
+
+        this.state.units[unitIndex] = {
+            ...unit,
+            stats: {
+                ...unit.stats,
+                hp: nextHp,
+                maxHp: nextMaxHp,
+                energy: nextEnergy,
+                maxEnergy: nextMaxEnergy,
+                attack: nextAttack,
+                range: nextRange,
+                movement: nextMovement
+            },
+            status: {
+                ...unit.status,
+                stepsTaken: Math.min(unit.status.stepsTaken, nextMovement)
+            }
+        };
+
+        const vitalsSummary = [
+            `HP ${nextHp}/${nextMaxHp}`,
+            `EN ${nextEnergy}/${nextMaxEnergy}`,
+            `ATK ${nextAttack}`,
+            `RNG ${nextRange}`,
+            `MOV ${nextMovement}`
+        ].filter(Boolean).join(' | ');
+        this.log(`> [ADMIN] ${unit.type} UPDATED: ${vitalsSummary}`, unit.playerId);
+
+        if (nextHp === 0) {
+            if (this.state.selectedUnitId === unitId) {
+                this.state.selectedUnitId = null;
+            }
+            this.removeUnit(unitId);
+            return;
+        }
+
+        this.notify();
+
+        if (isRemote) {
+            this.replicateAuthoritativeState();
+        }
     }
 
     public destroyUnit(unitId: string) {
@@ -3737,22 +3957,27 @@ class GameService {
             return;
         }
 
-        // BUILDING CHECK
-        const isBuilding = BUILDING_TYPES.includes(target.type);
         const playerChar = this.state.playerCharacters[source.playerId];
         const isNyx = playerChar === 'NYX';
         const isRepairBot = source.type === UnitType.REPAIR_BOT;
-        const round = this.state.roundNumber;
-        const canRepairBuildings = (isNyx && round >= 10) || isRepairBot;
+        const targetClassification = getUnitClassificationLabel(target.type);
+        const canRepairTarget = isRepairBot
+            ? targetClassification === 'BUILDING' || targetClassification === 'MACHINE'
+            : targetClassification === 'CREATURE';
 
-        if (isBuilding && !canRepairBuildings) {
-            this.log(`> TARGET INVALID: CANNOT REPAIR STRUCTURES`, source.playerId);
+        if (!canRepairTarget) {
+            this.log(
+                isRepairBot
+                    ? `> TARGET INVALID: BUILDINGS OR MACHINES ONLY`
+                    : `> TARGET INVALID: CREATURES ONLY`,
+                source.playerId
+            );
             return;
         }
 
         // HEAL AMOUNT
         let healAmount = 50;
-        if (canRepairBuildings) {
+        if (!isRepairBot && isNyx && this.state.roundNumber >= 10) {
             healAmount += source.level;
         }
 
@@ -5503,9 +5728,10 @@ class GameService {
                 this.log(`> AUTO-ATTACK ENGAGED: ${attacker.type} -> ${target.type} ${remaining > 0 ? '(MULTI-STRIKE)' : ''}`, playerId);
 
                 // Schedule Resolution
+                const impactDelay = this.getAttackImpactDelay(attacker, target);
                 setTimeout(() => {
                     this.resolveAttack(attacker.id, targetId!);
-                }, 600);
+                }, impactDelay);
             } else {
                 // Invalid (out of range/LOS), clear target
                 this.log(`> AUTO-ATTACK DISENGAGED: ${check.reason}`, playerId);

@@ -1,10 +1,10 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { TILE_SIZE, TILE_SPACING, BOARD_OFFSET, COLORS, CARD_CONFIG, ELEVATION_HEIGHT, BUILDING_TYPES } from '../constants';
+import { TILE_SIZE, TILE_SPACING, BOARD_OFFSET, COLORS, CARD_CONFIG, ELEVATION_HEIGHT, BUILDING_TYPES, getUnitClassificationLabel } from '../constants';
 import { gameService } from '../services/gameService';
 import Tile from './Tile';
-import { Unit, PlayerId, Position, CardCategory, InteractionState, TerrainData, Collectible, MapBounds, TilePulse } from '../types';
+import { Unit, UnitType, PlayerId, Position, CardCategory, InteractionState, TerrainData, Collectible, MapBounds, TilePulse } from '../types';
 import { Html } from '@react-three/drei';
 import { clampTerrainBrushSize, getTerrainBrushFootprint, isBrushEnabledTerrainTool } from '../utils/terrainBrush';
 import * as THREE from 'three';
@@ -223,7 +223,6 @@ const Board: React.FC<BoardProps> = ({
     const terrainData = (gameService as any).state.terrain as Record<string, TerrainData>;
     const tilePulse = (gameService as any).state.tilePulse as TilePulse | null;
     const matchMode = (gameService as any).state.matchMode as 'duel' | 'team_2v1' | 'team_2v2' | 'ffa';
-
     const [hoveredTile, setHoveredTile] = useState<Position | null>(null);
 
     const arePlayersAllied = (a?: PlayerId, b?: PlayerId) => {
@@ -266,6 +265,20 @@ const Board: React.FC<BoardProps> = ({
     const getUnitAt = React.useCallback((x: number, z: number): Unit | undefined => {
         return unitByCell.get(`${x},${z}`);
     }, [unitByCell]);
+
+    const getUnitFootprintDistance = React.useCallback((source: Unit, target: Unit) => {
+        const dx = Math.max(
+            source.position.x - (target.position.x + target.stats.size - 1),
+            target.position.x - (source.position.x + source.stats.size - 1),
+            0
+        );
+        const dz = Math.max(
+            source.position.z - (target.position.z + target.stats.size - 1),
+            target.position.z - (source.position.z + source.stats.size - 1),
+            0
+        );
+        return Math.max(dx, dz);
+    }, []);
 
     const handleTileClick = React.useCallback((x: number, z: number, pointer?: { source: 'TILE'; eventType?: string; button?: number; pointerType?: string; clientX?: number; clientY?: number; }) => {
         gameService.handleTileClick(x, z, pointer);
@@ -456,7 +469,7 @@ const Board: React.FC<BoardProps> = ({
                 const isValid = !occupiedSet.has(key) && revealedSet.has(key);
 
                 isPlacementValid = inRange && isValid;
-                highlightColor = isPlacementValid ? '#ffff00' : '#ff0000';
+                highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
             }
         }
 
@@ -468,7 +481,7 @@ const Board: React.FC<BoardProps> = ({
             // Global Map Check
             const isValid = !occupiedSet.has(key) && revealedSet.has(key);
             isPlacementValid = isValid;
-            highlightColor = isPlacementValid ? '#00ccff' : '#ff0000';
+            highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
         }
 
         // --- MODE: FREEZE ABILITY ---
@@ -483,7 +496,7 @@ const Board: React.FC<BoardProps> = ({
                 && !BUILDING_TYPES.includes(targetUnit.type);
 
             isPlacementValid = !!isValid;
-            highlightColor = isPlacementValid ? '#00ffff' : '#ff0000';
+            highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
         }
 
         // --- MODE: HEAL ABILITY ---
@@ -497,12 +510,52 @@ const Board: React.FC<BoardProps> = ({
 
             let isValid = false;
             if (sourceUnit && targetUnit) {
-                const dx = Math.abs(sourceUnit.position.x - targetUnit.position.x);
-                const dz = Math.abs(sourceUnit.position.z - targetUnit.position.z);
-                const inRange = dx <= 2 && dz <= 2;
-                const isFriendly = arePlayersAllied(targetUnit.playerId, interactionState.playerId);
-                isValid = inRange && isFriendly;
+                const inRange = getUnitFootprintDistance(sourceUnit, targetUnit) <= 2;
+                const isFriendly = arePlayersAllied(sourceUnit.playerId, targetUnit.playerId);
+                const targetClassification = getUnitClassificationLabel(targetUnit.type);
+                const hasCompatibleTarget = sourceUnit.type === UnitType.REPAIR_BOT
+                    ? targetClassification === 'BUILDING' || targetClassification === 'MACHINE'
+                    : targetClassification === 'CREATURE';
+
+                isValid = inRange && isFriendly && hasCompatibleTarget;
             }
+
+            isPlacementValid = isValid;
+            highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
+        }
+
+        // --- MODE: RESTORE ENERGY ABILITY ---
+        else if (interactionState.mode === 'ABILITY_RESTORE_ENERGY') {
+            isTargetingMode = true;
+            isPlacementMode = true;
+            placementFootprint.add(key);
+
+            const sourceUnit = units.find(u => u.id === interactionState.sourceUnitId);
+            const targetUnit = getUnitAt(x, z);
+
+            const isValid = !!(sourceUnit
+                && targetUnit
+                && arePlayersAllied(sourceUnit.playerId, targetUnit.playerId)
+                && getUnitFootprintDistance(sourceUnit, targetUnit) <= 2
+                && targetUnit.stats.maxEnergy > 0
+                && targetUnit.stats.energy < targetUnit.stats.maxEnergy);
+
+            isPlacementValid = isValid;
+            highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
+        }
+
+        // --- MODE: MIND CONTROL ABILITY ---
+        else if (interactionState.mode === 'ABILITY_MIND_CONTROL') {
+            isTargetingMode = true;
+            isPlacementMode = true;
+            placementFootprint.add(key);
+
+            const targetUnit = getUnitAt(x, z);
+            const isValid = !!(targetUnit
+                && arePlayersHostile(interactionState.playerId, targetUnit.playerId)
+                && targetUnit.type !== UnitType.TITAN
+                && targetUnit.type !== UnitType.PORTAL
+                && targetUnit.type !== UnitType.SPIKE);
 
             isPlacementValid = isValid;
             highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
@@ -524,7 +577,7 @@ const Board: React.FC<BoardProps> = ({
 
             // It's always valid to target somewhere (blast happens regardless)
             isPlacementValid = true;
-            highlightColor = '#ff4400'; // Orange-Red for danger
+            highlightColor = '#00ff00';
         }
 
         // --- MODE: FORWARD BASE TARGETING ---
@@ -584,7 +637,7 @@ const Board: React.FC<BoardProps> = ({
             });
 
             isPlacementValid = hasFriendlyUnit;
-            highlightColor = isPlacementValid ? '#38bdf8' : '#ff0000';
+            highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
         }
 
         // --- MODE: CARD PLACEMENT (Normal) ---
@@ -728,7 +781,7 @@ const Board: React.FC<BoardProps> = ({
                             onHoverEnd={handleTileHoverEnd}
                             isPlacementHover={showSpecialHighlight || isAttackTarget}
                             isPlacementValid={isTargetingMode ? isPlacementValid : (!isAttackTarget ? isPlacementValid : false)}
-                            isAttackTarget={isAttackTarget || (isTargetingMode && isInFootprint)}
+                            isAttackTarget={isAttackTarget}
                             isNemesis={isNemesis}
                             isPath={isPath && !isOccupied && !isAttackTarget} // Don't highlight path if occupied (unless we want to?) - user said "highlight smaller yellow square in each tile of path"
                         // Actually original logic didn't care about occupied, but path shouldn't overlap obstacles usually.

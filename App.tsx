@@ -195,7 +195,7 @@ const App: React.FC = () => {
     const [timerNow, setTimerNow] = useState(() => Date.now());
     const [isProtocolMinimized, setIsProtocolMinimized] = useState(true);
     const [isLogMinimized, setIsLogMinimized] = useState(true);
-    const [isDebugPointerVisible, setIsDebugPointerVisible] = useState(true);
+    const [isDebugPointerVisible, setIsDebugPointerVisible] = useState(false);
     const [soundEnabled, setSoundEnabled] = useState(() => soundService.isEnabled());
     const logEndRef = useRef<HTMLDivElement>(null);
     const gameStateRef = useRef<GameState | null>(null);
@@ -459,7 +459,7 @@ const App: React.FC = () => {
     const selectedUnit = gameState.units.find(u => u.id === gameState.selectedUnitId) || null;
     const isPlaying = gameState.appStatus === AppStatus.PLAYING || gameState.appStatus === AppStatus.TALENT_SELECTION || gameState.appStatus === AppStatus.SHOP;
     const showInventoryBar = !gameState.isMultiplayer || isLocalTurn;
-    const showUnitControlPanel = !gameState.isMultiplayer || isLocalTurn;
+    const showUnitControlPanel = !gameState.isMultiplayer || isLocalTurn || gameState.isInGameAdmin;
     const showTurnTimer = !gameState.isDevMode
         && !gameState.winner
         && gameState.activePlayerIds.includes(gameState.currentTurn)
@@ -524,6 +524,8 @@ const App: React.FC = () => {
                     previewPath={gameState.previewPath}
                     appStatus={gameState.appStatus}
                     lightMode={gameState.lightMode}
+                    showUnitNameLabels={gameState.showUnitNameLabels}
+                    showUnitLevelLabels={gameState.showUnitLevelLabels}
                     mapId={gameState.mapId}
                     collectibles={gameState.collectibles}
                     mapBounds={gameState.mapBounds}
@@ -541,6 +543,7 @@ const App: React.FC = () => {
                     lobbyMapId={gameState.lobbyMapId}
                     lobbyPlayerCount={gameState.lobbyPlayerCount}
                     lobbyMaxPlayers={gameState.lobbyMaxPlayers}
+                    hostAdminEnabled={gameState.hostAdminEnabled}
                     isMultiplayer={gameState.isMultiplayer}
                     isDevMode={gameState.isDevMode}
                 />
@@ -742,7 +745,14 @@ const App: React.FC = () => {
                     )}
 
                     {showUnitControlPanel && (
-                        <UnitControlPanel unit={selectedUnit} isDevMode={gameState.isDevMode} currentRound={gameState.roundNumber} characterId={selectedUnit ? gameState.playerCharacters[selectedUnit.playerId] : null} />
+                        <UnitControlPanel
+                            unit={selectedUnit}
+                            isDevMode={gameState.isDevMode}
+                            canEditStats={!gameState.isMultiplayer || gameState.isDevMode || gameState.isInGameAdmin}
+                            canUseActions={!gameState.isMultiplayer || isLocalTurn}
+                            currentRound={gameState.roundNumber}
+                            characterId={selectedUnit ? gameState.playerCharacters[selectedUnit.playerId] : null}
+                        />
                     )}
 
                     <div className="absolute top-16 left-4 w-72 flex flex-col gap-2 pointer-events-auto max-h-[calc(100vh-10rem)] z-10">
@@ -813,37 +823,32 @@ const App: React.FC = () => {
                                             {soundEnabled ? 'Enabled' : 'Muted'}
                                         </button>
                                     </div>
-                                </div>
-
-                                <div>
-                                    <h3 className="text-[10px] text-green-500 font-bold uppercase mb-1 border-b border-green-800/50 pb-0.5">Camera Uplink</h3>
-                                    <ul className="text-[11px] space-y-1 font-mono text-gray-300">
-                                        <li className="flex justify-between"><span>Orbit</span> <span className="text-white">R-Click + Drag</span></li>
-                                        <li className="flex justify-between"><span>Pan</span> <span className="text-white">Shift + Drag</span></li>
-                                        <li className="flex justify-between"><span>Zoom</span> <span className="text-white">Scroll Wheel</span></li>
-                                    </ul>
-                                </div>
-
-                                <div>
-                                    <h3 className="text-[10px] text-green-500 font-bold uppercase mb-1 border-b border-green-800/50 pb-0.5">Command Interface</h3>
-                                    <ul className="text-[11px] space-y-2 font-mono text-gray-300">
-                                        <li className="flex items-start gap-2">
-                                            <span className="text-green-500">{">>"}</span>
-                                            <span>[1-9] Select Unit Card</span>
-                                        </li>
-                                        <li className="flex items-start gap-2">
-                                            <span className="text-green-500">{">>"}</span>
-                                            <span>L-Click Unit to <span className="text-white">SELECT</span></span>
-                                        </li>
-                                        <li className="flex items-start gap-2">
-                                            <span className="text-green-500">{">>"}</span>
-                                            <span>SPACE to <span className="text-white">END TURN</span></span>
-                                        </li>
-                                        <li className="flex items-start gap-2">
-                                            <span className="text-green-500">{">>"}</span>
-                                            <span>ESC to <span className="text-white">MENU/PAUSE</span></span>
-                                        </li>
-                                    </ul>
+                                    <div className="flex items-center justify-between mt-3">
+                                        <span className="text-[11px] text-gray-300 uppercase tracking-tighter">Unit Names</span>
+                                        <button
+                                            onClick={() => gameService.toggleUnitNameLabels()}
+                                            className={`rounded border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] transition-colors ${
+                                                gameState.showUnitNameLabels
+                                                    ? 'border-cyan-400/50 bg-cyan-500/10 text-cyan-100 hover:bg-cyan-400/15'
+                                                    : 'border-gray-700 bg-black/40 text-gray-400 hover:border-gray-500'
+                                            }`}
+                                        >
+                                            {gameState.showUnitNameLabels ? 'Shown' : 'Hidden'}
+                                        </button>
+                                    </div>
+                                    <div className="flex items-center justify-between mt-3">
+                                        <span className="text-[11px] text-gray-300 uppercase tracking-tighter">Level Labels</span>
+                                        <button
+                                            onClick={() => gameService.toggleUnitLevelLabels()}
+                                            className={`rounded border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] transition-colors ${
+                                                gameState.showUnitLevelLabels
+                                                    ? 'border-emerald-400/50 bg-emerald-500/10 text-emerald-100 hover:bg-emerald-400/15'
+                                                    : 'border-gray-700 bg-black/40 text-gray-400 hover:border-gray-500'
+                                            }`}
+                                        >
+                                            {gameState.showUnitLevelLabels ? 'Shown' : 'Hidden'}
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         </div>

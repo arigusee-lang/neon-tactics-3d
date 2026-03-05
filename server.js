@@ -86,6 +86,7 @@ const PLAYER_IDS = [PLAYER_ONE, PLAYER_TWO, PLAYER_THREE, PLAYER_FOUR];
 
 const AUTHORITATIVE_ACTIONS = new Set([
   'SYNC_STATE',
+  'ADMIN_SET_UNIT_STATS',
   'MOVE',
   'ATTACK',
   'SKIP_TURN',
@@ -192,7 +193,8 @@ function emitLobbyState(roomId, lobby) {
     playerIds: getLobbyPlayerIds(lobby),
     maxPlayers: lobby.maxPlayers || 2,
     started: !!lobby.started,
-    authoritySocketId: lobby.authoritySocketId || null
+    authoritySocketId: lobby.authoritySocketId || null,
+    hostAdminEnabled: !!lobby.hostAdminEnabled
   });
 }
 
@@ -233,12 +235,14 @@ io.on('connection', (socket) => {
   // 1. Create Lobby
   socket.on('create_lobby', (payload = {}) => {
     const mapId = typeof payload?.mapId === 'string' ? payload.mapId : 'MAP_1';
+    const hostAdminEnabled = !!payload?.hostAdminEnabled;
     const maxPlayers = getLobbyCapacity(mapId);
     const turnOrder = PLAYER_IDS.slice(0, maxPlayers);
     const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
     lobbies[roomId] = {
       players: [socket.id],
       authoritySocketId: socket.id,
+      hostAdminEnabled,
       gameState: null,
       selectedCharacters: createEmptyCharacterSelections(),
       mapId,
@@ -249,8 +253,8 @@ io.on('connection', (socket) => {
     };
     socket.join(roomId);
     emitLobbyState(roomId, lobbies[roomId]);
-    socket.emit('lobby_created', { roomId, mapId, authoritySocketId: socket.id });
-    console.log(`Lobby created: ${roomId} by ${socket.id} | map=${mapId}`);
+    socket.emit('lobby_created', { roomId, mapId, authoritySocketId: socket.id, hostAdminEnabled });
+    console.log(`Lobby created: ${roomId} by ${socket.id} | map=${mapId} | hostAdmin=${hostAdminEnabled}`);
   });
 
   // 2. Join Lobby
@@ -271,6 +275,7 @@ io.on('connection', (socket) => {
           players: lobby.players,
           mapId: lobby.mapId || 'MAP_1',
           authoritySocketId: lobby.authoritySocketId,
+          hostAdminEnabled: !!lobby.hostAdminEnabled,
           turnOrder: lobby.turnOrder
         });
         console.log(`Player ${socket.id} joined lobby ${roomId} (${lobby.players.length}/${lobby.maxPlayers})`);
@@ -396,6 +401,13 @@ io.on('connection', (socket) => {
     if (!actorPlayerId) {
       socket.emit('command_rejected', { action, reason: 'PLAYER_ID_UNRESOLVED' });
       return;
+    }
+
+    if (action === 'ADMIN_SET_UNIT_STATS') {
+      if (!lobby.hostAdminEnabled || socket.id !== lobby.authoritySocketId) {
+        socket.emit('command_rejected', { action, reason: 'ADMIN_ONLY' });
+        return;
+      }
     }
 
     if (TURN_GATED_ACTIONS.has(action) && actorPlayerId !== lobby.currentTurn) {
