@@ -353,6 +353,25 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                 </div>
                             )}
 
+                            {isDevMode && unit.playerId === PlayerId.NEUTRAL && (
+                                <label className="flex items-start gap-3 rounded-lg border border-sky-500/25 bg-sky-950/10 p-3 cursor-pointer">
+                                    <input
+                                        type="checkbox"
+                                        checked={!!unit.status.dropsPerkCacheOnDeath}
+                                        onChange={(e) => gameService.setNeutralUnitPerkDrop(unit.id, e.target.checked)}
+                                        className="mt-0.5 h-4 w-4 accent-sky-400"
+                                    />
+                                    <div>
+                                        <div className="text-[9px] font-bold uppercase tracking-[0.22em] text-sky-300/90">
+                                            Drop Perk Cache On Death
+                                        </div>
+                                        <div className="mt-1 text-[10px] leading-relaxed text-slate-300">
+                                            Dev-only neutral flag. When this unit dies, it spawns a bonus perk pickup on its tile.
+                                        </div>
+                                    </div>
+                                </label>
+                            )}
+
                             {/* HP */}
                             <div>
                                 <div className="flex justify-between mb-1 text-[9px] font-bold text-gray-400 tracking-wider">

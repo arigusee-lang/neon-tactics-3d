@@ -1178,7 +1178,10 @@ class GameService {
                 position: u.position,
                 type: u.type,
                 rotation: u.rotation,
-                level: u.level
+                level: u.level,
+                status: u.status.dropsPerkCacheOnDeath
+                    ? { dropsPerkCacheOnDeath: true }
+                    : undefined
             })),
             collectibles: this.state.collectibles
         };
@@ -2041,7 +2044,12 @@ class GameService {
                 initialUnits = mapData.units.map((u: any) => ({
                     ...u,
                     stats: this.createUnit(u.type, u.position, u.playerId).stats,
-                    status: { stepsTaken: 0, attacksUsed: 0, fluxTowerAttackUpgradesPurchased: 0 },
+                    status: {
+                        stepsTaken: 0,
+                        attacksUsed: 0,
+                        fluxTowerAttackUpgradesPurchased: 0,
+                        dropsPerkCacheOnDeath: !!u.status?.dropsPerkCacheOnDeath
+                    },
                     effects: [],
                     movePath: []
                 }));
@@ -3458,6 +3466,30 @@ class GameService {
             this.state.selectedUnitId = null;
             this.notify();
         }
+    }
+
+    public setNeutralUnitPerkDrop(unitId: string, enabled: boolean) {
+        if (!this.state.isDevMode) return;
+
+        const unitIndex = this.state.units.findIndex((unit) => unit.id === unitId);
+        if (unitIndex === -1) return;
+
+        const unit = this.state.units[unitIndex];
+        if (unit.playerId !== PlayerId.NEUTRAL) return;
+
+        this.state.units[unitIndex] = {
+            ...unit,
+            status: {
+                ...unit.status,
+                dropsPerkCacheOnDeath: enabled
+            }
+        };
+
+        this.log(
+            `> [DEV] NEUTRAL PERK DROP ${enabled ? 'ENABLED' : 'DISABLED'}: ${unit.type}`,
+            PlayerId.NEUTRAL
+        );
+        this.notify();
     }
 
     public rotateUnit(unitId: string) {
@@ -5502,7 +5534,30 @@ class GameService {
             return u;
         });
 
+        if (unitToRemove?.status.dropsPerkCacheOnDeath && unitToRemove.playerId === PlayerId.NEUTRAL) {
+            const hasCollectibleOnTile = this.state.collectibles.some(
+                (collectible) =>
+                    collectible.position.x === unitToRemove.position.x &&
+                    collectible.position.z === unitToRemove.position.z
+            );
+
+            if (!hasCollectibleOnTile) {
+                this.state.collectibles.push({
+                    id: `col-${Date.now()}-${Math.random()}`,
+                    type: 'PERK_CACHE',
+                    value: 1,
+                    position: { ...unitToRemove.position }
+                });
+                this.log(`> NEUTRAL DROP: PERK CACHE DEPLOYED`, PlayerId.NEUTRAL);
+            } else {
+                this.log(`> NEUTRAL DROP BLOCKED: TILE ALREADY HAS FIELD ITEM`, PlayerId.NEUTRAL);
+            }
+        }
+
         this.state.units = this.state.units.filter(u => u.id !== unitId);
+        if (this.state.selectedUnitId === unitId) {
+            this.state.selectedUnitId = null;
+        }
         this.updateFogOfWar();
         this.checkWinCondition(); // Check for loss when unit dies
         this.notify();

@@ -191,6 +191,7 @@ export interface UnitStatus {
   stepsTaken: number;
   attacksUsed: number;
   fluxTowerAttackUpgradesPurchased?: number;
+  dropsPerkCacheOnDeath?: boolean;
 }
 
 export interface Unit {

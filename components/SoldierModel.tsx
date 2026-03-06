@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import { Group, MeshStandardMaterial, Vector3 } from 'three';
 import * as THREE from 'three';
@@ -22,7 +22,7 @@ const SoldierModel: React.FC<SoldierModelProps> = ({ color, isMoving, isDying, i
     const weaponRef = useRef<Group>(null);
 
     const matRefs = useRef<MeshStandardMaterial[]>([]);
-    const [deathStartTime, setDeathStartTime] = useState<number | null>(null);
+    const deathStartTimeRef = useRef<number | null>(null);
 
     // Define explosion vectors for death animation
     const explosionVectors = useMemo(() => ({
@@ -41,7 +41,7 @@ const SoldierModel: React.FC<SoldierModelProps> = ({ color, isMoving, isDying, i
         }
     };
 
-    useFrame((state) => {
+    useFrame((state, delta) => {
         if (!groupRef.current) return;
         const t = state.clock.elapsedTime;
 
@@ -57,25 +57,32 @@ const SoldierModel: React.FC<SoldierModelProps> = ({ color, isMoving, isDying, i
 
         // === DEATH ANIMATION ===
         if (isDying) {
-            if (deathStartTime === null) setDeathStartTime(t);
-            const elapsed = t - (deathStartTime || t);
-
-            // Explode parts
-            if (headRef.current) {
-                headRef.current.position.add(explosionVectors.head);
-                headRef.current.rotation.x += 0.1;
+            if (deathStartTimeRef.current === null) {
+                deathStartTimeRef.current = t;
             }
-            if (leftArmRef.current) leftArmRef.current.position.add(explosionVectors.lArm);
-            if (rightArmRef.current) rightArmRef.current.position.add(explosionVectors.rArm);
-            if (leftLegRef.current) leftLegRef.current.position.add(explosionVectors.lLeg);
-            if (rightLegRef.current) rightLegRef.current.position.add(explosionVectors.rLeg);
-            if (weaponRef.current) {
-                weaponRef.current.position.add(explosionVectors.weapon);
-                weaponRef.current.rotation.z -= 0.2;
+            const elapsed = t - deathStartTimeRef.current;
+            const deathMotionDuration = 0.45;
+            const shouldAnimateDeathMotion = elapsed < deathMotionDuration;
+
+            if (shouldAnimateDeathMotion) {
+                if (headRef.current) {
+                    headRef.current.position.addScaledVector(explosionVectors.head, delta * 2.5);
+                    headRef.current.rotation.x = Math.min(headRef.current.rotation.x + (delta * 6), 1.4);
+                }
+                if (leftArmRef.current) leftArmRef.current.position.addScaledVector(explosionVectors.lArm, delta * 2.2);
+                if (rightArmRef.current) rightArmRef.current.position.addScaledVector(explosionVectors.rArm, delta * 2.2);
+                if (leftLegRef.current) leftLegRef.current.position.addScaledVector(explosionVectors.lLeg, delta * 2);
+                if (rightLegRef.current) rightLegRef.current.position.addScaledVector(explosionVectors.rLeg, delta * 2);
+                if (weaponRef.current) {
+                    weaponRef.current.position.addScaledVector(explosionVectors.weapon, delta * 2.8);
+                    weaponRef.current.rotation.z = Math.max(weaponRef.current.rotation.z - (delta * 12), -1.5);
+                }
+
+                if (bodyRef.current) {
+                    bodyRef.current.rotation.x = Math.max(bodyRef.current.rotation.x - (delta * 3.2), -1.15);
+                }
             }
 
-            // General tumble
-            if (bodyRef.current) bodyRef.current.rotation.x -= 0.05;
             groupRef.current.position.y += Math.sin(elapsed * 5) * 0.01; // Slight bounce
 
             // Fade out
@@ -86,6 +93,7 @@ const SoldierModel: React.FC<SoldierModelProps> = ({ color, isMoving, isDying, i
             });
 
         } else {
+            deathStartTimeRef.current = null;
             // === ALIVE ANIMATION ===
             if (bodyRef.current) {
                 if (isMoving) {

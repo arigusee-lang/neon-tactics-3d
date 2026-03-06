@@ -656,10 +656,6 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
         if (!groupRef.current) return;
         const time = state.clock.elapsedTime;
 
-        if (isDying) {
-            return;
-        }
-
         if (supportPulseAmount && supportPulseStartRef.current) {
             const progress = Math.min((performance.now() - supportPulseStartRef.current) / 1150, 1);
             if (supportPulseLightRef.current) {
@@ -670,6 +666,10 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
                 supportPulseTextRef.current.style.opacity = `${1 - progress}`;
                 supportPulseTextRef.current.style.transform = `translateY(${-progress * 24}px) scale(${1 + ((1 - progress) * 0.08)})`;
             }
+        }
+
+        if (isDying) {
+            return;
         }
 
         if (isTeleporting && data.type !== EUnitType.SOLDIER) {
