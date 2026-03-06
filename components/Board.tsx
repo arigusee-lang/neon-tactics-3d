@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
-import { TILE_SIZE, TILE_SPACING, BOARD_OFFSET, COLORS, CARD_CONFIG, ELEVATION_HEIGHT, BUILDING_TYPES, getUnitClassificationLabel } from '../constants';
+import { TILE_SIZE, TILE_SPACING, BOARD_OFFSET, COLORS, CARD_CONFIG, ELEVATION_HEIGHT, BUILDING_TYPES, NEGATIVE_UNIT_EFFECT_NAMES, getUnitClassificationLabel } from '../constants';
 import { gameService } from '../services/gameService';
 import Tile from './Tile';
 import { Unit, UnitType, PlayerId, Position, CardCategory, InteractionState, TerrainData, Collectible, MapBounds, TilePulse } from '../types';
@@ -539,6 +539,41 @@ const Board: React.FC<BoardProps> = ({
                 && getUnitFootprintDistance(sourceUnit, targetUnit) <= 2
                 && targetUnit.stats.maxEnergy > 0
                 && targetUnit.stats.energy < targetUnit.stats.maxEnergy);
+
+            isPlacementValid = isValid;
+            highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
+        }
+
+        else if (interactionState.mode === 'ABILITY_IMMORTALITY_SHIELD') {
+            isTargetingMode = true;
+            isPlacementMode = true;
+            placementFootprint.add(key);
+
+            const targetUnit = getUnitAt(x, z);
+
+            const isValid = !!(targetUnit
+                && interactionState.playerId
+                && arePlayersAllied(interactionState.playerId, targetUnit.playerId)
+                && ['CREATURE', 'MACHINE'].includes(getUnitClassificationLabel(targetUnit.type)));
+
+            isPlacementValid = isValid;
+            highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';
+        }
+
+        else if (interactionState.mode === 'ABILITY_DISPEL') {
+            isTargetingMode = true;
+            isPlacementMode = true;
+            placementFootprint.add(key);
+
+            const sourceUnit = units.find(u => u.id === interactionState.sourceUnitId);
+            const targetUnit = getUnitAt(x, z);
+
+            const isValid = !!(sourceUnit
+                && targetUnit
+                && arePlayersAllied(sourceUnit.playerId, targetUnit.playerId)
+                && getUnitFootprintDistance(sourceUnit, targetUnit) <= 2
+                && ['CREATURE', 'MACHINE'].includes(getUnitClassificationLabel(targetUnit.type))
+                && targetUnit.effects.some((effect) => NEGATIVE_UNIT_EFFECT_NAMES.includes(effect.name as typeof NEGATIVE_UNIT_EFFECT_NAMES[number])));
 
             isPlacementValid = isValid;
             highlightColor = isPlacementValid ? '#00ff00' : '#ff0000';

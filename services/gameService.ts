@@ -1,6 +1,6 @@
 
 import { GameState, PlayerId, Unit, PlacePayload, UnitType, Card, Position, CardCategory, LogEntry, InteractionMode, AppStatus, Effect, Talent, TerrainData, TerrainTool, ShopItem, UnitStats, DebugClickTraceEntry, DebugClickResult, DebugPointerMeta, MapBounds, MapMetadata, MapPlayerSupport, MapPreviewData, ALL_PLAYER_IDS, CONTESTED_PLAYER_IDS, MatchMode, EmptyMapConfig } from '../types';
-import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS, TURN_TIMER_SECONDS, getUnitClassificationLabel } from '../constants';
+import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS, TURN_TIMER_SECONDS, NEGATIVE_UNIT_EFFECT_NAMES, getUnitClassificationLabel, FLUX_TOWER_ATTACK_UPGRADE_AMOUNT, FLUX_TOWER_ATTACK_UPGRADE_COST, FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP } from '../constants';
 import { findPath } from '../utils/pathfinding';
 import { clampTerrainBrushSize, getTerrainBrushFootprint, isBrushEnabledTerrainTool } from '../utils/terrainBrush';
 import { canTraverseTerrainEdge, getStepDirection } from '../utils/terrainTraversal';
@@ -147,6 +147,8 @@ const PROJECTILE_ATTACK_SPEEDS: Partial<Record<UnitType, number>> = {
 };
 
 const DEFAULT_PROJECTILE_ATTACK_SPEED = 32;
+const getFluxTowerUnlockedUpgradeCount = (level: number) =>
+    Math.max(0, Math.floor(level / FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP));
 
 class GameService {
     private state: GameState;
@@ -165,6 +167,7 @@ class GameService {
     private readonly authoritativeActions = new Set<string>([
         'SYNC_STATE',
         'ADMIN_SET_UNIT_STATS',
+        'FLUX_TOWER_ATTACK_UPGRADE',
         'MOVE',
         'ATTACK',
         'SKIP_TURN',
@@ -176,6 +179,8 @@ class GameService {
         'FREEZE_TARGET',
         'HEAL_TARGET',
         'RESTORE_ENERGY_TARGET',
+        'IMMORTALITY_SHIELD_TARGET',
+        'DISPEL_TARGET',
         'MIND_CONTROL_TARGET',
         'MIND_CONTROL_BREAK',
         'SUMMON_ACTIVATE',
@@ -214,6 +219,13 @@ class GameService {
 
     private canEditUnitStats() {
         return !this.state.isMultiplayer || this.state.isDevMode || this.state.isInGameAdmin;
+    }
+
+    private getFluxTowerAvailableUpgradeCount(unit: Unit) {
+        if (unit.type !== UnitType.TOWER) return 0;
+
+        const purchasedCount = unit.status.fluxTowerAttackUpgradesPurchased ?? 0;
+        return Math.max(0, getFluxTowerUnlockedUpgradeCount(unit.level) - purchasedCount);
     }
 
     private resetTurnTimer(startedAt: number = Date.now()) {
@@ -836,6 +848,9 @@ class GameService {
             case 'ADMIN_SET_UNIT_STATS':
                 this.applyUnitStatsEdit(data.unitId, data, true);
                 break;
+            case 'FLUX_TOWER_ATTACK_UPGRADE':
+                this.purchaseFluxTowerAttackUpgrade(data.unitId, true);
+                break;
             case 'MOVE':
                 // We need to simulate the move. 
                 // data: { unitId, path } -> But confirmMove uses previewPath
@@ -870,6 +885,12 @@ class GameService {
                 break;
             case 'RESTORE_ENERGY_TARGET':
                 this.handleRestoreEnergyTarget(data.targetUnitId, true, data.sourceUnitId);
+                break;
+            case 'IMMORTALITY_SHIELD_TARGET':
+                this.handleImmortalityShieldTarget(data.targetUnitId, true, data.playerId);
+                break;
+            case 'DISPEL_TARGET':
+                this.handleDispelTarget(data.targetUnitId, true, data.sourceUnitId);
                 break;
             case 'MIND_CONTROL_TARGET':
                 this.handleMindControlTarget(data.targetUnitId, true, data.sourceUnitId);
@@ -1225,6 +1246,35 @@ class GameService {
 
     private checkUnitFrozen(unit: Unit): boolean {
         return unit.effects.some(e => e.name === 'CRYO STASIS' || e.name === 'SYSTEM FREEZE');
+    }
+
+    private getNegativeEffects(unit: Unit): Effect[] {
+        return unit.effects.filter((effect) => NEGATIVE_UNIT_EFFECT_NAMES.includes(effect.name as typeof NEGATIVE_UNIT_EFFECT_NAMES[number]));
+    }
+
+    private hasNegativeEffects(unit: Unit): boolean {
+        return this.getNegativeEffects(unit).length > 0;
+    }
+
+    private createImmortalityShieldEffect(unitId: string): Effect {
+        return {
+            id: `eff-${unitId}-${Date.now()}`,
+            name: 'IMMORTALITY_SHIELD',
+            description: 'Invulnerable to damage',
+            icon: '🛡️',
+            duration: 2,
+            maxDuration: 2
+        };
+    }
+
+    private applyImmortalityShield(unit: Unit): Unit {
+        return {
+            ...unit,
+            effects: [
+                ...unit.effects.filter((effect) => effect.name !== 'IMMORTALITY_SHIELD'),
+                this.createImmortalityShieldEffect(unit.id)
+            ]
+        };
     }
 
     private getRandomColor(playerId: PlayerId): string {
@@ -1962,7 +2012,7 @@ class GameService {
                 initialUnits = mapData.units.map((u: any) => ({
                     ...u,
                     stats: this.createUnit(u.type, u.position, u.playerId).stats,
-                    status: { stepsTaken: 0, attacksUsed: 0 },
+                    status: { stepsTaken: 0, attacksUsed: 0, fluxTowerAttackUpgradesPurchased: 0 },
                     effects: [],
                     movePath: []
                 }));
@@ -3062,6 +3112,32 @@ class GameService {
         this.notify();
     }
 
+    public activateDispelAbility(unitId: string) {
+        if (this.state.appStatus !== AppStatus.PLAYING) return;
+        if (this.checkPlayerRestricted(this.state.currentTurn)) return;
+
+        const unit = this.state.units.find(u => u.id === unitId);
+        if (!unit || unit.playerId !== this.state.currentTurn || unit.type !== UnitType.HACKER) return;
+
+        if (unit.status.mindControlTargetId) {
+            this.log(`> CHANNEL LOCK ACTIVE: BREAK LINK FIRST`, unit.playerId);
+            return;
+        }
+
+        if (unit.stats.energy < 25) {
+            this.log(`> INSUFFICIENT ENERGY (${unit.stats.energy}/25)`, unit.playerId);
+            return;
+        }
+
+        this.state.interactionState = {
+            mode: 'ABILITY_DISPEL',
+            sourceUnitId: unit.id,
+            playerId: unit.playerId
+        };
+        this.log(`> SYSTEM PURGE READY: SELECT FRIENDLY CREATURE OR MACHINE`, unit.playerId);
+        this.notify();
+    }
+
     public activateMindControlAbility(unitId: string) {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
         if (this.checkPlayerRestricted(this.state.currentTurn)) return;
@@ -3100,6 +3176,7 @@ class GameService {
         attack?: number;
         range?: number;
         movement?: number;
+        level?: number;
     }) {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
         if (!this.canEditUnitStats()) return;
@@ -3130,6 +3207,9 @@ class GameService {
         const nextMovement = typeof stats.movement === 'number'
             ? Math.max(0, Math.round(stats.movement))
             : undefined;
+        const nextLevel = typeof stats.level === 'number'
+            ? Math.max(1, Math.round(stats.level))
+            : undefined;
 
         if (
             typeof nextHp === 'undefined' &&
@@ -3138,7 +3218,8 @@ class GameService {
             typeof nextMaxEnergy === 'undefined' &&
             typeof nextAttack === 'undefined' &&
             typeof nextRange === 'undefined' &&
-            typeof nextMovement === 'undefined'
+            typeof nextMovement === 'undefined' &&
+            typeof nextLevel === 'undefined'
         ) {
             return;
         }
@@ -3152,7 +3233,8 @@ class GameService {
                 ...(typeof nextMaxEnergy === 'number' ? { maxEnergy: nextMaxEnergy } : {}),
                 ...(typeof nextAttack === 'number' ? { attack: nextAttack } : {}),
                 ...(typeof nextRange === 'number' ? { range: nextRange } : {}),
-                ...(typeof nextMovement === 'number' ? { movement: nextMovement } : {})
+                ...(typeof nextMovement === 'number' ? { movement: nextMovement } : {}),
+                ...(typeof nextLevel === 'number' ? { level: nextLevel } : {})
             });
             return;
         }
@@ -3164,8 +3246,70 @@ class GameService {
             maxEnergy: nextMaxEnergy,
             attack: nextAttack,
             range: nextRange,
-            movement: nextMovement
+            movement: nextMovement,
+            level: nextLevel
         });
+    }
+
+    public purchaseFluxTowerAttackUpgrade(unitId: string, isRemote: boolean = false) {
+        if (this.state.appStatus !== AppStatus.PLAYING) return;
+        if (!isRemote && this.checkPlayerRestricted(this.state.currentTurn)) return;
+
+        const unitIndex = this.state.units.findIndex((unit) => unit.id === unitId);
+        if (unitIndex === -1) return;
+
+        const unit = this.state.units[unitIndex];
+        if (unit.type !== UnitType.TOWER) return;
+        if (unit.playerId !== this.state.currentTurn) return;
+
+        const availableUpgrades = this.getFluxTowerAvailableUpgradeCount(unit);
+        if (availableUpgrades <= 0) {
+            const nextUnlockLevel = (getFluxTowerUnlockedUpgradeCount(unit.level) + 1) * FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP;
+            this.log(`> FLUX OVERCHARGE LOCKED: NEXT UPGRADE AT LEVEL ${nextUnlockLevel}`, unit.playerId);
+            this.notify();
+            return;
+        }
+
+        if (this.state.credits[unit.playerId] < FLUX_TOWER_ATTACK_UPGRADE_COST) {
+            this.log(`> INSUFFICIENT CREDITS ($${this.state.credits[unit.playerId]}/$${FLUX_TOWER_ATTACK_UPGRADE_COST})`, unit.playerId);
+            this.notify();
+            return;
+        }
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('FLUX_TOWER_ATTACK_UPGRADE', { unitId });
+            return;
+        }
+
+        const purchasedCount = unit.status.fluxTowerAttackUpgradesPurchased ?? 0;
+        const nextAttack = unit.stats.attack + FLUX_TOWER_ATTACK_UPGRADE_AMOUNT;
+        const remainingUpgrades = availableUpgrades - 1;
+
+        this.state.credits = {
+            ...this.state.credits,
+            [unit.playerId]: this.state.credits[unit.playerId] - FLUX_TOWER_ATTACK_UPGRADE_COST
+        };
+        this.state.units[unitIndex] = {
+            ...unit,
+            stats: {
+                ...unit.stats,
+                attack: nextAttack
+            },
+            status: {
+                ...unit.status,
+                fluxTowerAttackUpgradesPurchased: purchasedCount + 1
+            }
+        };
+
+        this.log(
+            `> FLUX TOWER OVERCHARGED: ATK +${FLUX_TOWER_ATTACK_UPGRADE_AMOUNT} (${nextAttack})${remainingUpgrades > 0 ? ` | ${remainingUpgrades} STACKED UPGRADE${remainingUpgrades === 1 ? '' : 'S'} READY` : ''}`,
+            unit.playerId
+        );
+        this.notify();
+
+        if (isRemote) {
+            this.replicateAuthoritativeState();
+        }
     }
 
     private applyUnitStatsEdit(unitId: string, stats: {
@@ -3176,6 +3320,7 @@ class GameService {
         attack?: number;
         range?: number;
         movement?: number;
+        level?: number;
     }, isRemote: boolean = false) {
         const unitIndex = this.state.units.findIndex(u => u.id === unitId);
         if (unitIndex === -1) return;
@@ -3202,6 +3347,9 @@ class GameService {
         const nextMovement = typeof stats.movement === 'number'
             ? Math.max(0, Math.round(stats.movement))
             : unit.stats.movement;
+        const nextLevel = typeof stats.level === 'number'
+            ? Math.max(1, Math.round(stats.level))
+            : unit.level;
 
         if (
             nextHp === unit.stats.hp &&
@@ -3210,11 +3358,13 @@ class GameService {
             nextMaxEnergy === unit.stats.maxEnergy &&
             nextAttack === unit.stats.attack &&
             nextRange === unit.stats.range &&
-            nextMovement === unit.stats.movement
+            nextMovement === unit.stats.movement &&
+            nextLevel === unit.level
         ) return;
 
         this.state.units[unitIndex] = {
             ...unit,
+            level: nextLevel,
             stats: {
                 ...unit.stats,
                 hp: nextHp,
@@ -3232,6 +3382,7 @@ class GameService {
         };
 
         const vitalsSummary = [
+            `LVL ${nextLevel}`,
             `HP ${nextHp}/${nextMaxHp}`,
             `EN ${nextEnergy}/${nextMaxEnergy}`,
             `ATK ${nextAttack}`,
@@ -3358,6 +3509,15 @@ class GameService {
                     terrainBrushSize: 2
                 };
                 this.log(`> MASS RETREAT READY: SELECT TARGET ZONE`, playerId);
+                this.notify();
+                return;
+            }
+            if (card.type === UnitType.IMMORTALITY_SHIELD) {
+                this.state.interactionState = {
+                    mode: 'ABILITY_IMMORTALITY_SHIELD',
+                    playerId
+                };
+                this.log(`> IMMORTALITY SHIELD READY: SELECT FRIENDLY CREATURE OR MACHINE`, playerId);
                 this.notify();
                 return;
             }
@@ -3633,6 +3793,28 @@ class GameService {
                 this.handleRestoreEnergyTarget(clickedUnit.id);
             } else {
                 this.pushDebugTrace('handleTileClick.reject', 'REJECT', 'restore-energy target missing', { tile, pointer, notify: true });
+                this.log(`> INVALID TARGET`, currentTurn);
+            }
+            return;
+        }
+
+        if (interactionState.mode === 'ABILITY_IMMORTALITY_SHIELD') {
+            if (clickedUnit) {
+                this.pushDebugTrace('handleTileClick.action', 'ACTION', `immortality shield target ${clickedUnit.id}`, { tile, unitId: clickedUnit.id, pointer });
+                this.handleImmortalityShieldTarget(clickedUnit.id);
+            } else {
+                this.pushDebugTrace('handleTileClick.reject', 'REJECT', 'immortality-shield target missing', { tile, pointer, notify: true });
+                this.log(`> INVALID TARGET`, currentTurn);
+            }
+            return;
+        }
+
+        if (interactionState.mode === 'ABILITY_DISPEL') {
+            if (clickedUnit) {
+                this.pushDebugTrace('handleTileClick.action', 'ACTION', `dispel target ${clickedUnit.id}`, { tile, unitId: clickedUnit.id, pointer });
+                this.handleDispelTarget(clickedUnit.id);
+            } else {
+                this.pushDebugTrace('handleTileClick.reject', 'REJECT', 'dispel target missing', { tile, pointer, notify: true });
                 this.log(`> INVALID TARGET`, currentTurn);
             }
             return;
@@ -4057,6 +4239,90 @@ class GameService {
         });
     }
 
+    public handleImmortalityShieldTarget(targetUnitId: string, isRemote: boolean = false, forcedPlayerId?: PlayerId) {
+        const playerId = forcedPlayerId || this.state.interactionState.playerId;
+        if (!playerId) return;
+
+        const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
+        if (targetIdx === -1) return;
+
+        const target = this.state.units[targetIdx];
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('IMMORTALITY_SHIELD_TARGET', { playerId, targetUnitId });
+            return;
+        }
+
+        if (!this.arePlayersAllied(playerId, target.playerId)) {
+            this.log(`> TARGET INVALID: FRIENDLY ONLY`, playerId);
+            return;
+        }
+
+        const targetClassification = getUnitClassificationLabel(target.type);
+        if (targetClassification !== 'CREATURE' && targetClassification !== 'MACHINE') {
+            this.log(`> TARGET INVALID: CREATURES OR MACHINES ONLY`, playerId);
+            return;
+        }
+
+        this.consumeActionCard(playerId, UnitType.IMMORTALITY_SHIELD, this.state.selectedCardId);
+        this.state.units[targetIdx] = this.applyImmortalityShield(target);
+
+        this.log(`> IMMORTALITY SHIELD APPLIED`, playerId);
+        this.finalizeInteraction();
+    }
+
+    public handleDispelTarget(targetUnitId: string, isRemote: boolean = false, sourceUnitIdOverride?: string) {
+        const sourceUnitId = sourceUnitIdOverride || this.state.interactionState.sourceUnitId;
+        if (!sourceUnitId) return;
+
+        const sourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
+        if (sourceIdx === -1) return;
+
+        const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
+        if (targetIdx === -1) return;
+
+        const source = this.state.units[sourceIdx];
+        const target = this.state.units[targetIdx];
+        const supportRange = 2;
+
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('DISPEL_TARGET', { sourceUnitId, targetUnitId });
+            return;
+        }
+
+        if (!this.arePlayersAllied(source.playerId, target.playerId)) {
+            this.log(`> TARGET INVALID: FRIENDLY ONLY`, source.playerId);
+            return;
+        }
+
+        const distance = this.getUnitFootprintDistance(source, target);
+        if (distance > supportRange) {
+            this.log(`> TARGET OUT OF RANGE (${distance}/${supportRange})`, source.playerId);
+            return;
+        }
+
+        const targetClassification = getUnitClassificationLabel(target.type);
+        if (targetClassification !== 'CREATURE' && targetClassification !== 'MACHINE') {
+            this.log(`> TARGET INVALID: CREATURES OR MACHINES ONLY`, source.playerId);
+            return;
+        }
+
+        if (!this.hasNegativeEffects(target)) {
+            this.log(`> TARGET CLEAN: NO NEGATIVE EFFECTS`, source.playerId);
+            return;
+        }
+
+        const removableEffects = this.getNegativeEffects(target);
+
+        this.state.units[targetIdx].effects = target.effects.filter(
+            (effect) => !NEGATIVE_UNIT_EFFECT_NAMES.includes(effect.name as typeof NEGATIVE_UNIT_EFFECT_NAMES[number])
+        );
+        this.state.units[sourceIdx].stats.energy -= 25;
+
+        this.log(`> SYSTEM PURGE COMPLETE: ${removableEffects.length} EFFECTS REMOVED`, source.playerId);
+        this.finalizeInteraction();
+    }
+
     public handleMindControlTarget(targetUnitId: string, isRemote: boolean = false, sourceUnitIdOverride?: string) {
         const sourceUnitId = sourceUnitIdOverride || this.state.interactionState.sourceUnitId;
         if (!sourceUnitId) return;
@@ -4397,7 +4663,7 @@ class GameService {
             level: 1,
             rotation: this.getInitialRotation(playerId),
             stats: finalStats,
-            status: { stepsTaken: 0, attacksUsed: 0 },
+            status: { stepsTaken: 0, attacksUsed: 0, fluxTowerAttackUpgradesPurchased: 0 },
             effects: [],
             movePath: []
         };
@@ -5516,23 +5782,8 @@ class GameService {
 
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === playerId && !BUILDING_TYPES.includes(u.type)) {
-                    // Remove existing if any to refresh duration
-                    const otherEffects = u.effects.filter(e => e.name !== 'IMMORTALITY_SHIELD');
                     console.log(`Applying Shield to Unit: ${u.type} (${u.id})`);
-                    return {
-                        ...u,
-                        effects: [
-                            ...otherEffects,
-                            {
-                                id: `eff-${u.id}-${Date.now()}`,
-                                name: 'IMMORTALITY_SHIELD',
-                                description: 'Invulnerable to damage',
-                                icon: '🛡️',
-                                duration: 2,
-                                maxDuration: 2
-                            }
-                        ]
-                    };
+                    return this.applyImmortalityShield(u);
                 }
                 return u;
             });

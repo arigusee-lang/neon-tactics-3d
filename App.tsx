@@ -376,6 +376,21 @@ const App: React.FC = () => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (!gameState) return;
 
+            const activeElement = document.activeElement;
+            const isTypingInEditable = !!activeElement && (
+                activeElement instanceof HTMLInputElement
+                || activeElement instanceof HTMLTextAreaElement
+                || activeElement instanceof HTMLSelectElement
+                || activeElement instanceof HTMLElement && (
+                    activeElement.isContentEditable
+                    || activeElement.getAttribute('contenteditable') === 'true'
+                )
+            );
+
+            if (isTypingInEditable) {
+                return;
+            }
+
             if (e.code === 'Tab') {
                 e.preventDefault();
                 gameService.selectNearestControlledUnit();
@@ -432,6 +447,11 @@ const App: React.FC = () => {
                     // Cone (Summon Drones)
                     if (unit.type === UnitType.CONE) {
                         if (e.code === 'KeyD') gameService.activateSummonAbility(unit.id);
+                    }
+
+                    if (unit.type === UnitType.HACKER) {
+                        if (e.code === 'KeyG') gameService.activateDispelAbility(unit.id);
+                        if (e.code === 'KeyM') gameService.activateMindControlAbility(unit.id);
                     }
 
                     // Heavy (Suicide Protocol)
@@ -700,8 +720,12 @@ const App: React.FC = () => {
                                     ? `BUILDING WALL... (${gameState.interactionState.remaining} LEFT)`
                                     : gameState.interactionState.mode === 'ABILITY_SUMMON'
                                         ? `SUMMONING... (${gameState.interactionState.remaining} LEFT)`
-                                        : gameState.interactionState.mode === 'ABILITY_FREEZE'
+                                    : gameState.interactionState.mode === 'ABILITY_FREEZE'
                                             ? `TARGETING CRYO SHOT...`
+                                            : gameState.interactionState.mode === 'ABILITY_IMMORTALITY_SHIELD'
+                                                ? `TARGETING IMMORTALITY SHIELD...`
+                                            : gameState.interactionState.mode === 'ABILITY_DISPEL'
+                                                ? `TARGETING SYSTEM PURGE...`
                                             : gameState.interactionState.mode === 'MASS_RETREAT_TARGETING'
                                                 ? `SELECT MASS RETREAT ZONE${massRetreatText}`
                                             : gameState.interactionState.mode === 'TERRAIN_EDIT'
@@ -752,6 +776,8 @@ const App: React.FC = () => {
                             canUseActions={!gameState.isMultiplayer || isLocalTurn}
                             currentRound={gameState.roundNumber}
                             characterId={selectedUnit ? gameState.playerCharacters[selectedUnit.playerId] : null}
+                            currentTurnPlayerId={gameState.currentTurn}
+                            currentTurnCredits={gameState.credits[gameState.currentTurn]}
                         />
                     )}
 

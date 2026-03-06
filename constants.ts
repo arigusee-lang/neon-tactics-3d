@@ -55,6 +55,11 @@ export const MACHINE_TYPES = [
   UnitType.REPAIR_BOT
 ];
 
+export const NEGATIVE_UNIT_EFFECT_NAMES = [
+  'CRYO STASIS',
+  'SYSTEM FREEZE'
+] as const;
+
 export const getUnitClassificationLabel = (unitType: UnitType): 'BUILDING' | 'MACHINE' | 'CREATURE' => {
   if (BUILDING_TYPES.includes(unitType)) {
     return 'BUILDING';
@@ -73,6 +78,11 @@ export const DEV_ONLY_UNITS: UnitType[] = [
   UnitType.ARC_PORTAL,
   UnitType.WALL
 ];
+
+export const FLUX_TOWER_ATTACK_UPGRADE_COST = 25;
+export const FLUX_TOWER_ATTACK_UPGRADE_AMOUNT = 10;
+export const FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP = 10;
+export const FLUX_TOWER_MAX_VISUAL_UPGRADES = 5;
 
 export const CHARACTERS: Character[] = [
   {
@@ -197,9 +207,9 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
   [UnitType.HEAVY_TANK]: {
     category: CardCategory.UNIT,
     name: 'Mammoth Tank',
-    description: 'Heavy vehicle. Massive armor and firepower. Slow. 2x2.',
+    description: 'Heavy vehicle. Massive armor and firepower. Passive: Double Strike. Slow. 2x2.',
     cost: 450,
-    baseStats: { hp: 800, maxEnergy: 0, attack: 80, range: 5, movement: 3, size: 2, blocksLos: true }
+    baseStats: { hp: 800, maxEnergy: 0, attack: 80, range: 5, movement: 3, size: 2, blocksLos: true, maxAttacks: 2 }
   },
   [UnitType.SNIPER]: {
     category: CardCategory.UNIT,
@@ -274,6 +284,12 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     description: 'Main structure. On destruction, all of its owner\'s landing zones collapse.',
     cost: 900,
     baseStats: { hp: 3000, maxEnergy: 0, attack: 0, range: 0, movement: 0, size: 3, blocksLos: true }
+  },
+  [UnitType.IMMORTALITY_SHIELD]: {
+    category: CardCategory.ACTION,
+    name: 'Immortality Shield',
+    description: 'Apply temporary invulnerability to a friendly creature or machine for 2 turns.',
+    cost: 150
   },
   [UnitType.SYSTEM_FREEZE]: {
     category: CardCategory.ACTION,

@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { Unit, UnitType, PlayerId, Effect } from '../types';
-import { CARD_CONFIG, COLORS, getUnitClassificationLabel } from '../constants';
+import { CARD_CONFIG, COLORS, FLUX_TOWER_ATTACK_UPGRADE_AMOUNT, FLUX_TOWER_ATTACK_UPGRADE_COST, FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP, getUnitClassificationLabel } from '../constants';
 import { gameService } from '../services/gameService';
 
 interface UnitControlPanelProps {
@@ -12,6 +12,8 @@ interface UnitControlPanelProps {
     canUseActions?: boolean;
     currentRound?: number;
     characterId?: string | null;
+    currentTurnPlayerId?: PlayerId;
+    currentTurnCredits?: number;
 }
 
 const EnergyIcon = () => (
@@ -131,7 +133,9 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
     canEditStats,
     canUseActions = true,
     currentRound,
-    characterId
+    characterId,
+    currentTurnPlayerId,
+    currentTurnCredits = 0
 }) => {
     // Draggable State
     const [pos, setPos] = useState(() => {
@@ -152,6 +156,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
     const [attackInput, setAttackInput] = useState('');
     const [rangeInput, setRangeInput] = useState('');
     const [movementInput, setMovementInput] = useState('');
+    const [levelInput, setLevelInput] = useState('');
     const [isStatEditorOpen, setIsStatEditorOpen] = useState(false);
 
     const onMouseDown = (e: React.MouseEvent) => {
@@ -202,8 +207,9 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
         setAttackInput(unit ? String(unit.stats.attack) : '');
         setRangeInput(unit ? String(unit.stats.range) : '');
         setMovementInput(unit ? String(unit.stats.movement) : '');
+        setLevelInput(unit ? String(unit.level) : '');
         setIsStatEditorOpen(false);
-    }, [unit?.id, unit?.stats.attack, unit?.stats.energy, unit?.stats.hp, unit?.stats.maxEnergy, unit?.stats.maxHp, unit?.stats.movement, unit?.stats.range]);
+    }, [unit?.id, unit?.level, unit?.stats.attack, unit?.stats.energy, unit?.stats.hp, unit?.stats.maxEnergy, unit?.stats.maxHp, unit?.stats.movement, unit?.stats.range]);
 
     if (!unit) return null;
 
@@ -227,6 +233,22 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
     const hasEnergy = unit.stats.maxEnergy > 0;
     const energyPercent = hasEnergy ? (unit.stats.energy / unit.stats.maxEnergy) * 100 : 0;
     const actionsLocked = !canUseActions;
+    const isCurrentTurnUnit = unit.playerId === currentTurnPlayerId;
+    const fluxTowerPurchasedUpgrades = unit.status.fluxTowerAttackUpgradesPurchased ?? 0;
+    const fluxTowerUnlockedUpgrades = Math.max(0, Math.floor(unit.level / FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP));
+    const fluxTowerAvailableUpgrades = Math.max(0, fluxTowerUnlockedUpgrades - fluxTowerPurchasedUpgrades);
+    const nextFluxTowerUnlockLevel = (fluxTowerUnlockedUpgrades + 1) * FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP;
+    const canPurchaseFluxTowerUpgrade =
+        unit.type === UnitType.TOWER
+        && isCurrentTurnUnit
+        && !actionsLocked
+        && fluxTowerAvailableUpgrades > 0
+        && currentTurnCredits >= FLUX_TOWER_ATTACK_UPGRADE_COST;
+    const unitDescription = unit.type === UnitType.HACKER
+        ? 'Tech specialist. Can disrupt hostile systems and purge allied status locks. Abilities: Mind Control, System Purge.'
+        : unit.type === UnitType.HEAVY_TANK
+            ? 'Heavy vehicle. Massive armor and firepower. Passive: Double Strike. Slow. 2x2.'
+            : (config?.description || "No tactical data available.");
 
     const parseIntOrUndefined = (value: string) => {
         const parsed = Number.parseInt(value, 10);
@@ -241,7 +263,8 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
             maxEnergy: parseIntOrUndefined(maxEnergyInput),
             attack: parseIntOrUndefined(attackInput),
             range: parseIntOrUndefined(rangeInput),
-            movement: parseIntOrUndefined(movementInput)
+            movement: parseIntOrUndefined(movementInput),
+            level: parseIntOrUndefined(levelInput)
         });
     };
 
@@ -302,7 +325,8 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                                     { label: 'MAX EN', value: maxEnergyInput, onChange: setMaxEnergyInput, min: 0 },
                                                     { label: 'ATK', value: attackInput, onChange: setAttackInput, min: 0 },
                                                     { label: 'RNG', value: rangeInput, onChange: setRangeInput, min: 0 },
-                                                    { label: 'MOV', value: movementInput, onChange: setMovementInput, min: 0 }
+                                                    { label: 'MOV', value: movementInput, onChange: setMovementInput, min: 0 },
+                                                    { label: 'LVL', value: levelInput, onChange: setLevelInput, min: 1 }
                                                 ].map((field) => (
                                                     <label key={field.label} className="flex flex-col gap-1">
                                                         <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-gray-400">{field.label}</span>
@@ -312,8 +336,10 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                                             min={field.min}
                                                             onChange={(e) => field.onChange(e.target.value)}
                                                             onKeyDown={(e) => {
+                                                                e.stopPropagation();
                                                                 if (e.key === 'Enter') applyStatEdits();
                                                             }}
+                                                            onKeyUp={(e) => e.stopPropagation()}
                                                             className="border border-cyan-500/30 bg-black/60 px-2 py-1 text-xs text-white outline-none focus:border-cyan-400"
                                                         />
                                                     </label>
@@ -414,7 +440,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                         <div>
                             <h3 className="text-[9px] text-green-500/80 font-bold uppercase mb-2 tracking-widest">Database Entry</h3>
                             <p className="text-[10px] text-gray-400 leading-relaxed font-sans">
-                                {config?.description || "No tactical data available."}
+                                {unitDescription}
                             </p>
                         </div>
 
@@ -453,6 +479,20 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                     />
                                 )}
 
+                                {unit.type === UnitType.HEAVY_TANK && (
+                                    <AbilityButton
+                                        label="DOUBLE STRIKE"
+                                        icon="DS"
+                                        cost={0}
+                                        description="Twin weapon batteries let this tank perform two attack actions per turn."
+                                        onClick={() => { }}
+                                        isPassive
+                                        color="#f472b6"
+                                        onHover={handleShowTooltip}
+                                        onLeave={handleHideTooltip}
+                                    />
+                                )}
+
                                 {/* CHARGING STATION: INDUCTIVE FIELD (Passive) */}
                                 {unit.type === UnitType.CHARGING_STATION && (
                                     <AbilityButton
@@ -463,6 +503,24 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                         onClick={() => { }}
                                         isPassive
                                         color="#22d3ee" // cyan-400
+                                        onHover={handleShowTooltip}
+                                        onLeave={handleHideTooltip}
+                                    />
+                                )}
+
+                                {unit.type === UnitType.TOWER && (
+                                    <AbilityButton
+                                        label="FLUX OVERCHARGE"
+                                        icon="UP"
+                                        cost={FLUX_TOWER_ATTACK_UPGRADE_COST}
+                                        description={
+                                            fluxTowerAvailableUpgrades > 0
+                                                ? `Permanently gain +${FLUX_TOWER_ATTACK_UPGRADE_AMOUNT} ATK. ${fluxTowerAvailableUpgrades} stored upgrade${fluxTowerAvailableUpgrades === 1 ? '' : 's'} available. Purchased ${fluxTowerPurchasedUpgrades} total.`
+                                                : `No stored upgrades available yet. Unlocks one permanent +${FLUX_TOWER_ATTACK_UPGRADE_AMOUNT} ATK upgrade every ${FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP} levels. Next unlock at level ${nextFluxTowerUnlockLevel}.`
+                                        }
+                                        onClick={() => gameService.purchaseFluxTowerAttackUpgrade(unit.id)}
+                                        disabled={!canPurchaseFluxTowerUpgrade}
+                                        color="#f59e0b"
                                         onHover={handleShowTooltip}
                                         onLeave={handleHideTooltip}
                                     />
@@ -529,6 +587,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                                 onLeave={handleHideTooltip}
                                             />
                                         )}
+
                                     </>
                                 )}
 
@@ -578,6 +637,21 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                     />
                                 )}
 
+                                {unit.type === UnitType.HACKER && (
+                                    <AbilityButton
+                                        label="SYSTEM PURGE"
+                                        icon="P"
+                                        cost={25}
+                                        description="Remove all negative effects from a friendly creature or machine within 2 tiles."
+                                        onClick={() => gameService.activateDispelAbility(unit.id)}
+                                        disabled={actionsLocked || unit.stats.energy < 25 || !!unit.status.mindControlTargetId}
+                                        color="#38bdf8"
+                                        hotkey="G"
+                                        onHover={handleShowTooltip}
+                                        onLeave={handleHideTooltip}
+                                    />
+                                )}
+
                                 {/* HACKER: MIND CONTROL */}
                                 {unit.type === UnitType.HACKER && (
                                     <AbilityButton
@@ -621,7 +695,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                 )}
 
                                 {/* Generic Placeholder if no abilities */}
-                                {unit.type !== UnitType.HEAVY && unit.type !== UnitType.CONE && unit.type !== UnitType.SOLDIER && unit.type !== UnitType.SUICIDE_DRONE && unit.type !== UnitType.MEDIC && unit.type !== UnitType.TITAN && unit.type !== UnitType.CHARGING_STATION && unit.type !== UnitType.HACKER && !isDevMode && (
+                                {unit.type !== UnitType.HEAVY && unit.type !== UnitType.CONE && unit.type !== UnitType.HEAVY_TANK && unit.type !== UnitType.SOLDIER && unit.type !== UnitType.SUICIDE_DRONE && unit.type !== UnitType.MEDIC && unit.type !== UnitType.TITAN && unit.type !== UnitType.TOWER && unit.type !== UnitType.CHARGING_STATION && unit.type !== UnitType.HACKER && !isDevMode && (
                                     <div className="text-[10px] text-gray-500 text-center py-3 border border-dashed border-gray-800 rounded bg-black/40">
                                         NO ACTIVE MODULES DETECTED
                                     </div>

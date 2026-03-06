@@ -65,6 +65,7 @@ export enum UnitType {
   ARC_PORTAL = 'ARC_PORTAL',    // New 3x3 Portal
 
   // Actions
+  IMMORTALITY_SHIELD = 'IMMORTALITY_SHIELD',
   SYSTEM_FREEZE = 'SYSTEM_FREEZE',
   ION_CANNON = 'ION_CANNON',
   FORWARD_BASE = 'FORWARD_BASE',
@@ -189,6 +190,7 @@ export interface UnitStatus {
   // Turn Management
   stepsTaken: number;
   attacksUsed: number;
+  fluxTowerAttackUpgradesPurchased?: number;
 }
 
 export interface Unit {
@@ -224,7 +226,7 @@ export interface LogEntry {
 
 export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'DELETE' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN' | 'SET_P3_SPAWN' | 'SET_P4_SPAWN' | 'PLACE_COLLECTIBLE' | 'PLACE_HEALTH' | 'PLACE_ENERGY';
 
-export type InteractionMode = 'NORMAL' | 'WALL_PLACEMENT' | 'ABILITY_SUMMON' | 'ABILITY_TELEPORT' | 'ABILITY_FREEZE' | 'ABILITY_HEAL' | 'ABILITY_RESTORE_ENERGY' | 'ABILITY_MIND_CONTROL' | 'ION_CANNON_TARGETING' | 'FORWARD_BASE_TARGETING' | 'MASS_RETREAT_TARGETING' | 'TERRAIN_EDIT';
+export type InteractionMode = 'NORMAL' | 'WALL_PLACEMENT' | 'ABILITY_SUMMON' | 'ABILITY_TELEPORT' | 'ABILITY_FREEZE' | 'ABILITY_HEAL' | 'ABILITY_RESTORE_ENERGY' | 'ABILITY_IMMORTALITY_SHIELD' | 'ABILITY_DISPEL' | 'ABILITY_MIND_CONTROL' | 'ION_CANNON_TARGETING' | 'FORWARD_BASE_TARGETING' | 'MASS_RETREAT_TARGETING' | 'TERRAIN_EDIT';
 
 export interface InteractionState {
   mode: InteractionMode;

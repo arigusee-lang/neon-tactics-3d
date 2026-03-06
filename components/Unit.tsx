@@ -750,7 +750,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
             case EUnitType.PORTAL: return <PortalModel color={playerColor} isDying={isDying} />;
             case EUnitType.ARC_PORTAL: return <ArcPortalModelV2 color={playerColor} isDying={isDying} />;
             case EUnitType.WALL: return <WallModel color={playerColor} isDying={isDying} />;
-            case EUnitType.TOWER: return <TowerModel color={playerColor} isDying={isDying} />;
+            case EUnitType.TOWER: return <TowerModel color={playerColor} isDying={isDying} upgradeCount={data.status.fluxTowerAttackUpgradesPurchased ?? 0} />;
             case EUnitType.TITAN: return <TitanModel color={playerColor} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;
             case EUnitType.SUICIDE_DRONE: return <SuicideDroneModel color={playerColor} isDying={isDying} isExploding={isExploding} />;
             case EUnitType.CONE: return <ApexBladeModel color={playerColor} isMoving={isMoving} isDying={isDying} isAttacking={!!data.status.attackTargetId} />;

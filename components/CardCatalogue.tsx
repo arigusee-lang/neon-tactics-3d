@@ -15,6 +15,7 @@ const UNIT_ABILITIES = [
     { id: 'ABIL_PHASE', name: 'Phase Shift', type: 'ACTIVE', cost: 25, description: 'Instantly teleport to any revealed coordinate on the map.', color: '#22d3ee', icon: 'T' },
     { id: 'ABIL_CRYO', name: 'Cryo Shot', type: 'ACTIVE', cost: 50, description: 'Freezes target unit for 2 turns, preventing movement and action.', color: '#67e8f9', icon: '❄️' },
     { id: 'ABIL_REPAIR', name: 'Nano-Repair', type: 'ACTIVE', cost: 25, description: 'Restores 50 HP to a friendly biological or mechanical unit.', color: '#10b981', icon: '+' },
+    { id: 'ABIL_DISPEL', name: 'System Purge', type: 'ACTIVE', cost: 25, description: 'Removes all negative effects from a friendly creature or machine within 2 tiles.', color: '#38bdf8', icon: 'P' },
     { id: 'ABIL_SUMMON', name: 'Swarm Link', type: 'ACTIVE', cost: 50, description: 'Deploys 2 temporary Scout Drones to adjacent tiles.', color: '#3b82f6', icon: 'S' },
     { id: 'ABIL_SUICIDE', name: 'Overload', type: 'ACTIVE', cost: 0, description: 'Overloads reactor core to deal massive area damage (50 DMG). Destroys unit.', color: '#ef4444', icon: '!' },
     { id: 'ABIL_DETONATE', name: 'Detonate', type: 'ACTIVE', cost: 0, description: 'Triggers explosive payload dealing 80 area damage. Consumes unit.', color: '#f97316', icon: 'X' },
@@ -80,6 +81,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
             case UnitType.SPIKE: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L15 22L12 18L9 22L12 2Z" /></svg>;
             case UnitType.REPAIR_BOT: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="10" width="16" height="8" rx="2" /><circle cx="8" cy="18" r="3" /><circle cx="16" cy="18" r="3" /><path d="M12 10V6 M8 6h8" /></svg>;
 
+            case UnitType.IMMORTALITY_SHIELD: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L19 5V11C19 16 15.5 20 12 22C8.5 20 5 16 5 11V5L12 2Z" /><path d="M12 7V15 M8 11H16" /></svg>;
             case UnitType.SYSTEM_FREEZE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeDasharray="2 2" /><path d="M12 4V20 M4 12H20" /></svg>;
             case UnitType.FORWARD_BASE: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="4" width="16" height="16" rx="1" /><path d="M8 8H16V16H8Z" strokeDasharray="2 2" /><path d="M12 2V7 M12 17V22 M2 12H7 M17 12H22" /></svg>;
             case UnitType.TACTICAL_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M10 6L4 12L10 18" /><path d="M5 12H15" /><rect x="15" y="7" width="5" height="10" rx="1" /><path d="M17.5 4V7 M17.5 17V20" strokeDasharray="2 2" /></svg>;
@@ -206,6 +208,11 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
     const selectedAbility = selectedId && UNIT_ABILITIES.find(a => a.id === selectedId);
     const selectedTalent = selectedId && TALENT_POOL.find(t => t.id === selectedId);
     const selectedCollectible = selectedId && COLLECTIBLES.find(c => c.id === selectedId);
+    const selectedConfigDescription = selectedConfig && selectedId === UnitType.HACKER
+        ? 'Tech specialist. Can disrupt hostile systems and purge allied status locks. Abilities: Mind Control, System Purge.'
+        : selectedConfig && selectedId === UnitType.HEAVY_TANK
+            ? 'Heavy vehicle. Massive armor and firepower. Passive: Double Strike. Slow. 2x2.'
+            : selectedConfig?.description;
 
     return (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
@@ -336,7 +343,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                                 </div>
 
                                 <p className="text-xs text-gray-400 leading-relaxed mb-6 border-l-2 border-gray-700 pl-3">
-                                    {selectedConfig.description}
+                                    {selectedConfigDescription}
                                 </p>
 
                                 {/* Attributes Grid (Only for Units) */}

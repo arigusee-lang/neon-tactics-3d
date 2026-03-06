@@ -4,13 +4,15 @@ import { useFrame } from '@react-three/fiber';
 import { Group, MeshStandardMaterial, Vector3 } from 'three';
 import * as THREE from 'three';
 import { Edges } from '@react-three/drei';
+import { FLUX_TOWER_MAX_VISUAL_UPGRADES } from '../constants';
 
 interface TowerModelProps {
     color: string;
     isDying?: boolean;
+    upgradeCount?: number;
 }
 
-const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
+const TowerModel: React.FC<TowerModelProps> = ({ color, isDying, upgradeCount = 0 }) => {
     const groupRef = useRef<Group>(null);
 
     // Animation Refs
@@ -20,6 +22,13 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
 
     const matRefs = useRef<MeshStandardMaterial[]>([]);
     const [deathStartTime, setDeathStartTime] = useState<number | null>(null);
+    const visualUpgradeTier = Math.min(FLUX_TOWER_MAX_VISUAL_UPGRADES, upgradeCount);
+    const energizedColor = useMemo(() => {
+        const next = new THREE.Color(color);
+        next.offsetHSL(0, Math.min(0.18, visualUpgradeTier * 0.025), Math.min(0.16, visualUpgradeTier * 0.03));
+        return `#${next.getHexString()}`;
+    }, [color, visualUpgradeTier]);
+    const glowMultiplier = 1 + (visualUpgradeTier * 0.16);
 
     const addMatRef = (mat: MeshStandardMaterial) => {
         if (mat && !matRefs.current.includes(mat)) matRefs.current.push(mat);
@@ -56,7 +65,7 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
 
             // Pulse Core
             if (coreRef.current) {
-                const pulse = 2 + Math.sin(time * 5) * 1;
+                const pulse = (2 + Math.sin(time * 5) * 1) * glowMultiplier;
                 (coreRef.current.material as MeshStandardMaterial).emissiveIntensity = pulse;
             }
         }
@@ -73,7 +82,7 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                 <mesh position={[0, 0.15, 0]}>
                     <cylinderGeometry args={[0.3, 0.35, 0.1, 8]} />
                     <meshStandardMaterial ref={addMatRef} color="#111" />
-                    <Edges color={color} threshold={15} scale={1} />
+                    <Edges color={energizedColor} threshold={15} scale={1} />
                 </mesh>
             </group>
 
@@ -84,9 +93,9 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                     <cylinderGeometry args={[0.08, 0.08, 2.0, 8]} />
                     <meshStandardMaterial
                         ref={addMatRef}
-                        color={color}
-                        emissive={color}
-                        emissiveIntensity={2}
+                        color={energizedColor}
+                        emissive={energizedColor}
+                        emissiveIntensity={2 * glowMultiplier}
                         transparent
                         opacity={0.8}
                         roughness={0}
@@ -134,7 +143,7 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                             <meshStandardMaterial ref={addMatRef} color="#444" metalness={0.8} />
                             <mesh position={[0, 0, 0.06]}>
                                 <planeGeometry args={[0.3, 0.02]} />
-                                <meshBasicMaterial color={color} side={THREE.DoubleSide} />
+                                <meshBasicMaterial color={energizedColor} side={THREE.DoubleSide} />
                             </mesh>
                         </mesh>
                     ))}
@@ -143,7 +152,7 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                 {/* Middle Spinner */}
                 <mesh rotation={[Math.PI / 2, 0, 0]}>
                     <torusGeometry args={[0.3, 0.02, 4, 24]} />
-                    <meshStandardMaterial ref={addMatRef} color={color} emissive={color} emissiveIntensity={1} />
+                    <meshStandardMaterial ref={addMatRef} color={energizedColor} emissive={energizedColor} emissiveIntensity={1 * glowMultiplier} />
                 </mesh>
             </group>
 
@@ -153,16 +162,16 @@ const TowerModel: React.FC<TowerModelProps> = ({ color, isDying }) => {
                     <octahedronGeometry args={[0.2]} />
                     <meshStandardMaterial
                         ref={addMatRef}
-                        color={color}
-                        emissive={color}
-                        emissiveIntensity={3}
+                        color={energizedColor}
+                        emissive={energizedColor}
+                        emissiveIntensity={3 * glowMultiplier}
                         toneMapped={false}
                     />
                 </mesh>
                 {/* Focusing Lenses */}
                 <mesh rotation={[Math.PI / 2, 0, 0]}>
                     <ringGeometry args={[0.25, 0.3, 6]} />
-                    <meshBasicMaterial color={color} transparent opacity={0.6} side={THREE.DoubleSide} />
+                    <meshBasicMaterial color={energizedColor} transparent opacity={0.6} side={THREE.DoubleSide} />
                 </mesh>
                 <mesh rotation={[Math.PI / 2, 0, 0]} position={[0, 0.1, 0]}>
                     <ringGeometry args={[0.15, 0.2, 6]} />
