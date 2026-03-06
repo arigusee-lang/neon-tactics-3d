@@ -57,7 +57,8 @@ export const MACHINE_TYPES = [
 
 export const NEGATIVE_UNIT_EFFECT_NAMES = [
   'CRYO STASIS',
-  'SYSTEM FREEZE'
+  'SYSTEM FREEZE',
+  'MOBILITY SABOTAGE'
 ] as const;
 
 export const getUnitClassificationLabel = (unitType: UnitType): 'BUILDING' | 'MACHINE' | 'CREATURE' => {
@@ -304,6 +305,24 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     name: 'Ion Cannon',
     description: 'Orbital Strike: Deals 50 damage to all units in a 3x3 area.',
     cost: 300
+  },
+  [UnitType.MOBILITY_SABOTAGE]: {
+    category: CardCategory.ACTION,
+    name: 'Mobility Sabotage',
+    description: 'Reduce all hostile battlefield units by 2 Mobility for 3 turns.',
+    cost: 150
+  },
+  [UnitType.MOBILITY_SURGE]: {
+    category: CardCategory.ACTION,
+    name: 'Mobility Surge',
+    description: 'Give all of your mobile battlefield units +3 Mobility until end of turn.',
+    cost: 150
+  },
+  [UnitType.SILENCE]: {
+    category: CardCategory.ACTION,
+    name: 'Silence',
+    description: 'Opponents cannot summon units or use action cards during their next turn.',
+    cost: 150
   },
   [UnitType.FORWARD_BASE]: {
     category: CardCategory.ACTION,

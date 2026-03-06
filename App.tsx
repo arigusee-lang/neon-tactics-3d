@@ -53,9 +53,25 @@ const formatTimerValue = (totalSeconds: number) => {
 
 // Simple Effect Icon Component
 const EffectIcon: React.FC<{ effect: Effect, alignRight?: boolean }> = ({ effect, alignRight }) => {
+    const renderIcon = () => {
+        if (effect.name === 'SILENCE') {
+            return (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4 text-violet-300">
+                    <path d="M5 10V14" strokeLinecap="round" />
+                    <path d="M9 8V16" strokeLinecap="round" />
+                    <path d="M13 6V18" strokeLinecap="round" />
+                    <path d="M17 8V16" strokeLinecap="round" />
+                    <path d="M4 4L20 20" strokeLinecap="round" />
+                </svg>
+            );
+        }
+
+        return <span className="select-none">{effect.icon}</span>;
+    };
+
     return (
         <div className={`group relative flex items-center justify-center w-6 h-6 rounded bg-black/50 border border-gray-500/50 text-xs cursor-help`}>
-            <span className="select-none">{effect.icon}</span>
+            {renderIcon()}
 
             {/* Tooltip */}
             <div className={`absolute top-full mt-2 ${alignRight ? 'right-0' : 'left-0'} w-48 bg-black/95 border border-gray-600 rounded p-2 z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none`}>

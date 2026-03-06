@@ -35,6 +35,53 @@ const StatSquare: React.FC<{ label: string; value: string | number; highlight?: 
     </div>
 );
 
+const EffectBadgeIcon: React.FC<{ effect: Effect }> = ({ effect }) => {
+    switch (effect.name) {
+        case 'MOBILITY BOOST':
+            return (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4 text-emerald-300">
+                    <path d="M12 20V12" strokeLinecap="round" />
+                    <path d="M9 15L12 12L15 15" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M5 6H19" strokeLinecap="round" />
+                    <path d="M7 3H17" strokeLinecap="round" />
+                </svg>
+            );
+        case 'MOBILITY SABOTAGE':
+            return (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4 text-amber-300">
+                    <path d="M12 4V12" strokeLinecap="round" />
+                    <path d="M9 9L12 12L15 9" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M5 18H19" strokeLinecap="round" />
+                    <path d="M7 21H17" strokeLinecap="round" />
+                </svg>
+            );
+        case 'SYSTEM FREEZE':
+        case 'CRYO STASIS':
+            return (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" className="w-4 h-4 text-cyan-300">
+                    <path d="M12 3V21" strokeLinecap="round" />
+                    <path d="M5.5 7L18.5 17" strokeLinecap="round" />
+                    <path d="M18.5 7L5.5 17" strokeLinecap="round" />
+                    <path d="M4 12H20" strokeLinecap="round" />
+                </svg>
+            );
+        case 'IMMORTALITY_SHIELD':
+            return (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4 text-emerald-300">
+                    <path d="M12 3L18 5.5V10.5C18 15 15.3 18.5 12 20.5C8.7 18.5 6 15 6 10.5V5.5L12 3Z" strokeLinejoin="round" />
+                    <path d="M12 7V14" strokeLinecap="round" />
+                    <path d="M9 10.5H15" strokeLinecap="round" />
+                </svg>
+            );
+        default:
+            return (
+                <span className="select-none text-[9px] font-mono font-bold leading-none tracking-tight text-white">
+                    {effect.icon?.trim() || effect.name.slice(0, 2).toUpperCase()}
+                </span>
+            );
+    }
+};
+
 interface AbilityButtonProps {
     label: string;
     icon: React.ReactNode;
@@ -228,6 +275,9 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
     const hpPercent = (unit.stats.hp / unit.stats.maxHp) * 100;
     const hasEnergy = unit.stats.maxEnergy > 0;
     const energyPercent = hasEnergy ? (unit.stats.energy / unit.stats.maxEnergy) * 100 : 0;
+    const hasMobilityBoost = unit.effects.some((effect) => effect.name === 'MOBILITY BOOST');
+    const hasMobilitySabotage = unit.effects.some((effect) => effect.name === 'MOBILITY SABOTAGE');
+    const effectiveMovement = Math.max(0, unit.stats.movement + (hasMobilityBoost ? 3 : 0) - (hasMobilitySabotage ? 2 : 0));
     const actionsLocked = !canUseActions;
     const isCurrentTurnUnit = unit.playerId === currentTurnPlayerId;
     const fluxTowerPurchasedUpgrades = unit.status.fluxTowerAttackUpgradesPurchased ?? 0;
@@ -415,8 +465,8 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                 label="MOVES"
                                 value={
                                     <span>
-                                        <span className="text-white">{Math.max(0, unit.stats.movement - unit.status.stepsTaken)}</span>
-                                        <span className="text-gray-600 text-[10px] align-top">/{unit.stats.movement}</span>
+                                        <span className="text-white">{Math.max(0, effectiveMovement - unit.status.stepsTaken)}</span>
+                                        <span className="text-gray-600 text-[10px] align-top">/{effectiveMovement}</span>
                                     </span> as any
                                 }
                             />
@@ -429,7 +479,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                 {unit.effects.map(effect => (
                                     <div
                                         key={effect.id}
-                                        className="group relative flex items-center justify-center w-7 h-7 rounded bg-black/60 border border-green-900/50 text-sm cursor-help hover:bg-green-900/20 hover:border-green-500/50 transition-colors"
+                                        className="group relative flex items-center justify-center min-w-7 h-7 px-1 rounded bg-black/60 border border-green-900/50 text-sm cursor-help hover:bg-green-900/20 hover:border-green-500/50 transition-colors"
                                         onMouseEnter={(e) => handleShowTooltip(e, (
                                             <div className="w-48">
                                                 <div className="text-[10px] font-bold text-white uppercase mb-1">{effect.name}</div>
@@ -442,7 +492,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                         ), 'top')}
                                         onMouseLeave={handleHideTooltip}
                                     >
-                                        <span className="select-none">{effect.icon}</span>
+                                        <EffectBadgeIcon effect={effect} />
                                     </div>
                                 ))}
                             </div>

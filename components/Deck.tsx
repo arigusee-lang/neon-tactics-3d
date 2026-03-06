@@ -53,6 +53,9 @@ const Deck: React.FC<DeckProps> = ({ cards, selectedId, onSelect, playerColor, d
             case UnitType.REPAIR_BOT: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="10" width="16" height="8" rx="2" /><circle cx="8" cy="18" r="3" /><circle cx="16" cy="18" r="3" /><path d="M12 10V6 M8 6h8" /></svg>;
             case UnitType.IMMORTALITY_SHIELD: return <svg viewBox="0 0 24 24" {...p}><path d="M12 2L19 5V11C19 16 15.5 20 12 22C8.5 20 5 16 5 11V5L12 2Z" /><path d="M12 7V15 M8 11H16" /></svg>;
             case UnitType.SYSTEM_FREEZE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeDasharray="2 2" /><path d="M12 4V20 M4 12H20" /></svg>;
+            case UnitType.MOBILITY_SABOTAGE: return <svg viewBox="0 0 24 24" {...p}><path d="M5 6H19" /><path d="M8 12H16" /><path d="M10 18H14" /><path d="M7 4L5 6L7 8" /><path d="M17 16L19 18L17 20" /></svg>;
+            case UnitType.MOBILITY_SURGE: return <svg viewBox="0 0 24 24" {...p}><path d="M5 18H19" /><path d="M8 12H16" /><path d="M10 6H14" /><path d="M7 20L5 18L7 16" /><path d="M17 8L19 6L17 4" /></svg>;
+            case UnitType.SILENCE: return <svg viewBox="0 0 24 24" {...p}><path d="M5 10V14" /><path d="M9 8V16" /><path d="M13 6V18" /><path d="M17 8V16" /><path d="M4 4L20 20" /></svg>;
             case UnitType.FORWARD_BASE: return <svg viewBox="0 0 24 24" {...p}><rect x="5" y="5" width="14" height="14" rx="1" /><path d="M12 8V16 M8 12H16" /><path d="M5 2V5H2M22 5H19V2M5 22V19H2M22 19H19V22" /></svg>;
             case UnitType.TACTICAL_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M9 7L4 12L9 17" /><path d="M4 12H14a6 6 0 1 0 0 12" /></svg>;
             case UnitType.MASS_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M10 6L5 12L10 18" /><path d="M16 6L11 12L16 18" /><path d="M5 12H20" /></svg>;

@@ -129,6 +129,12 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain, mapBou
         setTooltip(null);
     };
 
+    const getEffectiveMovement = (unit: typeof tooltip.unit): number => {
+        const hasMobilityBoost = unit.effects.some((effect) => effect.name === 'MOBILITY BOOST');
+        const hasMobilitySabotage = unit.effects.some((effect) => effect.name === 'MOBILITY SABOTAGE');
+        return Math.max(0, unit.stats.movement + (hasMobilityBoost ? 3 : 0) - (hasMobilitySabotage ? 2 : 0));
+    };
+
     return (
         <div 
             className={`rounded-xl border border-green-500/60 shadow-[0_0_20px_rgba(0,255,0,0.1)] overflow-hidden transition-all duration-300 flex flex-col bg-black/40 ${isMinimized ? 'h-10 flex-none' : 'h-64 flex-none'}`}
@@ -205,7 +211,7 @@ const Minimap: React.FC<MinimapProps> = ({ units, revealedTiles, terrain, mapBou
                     </div>
                     <div className="flex gap-2 text-gray-400">
                          <span>HP: <span className="text-white">{tooltip.unit.stats.hp}</span></span>
-                         {tooltip.unit.stats.movement > 0 && <span>MOV: <span className="text-white">{tooltip.unit.stats.movement - tooltip.unit.status.stepsTaken}</span></span>}
+                         {tooltip.unit.stats.movement > 0 && <span>MOV: <span className="text-white">{Math.max(0, getEffectiveMovement(tooltip.unit) - tooltip.unit.status.stepsTaken)}</span></span>}
                     </div>
                 </div>,
                 document.body

@@ -511,6 +511,8 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
     const isExploding = data.status.isExploding || false;
 
     const isFrozen = data.effects.some(e => e.name === 'CRYO STASIS' || e.name === 'SYSTEM FREEZE');
+    const hasMobilityBoost = data.effects.some(e => e.name === 'MOBILITY BOOST');
+    const hasMobilitySabotage = data.effects.some(e => e.name === 'MOBILITY SABOTAGE');
     const hasShield = data.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
     const hasEnergy = data.stats.maxEnergy > 0;
     const isIndestructible = data.type === EUnitType.PORTAL;
@@ -957,6 +959,8 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
                         )}
 
                         {isFrozen && <div className="text-[8px] text-cyan-300 font-bold animate-pulse mt-0.5">SYSTEM FROZEN</div>}
+                        {hasMobilityBoost && <div className="text-[8px] text-emerald-300 font-bold animate-pulse mt-0.5">MOBILITY +3</div>}
+                        {hasMobilitySabotage && <div className="text-[8px] text-rose-300 font-bold animate-pulse mt-0.5">MOBILITY -2</div>}
                         {hasShield && <div className="text-[8px] text-yellow-300 font-bold animate-pulse mt-0.5 px-1 border border-yellow-500 rounded bg-yellow-900/50">SHIELD ACTIVE</div>}
                         {isIndestructible && <div className="text-[8px] text-yellow-300 font-black tracking-widest mt-0.5 drop-shadow-[0_0_5px_yellow]">STABLE</div>}
 

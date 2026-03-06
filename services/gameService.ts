@@ -1261,6 +1261,28 @@ class GameService {
         return false;
     }
 
+    private hasPlayerEffect(playerId: PlayerId, effectName: string): boolean {
+        return this.state.playerEffects[playerId].some((effect) => effect.name === effectName);
+    }
+
+    private isPlayerSilenced(playerId: PlayerId): boolean {
+        return this.hasPlayerEffect(playerId, 'SILENCE');
+    }
+
+    private checkCardPlayRestricted(playerId: PlayerId): boolean {
+        if (this.isPlayerSilenced(playerId)) {
+            this.log(`> SILENCE ACTIVE: CARD SYSTEMS OFFLINE`, playerId);
+            return true;
+        }
+
+        return false;
+    }
+
+    private getTurnStartSelectedCardId(playerId: PlayerId): string | null {
+        if (this.isPlayerSilenced(playerId)) return null;
+        return this.state.decks[playerId]?.[0]?.id || null;
+    }
+
     private checkUnitFrozen(unit: Unit): boolean {
         return unit.effects.some(e => e.name === 'CRYO STASIS' || e.name === 'SYSTEM FREEZE');
     }
@@ -1271,6 +1293,106 @@ class GameService {
 
     private hasNegativeEffects(unit: Unit): boolean {
         return this.getNegativeEffects(unit).length > 0;
+    }
+
+    private hasMobilitySabotage(unit: Unit): boolean {
+        return unit.effects.some((effect) => effect.name === 'MOBILITY SABOTAGE');
+    }
+
+    private hasMobilityBoost(unit: Unit): boolean {
+        return unit.effects.some((effect) => effect.name === 'MOBILITY BOOST');
+    }
+
+    private getEffectiveMovement(unit: Unit): number {
+        const mobilityBonus = this.hasMobilityBoost(unit) ? 3 : 0;
+        const mobilityPenalty = this.hasMobilitySabotage(unit) ? 2 : 0;
+        return Math.max(0, unit.stats.movement + mobilityBonus - mobilityPenalty);
+    }
+
+    private createMobilitySabotageEffect(unitId: string, existingEffectId?: string): Effect {
+        return {
+            id: existingEffectId ?? `ue-${unitId}-${Date.now()}-${Math.random()}`,
+            name: 'MOBILITY SABOTAGE',
+            description: '-2 Mobility for 3 turns.',
+            icon: 'mobility_sabotage',
+            duration: 3,
+            maxDuration: 3
+        };
+    }
+
+    private createMobilityBoostEffect(unitId: string, existingEffectId?: string): Effect {
+        return {
+            id: existingEffectId ?? `ue-${unitId}-${Date.now()}-${Math.random()}`,
+            name: 'MOBILITY BOOST',
+            description: '+3 Mobility until end of turn.',
+            icon: 'mobility_boost',
+            duration: 1,
+            maxDuration: 1
+        };
+    }
+
+    private createSilenceEffect(existingEffectId?: string): Effect {
+        return {
+            id: existingEffectId ?? `pe-silence-${Date.now()}-${Math.random()}`,
+            name: 'SILENCE',
+            description: 'Cannot summon units or use action cards this turn.',
+            icon: 'silence',
+            duration: 1,
+            maxDuration: 1
+        };
+    }
+
+    private applyMobilitySabotageEffect(unitId: string) {
+        const unitIndex = this.state.units.findIndex((unit) => unit.id === unitId);
+        if (unitIndex === -1) return;
+
+        const unit = this.state.units[unitIndex];
+        const existingEffect = unit.effects.find((effect) => effect.name === 'MOBILITY SABOTAGE');
+        const refreshedEffect = this.createMobilitySabotageEffect(unitId, existingEffect?.id);
+        const updatedUnit: Unit = {
+            ...unit,
+            effects: existingEffect
+                ? unit.effects.map((effect) => effect.name === 'MOBILITY SABOTAGE' ? refreshedEffect : effect)
+                : [...unit.effects, refreshedEffect]
+        };
+
+        const newUnits = [...this.state.units];
+        newUnits[unitIndex] = updatedUnit;
+        this.state.units = newUnits;
+
+        this.log(`> EFFECT APPLIED TO UNIT: ${refreshedEffect.name}`);
+    }
+
+    private applyMobilityBoostEffect(unitId: string) {
+        const unitIndex = this.state.units.findIndex((unit) => unit.id === unitId);
+        if (unitIndex === -1) return;
+
+        const unit = this.state.units[unitIndex];
+        const existingEffect = unit.effects.find((effect) => effect.name === 'MOBILITY BOOST');
+        const refreshedEffect = this.createMobilityBoostEffect(unitId, existingEffect?.id);
+        const updatedUnit: Unit = {
+            ...unit,
+            effects: existingEffect
+                ? unit.effects.map((effect) => effect.name === 'MOBILITY BOOST' ? refreshedEffect : effect)
+                : [...unit.effects, refreshedEffect]
+        };
+
+        const newUnits = [...this.state.units];
+        newUnits[unitIndex] = updatedUnit;
+        this.state.units = newUnits;
+
+        this.log(`> EFFECT APPLIED TO UNIT: ${refreshedEffect.name}`);
+    }
+
+    private applySilenceEffect(playerId: PlayerId) {
+        const existingEffect = this.state.playerEffects[playerId].find((effect) => effect.name === 'SILENCE');
+        const refreshedEffect = this.createSilenceEffect(existingEffect?.id);
+
+        this.state.playerEffects[playerId] = existingEffect
+            ? this.state.playerEffects[playerId].map((effect) => effect.name === 'SILENCE' ? refreshedEffect : effect)
+            : [...this.state.playerEffects[playerId], refreshedEffect];
+
+        this.log(`> EFFECT APPLIED TO [${this.getPlayerShortLabel(playerId)}]: ${refreshedEffect.name}`);
     }
 
     private createImmortalityShieldEffect(unitId: string): Effect {
@@ -2654,6 +2776,7 @@ class GameService {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
 
         if (this.checkPlayerRestricted(this.state.currentTurn)) return;
+        if (this.checkCardPlayRestricted(this.state.currentTurn)) return;
 
         const currentDeck = this.state.decks[this.state.currentTurn];
         const card = currentDeck.find(c => c.id === cardId);
@@ -2703,12 +2826,12 @@ class GameService {
                 if (unit.playerId === this.state.currentTurn) {
                     if (this.checkUnitFrozen(unit)) {
                         this.log(`> UNIT SELECTED (FROZEN)`, unit.playerId);
-                    } else if (unit.stats.movement > 0 && unit.status.stepsTaken >= unit.stats.movement) {
+                    } else if (this.getEffectiveMovement(unit) > 0 && unit.status.stepsTaken >= this.getEffectiveMovement(unit)) {
                         this.log(`> UNIT SELECTED (NO MOVEMENT LEFT)`, unit.playerId);
-                    } else if (unit.stats.movement === 0) {
+                    } else if (this.getEffectiveMovement(unit) === 0) {
                         this.log(`> STRUCTURE ACCESSED`, unit.playerId);
                     } else {
-                        const remaining = unit.stats.movement - unit.status.stepsTaken;
+                        const remaining = this.getEffectiveMovement(unit) - unit.status.stepsTaken;
                         this.log(`> UNIT READY (MOVES: ${remaining})`, unit.playerId);
                     }
                 } else if (unit.playerId === PlayerId.NEUTRAL) {
@@ -3513,6 +3636,7 @@ class GameService {
         const { playerId, position, cardId } = payload;
 
         if (!isRemote && this.checkPlayerRestricted(playerId)) return;
+        if (this.checkCardPlayRestricted(playerId)) return;
 
         // In multiplayer, local client only sends command and waits for authoritative broadcast.
         if (!isRemote && this.state.isMultiplayer) {
@@ -3617,6 +3741,21 @@ class GameService {
 
                 this.checkWinCondition(); // Check after card consumption
                 this.notify();
+                return;
+            }
+
+            if (card.type === UnitType.MOBILITY_SABOTAGE) {
+                this.applyMobilitySabotage(playerId);
+                return;
+            }
+
+            if (card.type === UnitType.MOBILITY_SURGE) {
+                this.applyMobilitySurge(playerId);
+                return;
+            }
+
+            if (card.type === UnitType.SILENCE) {
+                this.applySilence(playerId);
                 return;
             }
 
@@ -4138,6 +4277,50 @@ class GameService {
         this.consumeActionCard(playerId, UnitType.LOGISTICS_DELAY, this.state.selectedCardId);
         this.log(`> LOGISTICS DELAY: ${delayedCount} IN-TRANSIT ORDERS PUSHED BACK BY 3 TURNS`, playerId);
         this.checkWinCondition();
+        this.notify();
+    }
+
+    private applyMobilitySabotage(playerId: PlayerId) {
+        const hostileUnits = this.state.units.filter((unit) =>
+            this.arePlayersHostile(playerId, unit.playerId) &&
+            unit.stats.movement > 0 &&
+            !unit.status.isDying
+        );
+
+        hostileUnits.forEach((unit) => {
+            this.applyMobilitySabotageEffect(unit.id);
+        });
+
+        this.consumeActionCard(playerId, UnitType.MOBILITY_SABOTAGE, this.state.selectedCardId);
+        this.log(`> MOBILITY SABOTAGE DEPLOYED: ${hostileUnits.length} HOSTILE UNITS HAMPERED`, playerId);
+        this.notify();
+    }
+
+    private applyMobilitySurge(playerId: PlayerId) {
+        const friendlyUnits = this.state.units.filter((unit) =>
+            unit.playerId === playerId &&
+            unit.stats.movement > 0 &&
+            !unit.status.isDying
+        );
+
+        friendlyUnits.forEach((unit) => {
+            this.applyMobilityBoostEffect(unit.id);
+        });
+
+        this.consumeActionCard(playerId, UnitType.MOBILITY_SURGE, this.state.selectedCardId);
+        this.log(`> MOBILITY SURGE DEPLOYED: ${friendlyUnits.length} FRIENDLY UNITS OVERCLOCKED`, playerId);
+        this.notify();
+    }
+
+    private applySilence(playerId: PlayerId) {
+        const hostilePlayers = this.getHostilePlayers(playerId);
+
+        hostilePlayers.forEach((targetPlayerId) => {
+            this.applySilenceEffect(targetPlayerId);
+        });
+
+        this.consumeActionCard(playerId, UnitType.SILENCE, this.state.selectedCardId);
+        this.log(`> SILENCE DEPLOYED: ${hostilePlayers.length} HOSTILE COMMAND NETS JAMMED`, playerId);
         this.notify();
     }
 
@@ -5374,7 +5557,7 @@ class GameService {
             return false;
         }
 
-        const remainingSteps = unit.stats.movement - unit.status.stepsTaken;
+        const remainingSteps = this.getEffectiveMovement(unit) - unit.status.stepsTaken;
         if (remainingSteps <= 0 || path.length > remainingSteps) {
             return false;
         }
@@ -5578,13 +5761,13 @@ class GameService {
             return;
         }
         const unit = units.find(u => u.id === selectedUnitId);
-        if (!unit || unit.playerId !== currentTurn || unit.stats.movement === 0) {
+        if (!unit || unit.playerId !== currentTurn || this.getEffectiveMovement(unit) === 0) {
             this.lastPreviewSignature = null;
             this.lastPreviewPathKey = '';
             this.lastPreviewBlocked = false;
             return;
         }
-        if (unit.status.stepsTaken >= unit.stats.movement) {
+        if (unit.status.stepsTaken >= this.getEffectiveMovement(unit)) {
             this.lastPreviewSignature = null;
             this.lastPreviewPathKey = '';
             this.lastPreviewBlocked = false;
@@ -5638,7 +5821,7 @@ class GameService {
             return;
         }
 
-        const remainingSteps = unit.stats.movement - unit.status.stepsTaken;
+        const remainingSteps = this.getEffectiveMovement(unit) - unit.status.stepsTaken;
         const path = findPath(
             unit.position,
             { x: targetX, z: targetZ },
@@ -5690,8 +5873,9 @@ class GameService {
         }
 
         const unit = units[unitIndex];
-        if (unit.status.stepsTaken >= unit.stats.movement) {
-            this.pushDebugTrace('confirmMove.reject', 'REJECT', `movement exhausted ${unit.status.stepsTaken}/${unit.stats.movement}`, { unitId: selectedUnitId, notify: true });
+        const effectiveMovement = this.getEffectiveMovement(unit);
+        if (unit.status.stepsTaken >= effectiveMovement) {
+            this.pushDebugTrace('confirmMove.reject', 'REJECT', `movement exhausted ${unit.status.stepsTaken}/${effectiveMovement}`, { unitId: selectedUnitId, notify: true });
             return;
         }
 
@@ -5744,7 +5928,7 @@ class GameService {
             tile: previewPath[previewPath.length - 1]
         });
         this.state = { ...this.state, units: newUnits, previewPath: [] };
-        this.log(`> UNIT MOVED (${stepsToAdd} STEPS). REMAINING: ${unit.stats.movement - (unit.status.stepsTaken + stepsToAdd)}`, currentTurn);
+        this.log(`> UNIT MOVED (${stepsToAdd} STEPS). REMAINING: ${effectiveMovement - (unit.status.stepsTaken + stepsToAdd)}`, currentTurn);
         this.notify();
     }
 
@@ -6000,11 +6184,14 @@ class GameService {
         this.state.appStatus = AppStatus.PLAYING;
         this.state.currentTurn = resumePlayer;
         this.resetTurnTimer();
-        this.state.selectedCardId = this.state.decks[resumePlayer]?.[0]?.id || null;
+        this.state.selectedCardId = this.getTurnStartSelectedCardId(resumePlayer);
         this.state.selectedUnitId = null;
         this.state.previewPath = [];
         this.state.interactionState = { mode: 'NORMAL' };
         this.log(`> TURN ENDED. PLAYER ${resumePlayer} ACTIVE.`);
+        if (this.isPlayerSilenced(resumePlayer)) {
+            this.log(`> SILENCE ACTIVE: ${resumePlayer} CANNOT DEPLOY OR CAST THIS TURN`, resumePlayer);
+        }
 
         if (this.state.isMultiplayer && this.isSyncAuthority()) {
             this.replicateAuthoritativeState();
@@ -6020,7 +6207,7 @@ class GameService {
 
     private openTalentSelection(playerId: PlayerId, choices: Talent[]) {
         this.state.currentTurn = playerId;
-        this.state.selectedCardId = this.state.decks[playerId]?.[0]?.id || null;
+        this.state.selectedCardId = this.getTurnStartSelectedCardId(playerId);
         this.state.selectedUnitId = null;
         this.state.previewPath = [];
         this.state.interactionState = { mode: 'NORMAL' };
@@ -6130,13 +6317,16 @@ class GameService {
                     turnStartedAt: Date.now(),
                     turnOvertimeDamageApplied: 0,
                     roundNumber: nextRound,
-                    selectedCardId: this.state.decks[nextTurn][0]?.id || null,
+                    selectedCardId: this.getTurnStartSelectedCardId(nextTurn),
                     selectedUnitId: null,
                     interactionState: { mode: 'NORMAL' }
                 };
 
                 if (this.checkPlayerRestricted(nextTurn)) {
                     this.log(`> WARNING: PLAYER ${nextTurn} SYSTEMS COMPROMISED`);
+                }
+                if (this.isPlayerSilenced(nextTurn)) {
+                    this.log(`> SILENCE ACTIVE: ${nextTurn} CANNOT DEPLOY OR CAST THIS TURN`, nextTurn);
                 }
 
                 if (nextRound > 0 && nextRound % TALENT_SELECTION_LEVEL_STEP === 0) {
@@ -6191,12 +6381,15 @@ class GameService {
             currentTurn: playerId,
             turnStartedAt: Date.now(),
             turnOvertimeDamageApplied: 0,
-            selectedCardId: this.state.decks[playerId]?.[0]?.id || null,
+            selectedCardId: this.getTurnStartSelectedCardId(playerId),
             selectedUnitId: null,
             interactionState: { mode: 'NORMAL' }
         };
 
         this.log(`> [DEV] TURN OVERRIDE: ${playerId} ACTIVE`);
+        if (this.isPlayerSilenced(playerId)) {
+            this.log(`> SILENCE ACTIVE: ${playerId} CANNOT DEPLOY OR CAST THIS TURN`, playerId);
+        }
         this.notify();
     }
 
