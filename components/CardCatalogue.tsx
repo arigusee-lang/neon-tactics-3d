@@ -21,13 +21,14 @@ const UNIT_ABILITIES = [
     { id: 'ABIL_DETONATE', name: 'Detonate', type: 'ACTIVE', cost: 0, description: 'Triggers explosive payload dealing 80 area damage. Consumes unit.', color: '#f97316', icon: 'X' },
     { id: 'ABIL_SPLASH', name: 'Splash Rounds', type: 'PASSIVE', cost: 0, description: 'Projectiles explode on impact, dealing 25 damage to adjacent tiles.', color: '#facc15', icon: '💥' },
     { id: 'ABIL_DOUBLE', name: 'Double Strike', type: 'PASSIVE', cost: 0, description: 'Neural overclock allows unit to perform two attack actions per turn.', color: '#f472b6', icon: '⚔️' },
-    { id: 'ABIL_INDUCT', name: 'Inductive Field', type: 'PASSIVE', cost: 0, description: 'Wireless energy transfer restores 25 Energy to adjacent allies per turn.', color: '#22d3ee', icon: '⚡' }
+    { id: 'ABIL_INDUCT', name: 'Inductive Field', type: 'PASSIVE', cost: 0, description: 'Wireless energy transfer restores 25 Energy to adjacent allies per turn.', color: '#22d3ee', icon: '???' },
 ];
 
 const COLLECTIBLES = [
     { id: 'MONEY_PRIZE', name: 'Credit Cache', description: 'Grants $50 credits to the collecting player.', color: '#4ade80', icon: '$' },
     { id: 'HEALTH_PACK', name: 'Nanite Medkit', description: 'Restores 75 HP to the unit that picks it up.', color: '#ef4444', icon: '+' },
-    { id: 'ENERGY_CELL', name: 'Plasma Cell', description: 'Restores 50 Energy to the unit that picks it up.', color: '#a855f7', icon: '⚡' }
+    { id: 'ENERGY_CELL', name: 'Plasma Cell', description: 'Restores 50 Energy to the unit that picks it up.', color: '#a855f7', icon: '???' },
+    { id: 'PERK_CACHE', name: 'Perk Cache', description: 'Immediately opens a bonus talent draft for the collecting player.', color: '#38bdf8', icon: '*' }
 ];
 
 const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {

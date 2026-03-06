@@ -128,6 +128,36 @@ const EnergyCellModel: React.FC = () => {
     );
 }
 
+const PerkCacheModel: React.FC = () => {
+    const groupRef = useRef<any>(null);
+    useFrame((state) => {
+        if (groupRef.current) {
+            groupRef.current.rotation.y += 0.03;
+            groupRef.current.rotation.z = Math.sin(state.clock.elapsedTime * 1.4) * 0.12;
+            groupRef.current.position.y = Math.sin(state.clock.elapsedTime * 2.4) * 0.1;
+        }
+    });
+
+    const frameMaterial = <meshStandardMaterial color="#38bdf8" emissive="#7dd3fc" emissiveIntensity={0.7} roughness={0.18} metalness={0.85} />;
+
+    return (
+        <group ref={groupRef}>
+            <mesh rotation={[0, 0, Math.PI / 4]}>
+                <torusGeometry args={[0.24, 0.06, 10, 4]} />
+                {frameMaterial}
+            </mesh>
+            <mesh rotation={[Math.PI / 2, 0, Math.PI / 4]}>
+                <torusGeometry args={[0.24, 0.06, 10, 4]} />
+                {frameMaterial}
+            </mesh>
+            <mesh>
+                <octahedronGeometry args={[0.16, 0]} />
+                <meshStandardMaterial color="#ffffff" emissive="#bae6fd" emissiveIntensity={1} roughness={0.05} metalness={0.4} />
+            </mesh>
+        </group>
+    );
+}
+
 const TilePulseEffect: React.FC<{ position: [number, number, number]; kind: 'SABOTAGE' | 'ION_CANNON'; }> = ({ position, kind }) => {
     const ringRef = useRef<THREE.Mesh>(null);
     const beamRef = useRef<THREE.Mesh>(null);
@@ -889,6 +919,13 @@ const Board: React.FC<BoardProps> = ({
                     borderColor = "border-purple-500/50";
                     shadowColor = "rgba(168,85,247,0.5)";
                     label = `+${c.value} EN`;
+                } else if (c.type === 'PERK_CACHE') {
+                    Model = PerkCacheModel;
+                    color = "#38bdf8";
+                    textColor = "text-sky-300";
+                    borderColor = "border-sky-400/50";
+                    shadowColor = "rgba(56,189,248,0.55)";
+                    label = `+${c.value} PERK`;
                 }
 
                 return (

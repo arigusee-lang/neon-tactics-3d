@@ -29,6 +29,7 @@ const getUnitColor = (unit: Unit): string => {
 const getCollectibleColor = (collectible: Collectible): string => {
   if (collectible.type === 'HEALTH_PACK') return '#ef4444';
   if (collectible.type === 'ENERGY_CELL') return '#a855f7';
+  if (collectible.type === 'PERK_CACHE') return '#38bdf8';
   return '#facc15';
 };
 

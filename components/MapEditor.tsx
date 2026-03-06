@@ -125,6 +125,15 @@ const MapEditor: React.FC<MapEditorProps> = ({ activeTool }) => {
                     <path d="M13 2L3 14H12L11 22L21 10H12L13 2Z" fill="currentColor" stroke="none" />
                 </svg>
             )
+        },
+        {
+            id: 'PLACE_PERK',
+            label: 'Perk Draft',
+            icon: (
+                <svg viewBox="0 0 24 24" className={`${baseIconClass} text-sky-400`}>
+                    <path d="M12 3L14.6 8.4L20.5 9.1L16.2 13.2L17.3 19L12 16.1L6.7 19L7.8 13.2L3.5 9.1L9.4 8.4Z" fill="currentColor" stroke="none" />
+                </svg>
+            )
         }
     ];
 
@@ -178,7 +187,7 @@ const MapEditor: React.FC<MapEditorProps> = ({ activeTool }) => {
                         Export Map JSON
                     </button>
                     <div className="text-[9px] text-gray-500 mt-1 text-center font-mono">
-                        Saves map size, deletions, terrain, and units
+                        Saves map size, deletions, terrain, units, and field items
                     </div>
                 </div>
             </div>

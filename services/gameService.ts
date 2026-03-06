@@ -3012,6 +3012,24 @@ class GameService {
                 });
                 this.log(`> ENERGY CELL PLANTED (+50 EN)`);
             }
+        } else if (terrainTool === 'PLACE_PERK') {
+            const key = targetKeys[0];
+            if (!key) return;
+
+            const [targetX, targetZ] = key.split(',').map(Number);
+            const existingIdx = this.state.collectibles.findIndex(c => c.position.x === targetX && c.position.z === targetZ);
+            if (existingIdx > -1) {
+                this.state.collectibles.splice(existingIdx, 1);
+                this.log(`> COLLECTIBLE REMOVED`);
+            } else {
+                this.state.collectibles.push({
+                    id: `col-${Date.now()}-${Math.random()}`,
+                    type: 'PERK_CACHE',
+                    value: 1,
+                    position: { x: targetX, z: targetZ }
+                });
+                this.log(`> PERK CACHE PLANTED (+1 TALENT PICK)`);
+            }
         }
 
         this.state.terrain = { ...this.state.terrain };
@@ -5698,6 +5716,8 @@ class GameService {
         newUnits[unitIndex] = { ...unit, position: nextPos, movePath: remainingPath, rotation: rotation };
         this.state.units = newUnits;
 
+        let shouldTriggerBonusTalentPick = false;
+
         // Check for Collectibles
         const colIdx = this.state.collectibles.findIndex(c => c.position.x === nextPos.x && c.position.z === nextPos.z);
         if (colIdx > -1) {
@@ -5726,9 +5746,21 @@ class GameService {
                     this.state.units = newUnits;
                 }
             }
+            else if (collectible.type === 'PERK_CACHE') {
+                shouldTriggerBonusTalentPick = true;
+                this.log(`> PERK CACHE ACQUIRED: BONUS TALENT DRAFT ONLINE`, unit.playerId);
+                this.state.collectibles.splice(colIdx, 1);
+            }
         }
 
         this.updateFogOfWar();
+
+        if (shouldTriggerBonusTalentPick) {
+            this.state.pendingTalentResumePlayerId = unit.playerId;
+            this.triggerTalentSelection(unit.playerId);
+            return;
+        }
+
         this.notify();
         this.replicateAuthoritativeState();
     }

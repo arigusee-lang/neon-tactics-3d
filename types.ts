@@ -224,7 +224,7 @@ export interface LogEntry {
   playerId?: PlayerId;
 }
 
-export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'DELETE' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN' | 'SET_P3_SPAWN' | 'SET_P4_SPAWN' | 'PLACE_COLLECTIBLE' | 'PLACE_HEALTH' | 'PLACE_ENERGY';
+export type TerrainTool = 'RAMP' | 'ELEVATE' | 'LOWER' | 'DESTROY' | 'DELETE' | 'SET_P1_SPAWN' | 'SET_P2_SPAWN' | 'SET_P3_SPAWN' | 'SET_P4_SPAWN' | 'PLACE_COLLECTIBLE' | 'PLACE_HEALTH' | 'PLACE_ENERGY' | 'PLACE_PERK';
 
 export type InteractionMode = 'NORMAL' | 'WALL_PLACEMENT' | 'ABILITY_SUMMON' | 'ABILITY_TELEPORT' | 'ABILITY_FREEZE' | 'ABILITY_HEAL' | 'ABILITY_RESTORE_ENERGY' | 'ABILITY_IMMORTALITY_SHIELD' | 'ABILITY_DISPEL' | 'ABILITY_MIND_CONTROL' | 'ION_CANNON_TARGETING' | 'FORWARD_BASE_TARGETING' | 'MASS_RETREAT_TARGETING' | 'TERRAIN_EDIT';
 
@@ -284,7 +284,7 @@ export interface ShopItem {
 
 export interface Collectible {
   id: string;
-  type: 'MONEY_PRIZE' | 'HEALTH_PACK' | 'ENERGY_CELL';
+  type: 'MONEY_PRIZE' | 'HEALTH_PACK' | 'ENERGY_CELL' | 'PERK_CACHE';
   value: number;
   position: Position;
 }
