@@ -1,6 +1,7 @@
 
 import { GameState, PlayerId, Unit, PlacePayload, UnitType, Card, Position, CardCategory, LogEntry, InteractionMode, AppStatus, Effect, Talent, TerrainData, TerrainTool, ShopItem, UnitStats, DebugClickTraceEntry, DebugClickResult, DebugPointerMeta, MapBounds, MapMetadata, MapPlayerSupport, MapPreviewData, ALL_PLAYER_IDS, CONTESTED_PLAYER_IDS, MatchMode, EmptyMapConfig } from '../types';
-import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS, TURN_TIMER_SECONDS, NEGATIVE_UNIT_EFFECT_NAMES, getUnitClassificationLabel, FLUX_TOWER_ATTACK_UPGRADE_AMOUNT, FLUX_TOWER_ATTACK_UPGRADE_COST, FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP } from '../constants';
+import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS, TURN_TIMER_SECONDS, NEGATIVE_UNIT_EFFECT_NAMES, getUnitClassificationLabel, FLUX_TOWER_ATTACK_UPGRADE_AMOUNT, FLUX_TOWER_ATTACK_UPGRADE_COST, FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP, TALENT_SELECTION_LEVEL_STEP } from '../constants';
+import { ENABLE_CHARACTER_SYSTEM } from '../featureFlags';
 import { findPath } from '../utils/pathfinding';
 import { clampTerrainBrushSize, getTerrainBrushFootprint, isBrushEnabledTerrainTool } from '../utils/terrainBrush';
 import { canTraverseTerrainEdge, getStepDirection } from '../utils/terrainTraversal';
@@ -330,6 +331,25 @@ class GameService {
 
     private createEmptyPlayerCharacters(): Record<PlayerId, string | null> {
         return this.createPerPlayerRecord(() => null);
+    }
+
+    private getBaseUnlockedUnitPool(): UnitType[] {
+        return Object.keys(CARD_CONFIG).filter((key) => {
+            const unitType = key as UnitType;
+            if (DEV_ONLY_UNITS.includes(unitType)) {
+                return false;
+            }
+
+            if (!ENABLE_CHARACTER_SYSTEM) {
+                return true;
+            }
+
+            return (
+                unitType !== UnitType.MEDIC &&
+                unitType !== UnitType.LIGHT_TANK &&
+                unitType !== UnitType.HEAVY_TANK
+            );
+        }) as UnitType[];
     }
 
     private getPlayerShortLabel(playerId: PlayerId): string {
@@ -1058,13 +1078,7 @@ class GameService {
             message: "SYSTEM BOOT SEQUENCE INITIATED...",
         };
 
-        // Default Unlock Pool (excludes Medic, Light Tank, Heavy Tank)
-        const baseUnlocks = Object.keys(CARD_CONFIG).filter(k =>
-            k !== UnitType.MEDIC &&
-            k !== UnitType.LIGHT_TANK &&
-            k !== UnitType.HEAVY_TANK &&
-            !DEV_ONLY_UNITS.includes(k as UnitType)
-        ) as UnitType[];
+        const baseUnlocks = this.getBaseUnlockedUnitPool();
         const activePlayerIds = [PlayerId.ONE, PlayerId.TWO];
 
         return {
@@ -1334,6 +1348,12 @@ class GameService {
         if (config) {
             this.pendingStartConfig = { ...config };
         }
+
+        if (!ENABLE_CHARACTER_SYSTEM) {
+            this.finalizeCharacterSelection();
+            return;
+        }
+
         this.state.appStatus = AppStatus.CHARACTER_SELECTION;
         this.log("> CHARACTER SELECTION MATRIX INITIALIZED.");
         this.notify();
@@ -1344,7 +1364,14 @@ class GameService {
         const activePlayerIds = this.getActivePlayersForMap(mapType, isDevMode, emptyMapConfig);
         const turnOrder = [...activePlayerIds];
         const matchMode = this.getMatchModeForMap(mapType, emptyMapConfig);
+        const baseUnlocks = this.getBaseUnlockedUnitPool();
         this.state.playerCharacters = this.createEmptyPlayerCharacters();
+        this.state.characterActions = this.createPerPlayerRecord(() => []);
+        this.state.unlockedUnits = this.createPerPlayerRecord((playerId) =>
+            playerId === PlayerId.NEUTRAL || !activePlayerIds.includes(playerId)
+                ? []
+                : [...baseUnlocks]
+        );
         this.state.activePlayerIds = activePlayerIds;
         this.state.turnOrder = turnOrder;
         this.state.matchMode = matchMode;
@@ -1745,6 +1772,8 @@ class GameService {
     }
 
     private applyCharacterPerks(playerId: PlayerId) {
+        if (!ENABLE_CHARACTER_SYSTEM) return;
+
         const charId = this.state.playerCharacters[playerId];
         const character = CHARACTERS.find(c => c.id === charId);
 
@@ -2399,12 +2428,15 @@ class GameService {
         });
         this.state.units = units;
 
-        // Process Character Action Cooldowns
-        // Process Character Action Cooldowns
-
-        // Lazy Init actions if missing (e.g. hot reload or legacy save)
         if (!this.state.characterActions) {
             this.state.characterActions = this.createPerPlayerRecord(() => []);
+        }
+
+        if (!ENABLE_CHARACTER_SYSTEM) {
+            if (this.state.characterActions[playerId]?.length) {
+                this.state.characterActions[playerId] = [];
+            }
+            return;
         }
 
         if (!this.state.characterActions[playerId] || this.state.characterActions[playerId].length === 0) {
@@ -3089,14 +3121,6 @@ class GameService {
 
         const unit = this.state.units.find(u => u.id === unitId);
         if (!unit || unit.playerId !== this.state.currentTurn || unit.type !== UnitType.MEDIC) return;
-
-        // Level 25 check handled in UI, but good to double check or assume UI handles it?
-        // Let's check here too for safety
-        const playerChar = this.state.playerCharacters[unit.playerId];
-        if (playerChar !== 'NYX' || this.state.roundNumber < 25) {
-            this.log(`> ACCESS DENIED: PROTOCOL LOCKED`, unit.playerId);
-            return;
-        }
 
         if (unit.stats.energy < 25) {
             this.log(`> INSUFFICIENT ENERGY (${unit.stats.energy}/25)`, unit.playerId);
@@ -4139,8 +4163,6 @@ class GameService {
             return;
         }
 
-        const playerChar = this.state.playerCharacters[source.playerId];
-        const isNyx = playerChar === 'NYX';
         const isRepairBot = source.type === UnitType.REPAIR_BOT;
         const targetClassification = getUnitClassificationLabel(target.type);
         const canRepairTarget = isRepairBot
@@ -4157,11 +4179,7 @@ class GameService {
             return;
         }
 
-        // HEAL AMOUNT
-        let healAmount = 50;
-        if (!isRepairBot && isNyx && this.state.roundNumber >= 10) {
-            healAmount += source.level;
-        }
+        const healAmount = 50;
 
         this.animateSupportAction(targetUnitId, healAmount, 'HEAL', () => {
             const latestSourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
@@ -5144,21 +5162,7 @@ class GameService {
             if (isInvulnerable) {
                 this.log(`> ATTACK DEFLECTED: IMMORTALITY SHIELD`, attacker.playerId);
             } else {
-                let damage = attacker.stats.attack;
-
-                // Griff Perk: Tanks deal +Level damage (Level 10+)
-                if ((attacker.type === UnitType.LIGHT_TANK || attacker.type === UnitType.HEAVY_TANK) &&
-                    this.state.playerCharacters[attacker.playerId] === 'GRIFF' &&
-                    this.state.roundNumber >= 10) {
-                    damage += attacker.level;
-                }
-
-                // Kylo Perk: Apex Blade units gain +Level Attack (Level 10+)
-                if (attacker.type === UnitType.CONE &&
-                    this.state.playerCharacters[attacker.playerId] === 'KYLO' &&
-                    this.state.roundNumber >= 10) {
-                    damage += this.state.roundNumber;
-                }
+                const damage = attacker.stats.attack;
                 const newHp = Math.max(0, target.stats.hp - damage);
 
 	                updatedUnits[targetIdx] = {
@@ -5730,6 +5734,10 @@ class GameService {
     }
 
     public triggerCharacterAction(actionId: string, isRemote: boolean = false) {
+        if (!ENABLE_CHARACTER_SYSTEM) {
+            return;
+        }
+
         if (this.state.appStatus !== AppStatus.PLAYING) {
             console.log("TriggerAction Skipped: Not Playing");
             return;
@@ -6044,7 +6052,7 @@ class GameService {
                     this.log(`> WARNING: PLAYER ${nextTurn} SYSTEMS COMPROMISED`);
                 }
 
-                if (nextRound > 0 && nextRound % 10 === 0) {
+                if (nextRound > 0 && nextRound % TALENT_SELECTION_LEVEL_STEP === 0) {
                     const talentQueue = turnOrder.filter((playerId) => this.state.activePlayerIds.includes(playerId));
                     const [firstPlayer, ...remainingPlayers] = talentQueue;
 

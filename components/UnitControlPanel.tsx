@@ -10,8 +10,6 @@ interface UnitControlPanelProps {
     isDevMode?: boolean;
     canEditStats?: boolean;
     canUseActions?: boolean;
-    currentRound?: number;
-    characterId?: string | null;
     currentTurnPlayerId?: PlayerId;
     currentTurnCredits?: number;
 }
@@ -132,8 +130,6 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
     isDevMode,
     canEditStats,
     canUseActions = true,
-    currentRound,
-    characterId,
     currentTurnPlayerId,
     currentTurnCredits = 0
 }) => {
@@ -566,7 +562,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                             cost={25}
                                             description={unit.type === UnitType.REPAIR_BOT
                                                 ? "Repair a friendly building or machine within 2 tiles for 50 HP."
-                                                : `Heal a friendly creature within 2 tiles for ${50 + (characterId === 'NYX' && (currentRound || 0) >= 10 ? unit.level : 0)} HP.`}
+                                                : "Heal a friendly creature within 2 tiles for 50 HP."}
                                             onClick={() => gameService.activateHealAbility(unit.id)}
                                             disabled={actionsLocked || unit.stats.energy < 25}
                                             color="#10b981" // emerald-500
@@ -574,7 +570,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                             onLeave={handleHideTooltip}
                                         />
 
-                                        {characterId === 'NYX' && (currentRound || 0) >= 25 && unit.type === UnitType.MEDIC && (
+                                        {unit.type === UnitType.MEDIC && (
                                             <AbilityButton
                                                 label="RESTORE ENERGY"
                                                 icon="⚡"

@@ -83,6 +83,8 @@ export const FLUX_TOWER_ATTACK_UPGRADE_COST = 25;
 export const FLUX_TOWER_ATTACK_UPGRADE_AMOUNT = 10;
 export const FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP = 10;
 export const FLUX_TOWER_MAX_VISUAL_UPGRADES = 5;
+export const CHARACTER_PERK_TIER_ONE_LEVEL = 6;
+export const TALENT_SELECTION_LEVEL_STEP = 6;
 
 export const CHARACTERS: Character[] = [
   {
@@ -93,7 +95,7 @@ export const CHARACTERS: Character[] = [
     color: '#00ff00',
     perks: [
       { level: 0, description: 'Unlock access to MEDIC units in the logistics network.', unlocksUnits: [UnitType.MEDIC] },
-      { level: 10, description: 'Enhanced Repair: Medics heal creatures for +Level amount.' },
+      { level: CHARACTER_PERK_TIER_ONE_LEVEL, description: 'Enhanced Repair: Medics heal creatures for +Level amount.' },
       { level: 25, description: 'Restore Energy: Medics can restore 50 Energy to a target unit.' },
       { level: 50, description: 'Immortality Shield: Temporary invulnerability (Cooldown: 25 turns).' },
       { level: 100, description: 'TBD: Immortality Field' }
@@ -118,7 +120,7 @@ export const CHARACTERS: Character[] = [
     color: '#ff3300',
     perks: [
       { level: 0, description: 'Unlock access to RAPTOR and MAMMOTH TANKS.', unlocksUnits: [UnitType.LIGHT_TANK, UnitType.HEAVY_TANK] },
-      { level: 10, description: 'Reinforced Plating: Tanks deal +Level damage.' },
+      { level: CHARACTER_PERK_TIER_ONE_LEVEL, description: 'Reinforced Plating: Tanks deal +Level damage.' },
       { level: 25, description: 'TBD: Artillery Support' },
       { level: 50, description: 'TBD: Factory Overclock' },
       { level: 100, description: 'TBD: Nuclear Option' }
@@ -132,7 +134,7 @@ export const CHARACTERS: Character[] = [
     color: '#00ffff',
     perks: [
       { level: 0, description: 'Unlock access to HACKER units.', unlocksUnits: [UnitType.HACKER] },
-      { level: 10, description: 'TBD: Signal Boost' },
+      { level: CHARACTER_PERK_TIER_ONE_LEVEL, description: 'TBD: Signal Boost' },
       { level: 25, description: 'TBD: Botnet' },
       { level: 50, description: 'TBD: System Override' },
       { level: 100, description: 'TBD: Singularity' }
@@ -146,7 +148,7 @@ export const CHARACTERS: Character[] = [
     color: '#DC143C',
     perks: [
       { level: 0, description: 'TBD' },
-      { level: 10, description: 'Overclock: Apex Blade units gain +Level Attack.' },
+      { level: CHARACTER_PERK_TIER_ONE_LEVEL, description: 'Overclock: Apex Blade units gain +Level Attack.' },
       { level: 25, description: 'TBD' },
       { level: 50, description: 'TBD' },
       { level: 100, description: 'TBD' }
@@ -193,9 +195,9 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
   [UnitType.SUICIDE_DRONE]: {
     category: CardCategory.UNIT,
     name: 'Tick',
-    description: 'Explosive drone. Detonates on contact. Fast.',
+    description: 'Explosive drone. Can detonate on command. Fast.',
     cost: 40,
-    baseStats: { hp: 20, maxEnergy: 0, attack: 100, range: 1, movement: 7, size: 1, blocksLos: false }
+    baseStats: { hp: 20, maxEnergy: 0, attack: 0, range: 1, movement: 7, size: 1, blocksLos: false }
   },
   [UnitType.LIGHT_TANK]: {
     category: CardCategory.UNIT,

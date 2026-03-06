@@ -15,6 +15,7 @@ import WinScreen from './components/WinScreen';
 import RulebookModal from './components/RulebookModal';
 import { gameService } from './services/gameService';
 import { soundService } from './services/soundService';
+import { ENABLE_CHARACTER_SYSTEM } from './featureFlags';
 import { GameState, PlayerId, AppStatus, Effect, UnitType, Talent } from './types';
 import { COLORS, CHARACTERS, TURN_TIMER_SECONDS } from './constants';
 import { groupCards } from './utils/cardUtils';
@@ -140,6 +141,7 @@ const PlayerTooltip: React.FC<{
 
 // Character Action Bar Component
 const CharacterActionBar: React.FC<{ actions: any[], playerId: PlayerId, currentTurn: PlayerId, isDevMode: boolean, currentRound: number }> = ({ actions, playerId, currentTurn, isDevMode, currentRound }) => {
+    if (!ENABLE_CHARACTER_SYSTEM) return null;
     if (!actions || actions.length === 0) return null;
 
     return (
@@ -570,7 +572,7 @@ const App: React.FC = () => {
             )}
 
             {/* Character Selection Modal */}
-            {gameState.appStatus === AppStatus.CHARACTER_SELECTION && (
+            {ENABLE_CHARACTER_SYSTEM && gameState.appStatus === AppStatus.CHARACTER_SELECTION && (
                 <CharacterSelectionModal
                     playerCharacters={gameState.playerCharacters}
                     activePlayerIds={gameState.activePlayerIds}
@@ -663,9 +665,9 @@ const App: React.FC = () => {
                                                 >
                                                     {getPlayerLabel(playerId)}
                                                     <PlayerTooltip
-                                                        characterId={gameState.playerCharacters[playerId]}
+                                                        characterId={ENABLE_CHARACTER_SYSTEM ? gameState.playerCharacters[playerId] : null}
                                                         talents={gameState.playerTalents[playerId]}
-                                                        actions={gameState.characterActions[playerId]}
+                                                        actions={ENABLE_CHARACTER_SYSTEM ? gameState.characterActions[playerId] : []}
                                                         alignRight={index >= hudPlayerIds.length - 2}
                                                     />
                                                 </div>
@@ -747,13 +749,15 @@ const App: React.FC = () => {
                         <div className="absolute bottom-6 left-0 right-0 z-10 flex justify-center px-4 pointer-events-none">
                             <div className="w-full max-w-screen-xl flex flex-col items-center gap-1 pointer-events-none">
                                 {/* Character Actions */}
-                                <CharacterActionBar
-                                    actions={gameState.characterActions[gameState.currentTurn]}
-                                    playerId={controlledPlayerId || gameState.currentTurn}
-                                    currentTurn={gameState.currentTurn}
-                                    isDevMode={gameState.isDevMode}
-                                    currentRound={gameState.roundNumber}
-                                />
+                                {ENABLE_CHARACTER_SYSTEM && (
+                                    <CharacterActionBar
+                                        actions={gameState.characterActions[gameState.currentTurn]}
+                                        playerId={controlledPlayerId || gameState.currentTurn}
+                                        currentTurn={gameState.currentTurn}
+                                        isDevMode={gameState.isDevMode}
+                                        currentRound={gameState.roundNumber}
+                                    />
+                                )}
 
                                 <Deck
                                     cards={currentPlayerDeck}
@@ -774,8 +778,6 @@ const App: React.FC = () => {
                             isDevMode={gameState.isDevMode}
                             canEditStats={!gameState.isMultiplayer || gameState.isDevMode || gameState.isInGameAdmin}
                             canUseActions={!gameState.isMultiplayer || isLocalTurn}
-                            currentRound={gameState.roundNumber}
-                            characterId={selectedUnit ? gameState.playerCharacters[selectedUnit.playerId] : null}
                             currentTurnPlayerId={gameState.currentTurn}
                             currentTurnCredits={gameState.credits[gameState.currentTurn]}
                         />
