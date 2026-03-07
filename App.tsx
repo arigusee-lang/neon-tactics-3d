@@ -415,7 +415,7 @@ const App: React.FC = () => {
                 return;
             }
 
-            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD' && gameState.isDevMode) {
+            if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD') {
                 e.preventDefault();
                 setIsDebugPointerVisible((prev) => !prev);
                 return;
@@ -551,7 +551,7 @@ const App: React.FC = () => {
                 {soundEnabled ? 'SFX ON' : 'SFX OFF'}
             </button>
 
-            {gameState.isDevMode && isDebugPointerVisible && <DebugPointerInfo gameState={gameState} />}
+            {isDebugPointerVisible && <DebugPointerInfo gameState={gameState} />}
 
             <div className="absolute inset-0 z-0">
                 <GameScene

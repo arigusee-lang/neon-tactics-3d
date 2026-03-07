@@ -134,6 +134,9 @@ const PLAYER_TWO = 'P2';
 const PLAYER_THREE = 'P3';
 const PLAYER_FOUR = 'P4';
 const PLAYER_IDS = [PLAYER_ONE, PLAYER_TWO, PLAYER_THREE, PLAYER_FOUR];
+const METRIC_WINDOW_MS = 30000;
+const LARGE_SYNC_BYTES = 128 * 1024;
+const LARGE_ACTION_BYTES = 16 * 1024;
 
 const AUTHORITATIVE_ACTIONS = new Set([
   'SYNC_STATE',
@@ -217,6 +220,106 @@ function getNextTurn(currentTurn, turnOrder = PLAYER_IDS) {
     return turnOrder[0] || PLAYER_ONE;
   }
   return turnOrder[(currentIndex + 1) % turnOrder.length];
+}
+
+function estimatePayloadBytes(payload) {
+  try {
+    return Buffer.byteLength(JSON.stringify(payload ?? null), 'utf8');
+  } catch (error) {
+    return -1;
+  }
+}
+
+function createMetricBucket() {
+  return {
+    events: 0,
+    totalBytes: 0,
+    maxBytes: 0,
+    actions: {}
+  };
+}
+
+function createLobbyMetricsWindow() {
+  return {
+    startedAt: Date.now(),
+    sync: createMetricBucket(),
+    auth: createMetricBucket(),
+    relay: createMetricBucket()
+  };
+}
+
+function ensureLobbyMetrics(lobby) {
+  if (!lobby.metrics) {
+    lobby.metrics = createLobbyMetricsWindow();
+  }
+  return lobby.metrics;
+}
+
+function resetLobbyMetrics(lobby) {
+  lobby.metrics = createLobbyMetricsWindow();
+}
+
+function formatMetricActions(actions) {
+  const entries = Object.entries(actions)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6);
+
+  if (entries.length === 0) {
+    return 'none';
+  }
+
+  return entries.map(([action, count]) => `${action}:${count}`).join(',');
+}
+
+function formatMetricBucket(name, bucket) {
+  if (!bucket || bucket.events === 0) {
+    return `${name}=none`;
+  }
+
+  const avgBytes = Math.round(bucket.totalBytes / bucket.events);
+  return `${name}=events:${bucket.events}|avgBytes:${avgBytes}|maxBytes:${bucket.maxBytes}|actions:${formatMetricActions(bucket.actions)}`;
+}
+
+function flushLobbyMetrics(roomId, lobby, reason = 'periodic') {
+  const metrics = lobby?.metrics;
+  if (!metrics) return;
+
+  const hasEvents = [metrics.sync, metrics.auth, metrics.relay].some((bucket) => bucket.events > 0);
+  if (!hasEvents) {
+    resetLobbyMetrics(lobby);
+    return;
+  }
+
+  const durationMs = Date.now() - metrics.startedAt;
+  console.log(
+    `[METRIC][WINDOW] room=${roomId} reason=${reason} durationMs=${durationMs} phase=${getLobbyPhase(lobby)} connected=${getConnectedSlots(lobby).length}/${getJoinedSlots(lobby).length} ${formatMetricBucket('sync', metrics.sync)} ${formatMetricBucket('auth', metrics.auth)} ${formatMetricBucket('relay', metrics.relay)}`
+  );
+  resetLobbyMetrics(lobby);
+}
+
+function recordLobbyMetric(roomId, lobby, channel, action, payload) {
+  const metrics = ensureLobbyMetrics(lobby);
+  const bucket = metrics[channel];
+  if (!bucket) return -1;
+
+  const bytes = estimatePayloadBytes(payload);
+  bucket.events += 1;
+  if (bytes >= 0) {
+    bucket.totalBytes += bytes;
+    bucket.maxBytes = Math.max(bucket.maxBytes, bytes);
+  }
+  bucket.actions[action] = (bucket.actions[action] || 0) + 1;
+
+  const largeThreshold = channel === 'sync' ? LARGE_SYNC_BYTES : LARGE_ACTION_BYTES;
+  if (bytes >= largeThreshold) {
+    console.warn(`[METRIC][LARGE_PAYLOAD] room=${roomId} channel=${channel} action=${action} bytes=${bytes}`);
+  }
+
+  if ((Date.now() - metrics.startedAt) >= METRIC_WINDOW_MS) {
+    flushLobbyMetrics(roomId, lobby);
+  }
+
+  return bytes;
 }
 
 function createEmptyCharacterSelections() {
@@ -353,6 +456,7 @@ function removePlayerFromLobby(socket, roomId, lobby, departureMessage = 'Oppone
   };
 
   if (getConnectedSlots(lobby).length === 0) {
+    flushLobbyMetrics(roomId, lobby, 'all_players_left');
     console.log(`[ROOM][CLEANUP] room=${roomId} reason=all_players_left`);
     delete lobbies[roomId];
     return;
@@ -382,9 +486,13 @@ function markPlayerDisconnected(socket, roomId, lobby, reason = 'transport disco
 
   const connectedCount = getConnectedSlots(lobby).length;
   const joinedCount = getJoinedSlots(lobby).length;
-  console.warn(`[ROOM][DISCONNECT] room=${roomId} player=${departingSlot.playerId} socket=${socket.id} reason=${reason} connected=${connectedCount}/${joinedCount} phase=${getLobbyPhase(lobby)}`);
+  const transportName = socket.conn?.transport?.name || 'unknown';
+  const connectionAgeMs = socket.data?.connectedAt ? Date.now() - socket.data.connectedAt : null;
+  const sessionAgePart = typeof connectionAgeMs === 'number' ? ` ageMs=${connectionAgeMs}` : '';
+  console.warn(`[ROOM][DISCONNECT] room=${roomId} player=${departingSlot.playerId} socket=${socket.id} reason=${reason} transport=${transportName} connected=${connectedCount}/${joinedCount} phase=${getLobbyPhase(lobby)}${sessionAgePart}`);
 
   if (connectedCount === 0) {
+    flushLobbyMetrics(roomId, lobby, 'all_players_disconnected');
     console.log(`[ROOM][CLEANUP] room=${roomId} reason=all_players_disconnected`);
     delete lobbies[roomId];
     return;
@@ -479,6 +587,7 @@ function emitJoinFailure(socket, restoreSession, roomId, reason, message) {
 
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
+  socket.data.connectedAt = Date.now();
   socket.data.roomId = null;
   socket.data.playerId = null;
 
@@ -688,7 +797,14 @@ io.on('connection', (socket) => {
       if (typeof data.currentTurn === 'string' && data.currentTurn.length > 0) {
         lobby.currentTurn = data.currentTurn;
       }
-      lobby.gameState = data;
+      const syncBytes = recordLobbyMetric(roomId, lobby, 'sync', action, data);
+      lobby.gameState = {
+        ...(lobby.gameState || {}),
+        ...data
+      };
+      if (syncBytes >= 0) {
+        console.log(`[AUTH][SYNC] room=${roomId} socket=${socket.id} bytes=${syncBytes} turn=${lobby.currentTurn}`);
+      }
 
       io.to(roomId).emit('authoritative_command', {
         action,
@@ -735,6 +851,8 @@ io.on('connection', (socket) => {
       lobby.currentTurn = getNextTurn(lobby.currentTurn, lobby.turnOrder);
     }
 
+    recordLobbyMetric(roomId, lobby, 'auth', action, data);
+
     if (action === 'MOVE') {
       const pathLen = Array.isArray(data?.path) ? data.path.length : 0;
       const target = pathLen > 0 ? data.path[pathLen - 1] : null;
@@ -759,6 +877,7 @@ io.on('connection', (socket) => {
     // payload should contain { roomId, action, data }
     const lobby = payload.roomId ? lobbies[payload.roomId] : null;
     if (payload.roomId && lobby && getPlayerSlotBySocketId(lobby, socket.id) && !isLobbyPausedForDisconnect(lobby)) {
+      recordLobbyMetric(payload.roomId, lobby, 'relay', payload.action || 'UNKNOWN', payload.data);
       socket.to(payload.roomId).emit('game_action', payload);
       // console.log(`Action forwarded in ${payload.roomId}:`, payload.action);
     }

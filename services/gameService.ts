@@ -406,8 +406,8 @@ class GameService {
         return true;
     }
 
-    private applyTurnTimerDamage(playerId: PlayerId, damage: number) {
-        if (damage <= 0) return;
+    private applyTurnTimerDamage(playerId: PlayerId, damage: number): boolean {
+        if (damage <= 0) return false;
 
         const portalIdx = this.state.units.findIndex((unit) =>
             unit.playerId === playerId
@@ -415,7 +415,7 @@ class GameService {
             && !unit.status.isDying
         );
 
-        if (portalIdx === -1) return;
+        if (portalIdx === -1) return false;
 
         const portal = this.state.units[portalIdx];
         const damageResult = this.applyDamageToUnit(portal, damage);
@@ -427,10 +427,6 @@ class GameService {
 
         if (damageResult.hpDamage > 0) {
             this.triggerDamagePulses([{ unitId: portal.id, amount: damageResult.hpDamage }]);
-        }
-
-        if (this.state.turnOvertimeDamageApplied === 0) {
-            this.log(`> TURN TIMER EXPIRED: ${playerId} MAIN TAKING OVERTIME DAMAGE`, playerId);
         }
 
         if (damageResult.shieldAbsorbed > 0) {
@@ -450,6 +446,8 @@ class GameService {
                 this.removeUnit(portal.id);
             }, 1500);
         }
+
+        return nextHp === 0;
     }
 
     private processTurnTimerTick() {
@@ -461,10 +459,11 @@ class GameService {
 
         if (pendingDamage <= 0) return;
 
-        this.applyTurnTimerDamage(this.state.currentTurn, pendingDamage);
+        if (this.state.turnOvertimeDamageApplied === 0) {
+            this.log(`> TURN TIMER EXPIRED: ${this.state.currentTurn} MAIN ACCRUING OVERTIME DAMAGE`, this.state.currentTurn);
+            this.notify();
+        }
         this.state.turnOvertimeDamageApplied = overtimeDamageTarget;
-        this.notify();
-        this.replicateAuthoritativeState();
     }
 
     private getAttackImpactDelay(attacker: Unit, target: Unit): number {
@@ -656,7 +655,7 @@ class GameService {
         this.pendingSyncDueAt = 0;
     }
 
-    private replicateAuthoritativeState(delayMs: number = 0) {
+    private replicateAuthoritativeState(delayMs: number = 0, includeStaticState: boolean = false) {
         if (!this.state.isMultiplayer || !this.isSyncAuthority()) return;
 
         const now = Date.now();
@@ -683,7 +682,7 @@ class GameService {
             if (!this.state.isMultiplayer || !this.isSyncAuthority()) return;
 
             this.lastSyncSentAt = Date.now();
-            this.dispatchAction('SYNC_STATE', this.buildSyncStatePayload());
+            this.dispatchAction('SYNC_STATE', this.buildSyncStatePayload(includeStaticState));
         }, waitMs);
     }
 
@@ -1280,14 +1279,37 @@ class GameService {
         }
     }
 
-    private buildSyncStatePayload() {
+    private relayPeerAction(action: string, data: any) {
+        if (!this.state.isMultiplayer || !this.socket || !this.state.roomId) return;
+        this.socket.emit('game_action', {
+            roomId: this.state.roomId,
+            action,
+            data
+        });
+    }
+
+    private cloneUnitForSync(unit: Unit): Unit {
+        return {
+            ...unit,
+            status: {
+                ...unit.status,
+                healPulseAmount: null,
+                energyPulseAmount: null,
+                damagePulseAmount: null,
+                creditPulseAmount: null,
+                missPulseText: null
+            }
+        };
+    }
+
+    private buildSyncStatePayload(includeStaticState: boolean = false) {
         return {
             mapId: this.state.mapId,
-            terrain: this.state.terrain,
+            ...(includeStaticState ? { terrain: this.state.terrain } : {}),
             decks: this.createPerPlayerRecord((playerId) =>
                 this.state.decks[playerId].map((card) => this.cloneCardForSync(card))
             ),
-            units: this.state.units.map((unit) => ({ ...unit })),
+            units: this.state.units.map((unit) => this.cloneUnitForSync(unit)),
             collectibles: this.state.collectibles.map((collectible) => ({ ...collectible })),
             credits: { ...this.state.credits },
             shopBudgetRemaining: { ...this.state.shopBudgetRemaining },
@@ -1331,10 +1353,196 @@ class GameService {
                 this.state.playerEffects[playerId].map((effect) => ({ ...effect }))
             ),
             interactionState: { ...this.state.interactionState },
-            tilePulse: this.state.tilePulse ? { ...this.state.tilePulse } : null,
             fogOfWarDisabled: this.state.fogOfWarDisabled,
             winner: this.state.winner
         };
+    }
+
+    private playRemoteAttackAnimation(attackerId: string, targetId: string) {
+        const attackerIdx = this.state.units.findIndex((unit) => unit.id === attackerId);
+        const target = this.state.units.find((unit) => unit.id === targetId);
+        if (attackerIdx === -1 || !target) return;
+
+        const attacker = this.state.units[attackerIdx];
+        const dx = target.position.x - attacker.position.x;
+        const dz = target.position.z - attacker.position.z;
+        const rotation = Math.atan2(dx, dz);
+        const nextUnits = [...this.state.units];
+
+        nextUnits[attackerIdx] = {
+            ...attacker,
+            rotation,
+            status: {
+                ...attacker.status,
+                attackTargetId: targetId
+            }
+        };
+
+        this.state.units = nextUnits;
+        this.notify();
+
+        const impactDelay = this.getAttackImpactDelay(attacker, target) + 120;
+        window.setTimeout(() => {
+            const currentIdx = this.state.units.findIndex((unit) => unit.id === attackerId);
+            if (currentIdx === -1) return;
+            const currentAttacker = this.state.units[currentIdx];
+            if (currentAttacker.status.attackTargetId !== targetId) return;
+
+            const clearedUnits = [...this.state.units];
+            clearedUnits[currentIdx] = {
+                ...currentAttacker,
+                status: {
+                    ...currentAttacker.status,
+                    attackTargetId: null
+                }
+            };
+            this.state.units = clearedUnits;
+            this.notify();
+        }, impactDelay);
+    }
+
+    private playSupportPulseLocally(targetUnitId: string, amount: number, pulseType: 'HEAL' | 'ENERGY') {
+        const targetIdx = this.state.units.findIndex((unit) => unit.id === targetUnitId);
+        if (targetIdx === -1) return;
+
+        this.state.units[targetIdx] = {
+            ...this.state.units[targetIdx],
+            status: {
+                ...this.state.units[targetIdx].status,
+                healPulseAmount: pulseType === 'HEAL' ? amount : null,
+                energyPulseAmount: pulseType === 'ENERGY' ? amount : null
+            }
+        };
+
+        this.notify();
+
+        window.setTimeout(() => {
+            const cleanupIdx = this.state.units.findIndex((unit) => unit.id === targetUnitId);
+            if (cleanupIdx === -1) return;
+
+            this.state.units[cleanupIdx] = {
+                ...this.state.units[cleanupIdx],
+                status: {
+                    ...this.state.units[cleanupIdx].status,
+                    healPulseAmount: null,
+                    energyPulseAmount: null
+                }
+            };
+            this.notify();
+        }, 1200);
+    }
+
+    private playDamagePulsesLocally(pulses: Array<{ unitId: string; amount: number }>) {
+        if (pulses.length === 0) return;
+
+        const appliedUnitIds = new Set<string>();
+
+        this.state.units = this.state.units.map((unit) => {
+            const pulse = pulses.find((entry) => entry.unitId === unit.id && entry.amount > 0);
+            if (!pulse) return unit;
+
+            appliedUnitIds.add(unit.id);
+            return {
+                ...unit,
+                status: {
+                    ...unit.status,
+                    damagePulseAmount: pulse.amount
+                }
+            };
+        });
+
+        if (appliedUnitIds.size === 0) return;
+        this.notify();
+
+        window.setTimeout(() => {
+            this.state.units = this.state.units.map((unit) => {
+                if (!appliedUnitIds.has(unit.id)) return unit;
+                return {
+                    ...unit,
+                    status: {
+                        ...unit.status,
+                        damagePulseAmount: null
+                    }
+                };
+            });
+            this.notify();
+        }, 1200);
+    }
+
+    private playCreditPulsesLocally(pulses: Array<{ unitId: string; amount: number }>) {
+        if (pulses.length === 0) return;
+
+        const appliedUnitIds = new Set<string>();
+
+        this.state.units = this.state.units.map((unit) => {
+            const pulse = pulses.find((entry) => entry.unitId === unit.id && entry.amount > 0);
+            if (!pulse) return unit;
+
+            appliedUnitIds.add(unit.id);
+            return {
+                ...unit,
+                status: {
+                    ...unit.status,
+                    creditPulseAmount: pulse.amount
+                }
+            };
+        });
+
+        if (appliedUnitIds.size === 0) return;
+        this.notify();
+
+        window.setTimeout(() => {
+            this.state.units = this.state.units.map((unit) => {
+                if (!appliedUnitIds.has(unit.id)) return unit;
+                return {
+                    ...unit,
+                    status: {
+                        ...unit.status,
+                        creditPulseAmount: null
+                    }
+                };
+            });
+            this.notify();
+        }, 1200);
+    }
+
+    private playMissPulseLocally(targetUnitId: string, text: string) {
+        const targetIdx = this.state.units.findIndex((unit) => unit.id === targetUnitId);
+        if (targetIdx === -1) return;
+
+        this.state.units[targetIdx] = {
+            ...this.state.units[targetIdx],
+            status: {
+                ...this.state.units[targetIdx].status,
+                missPulseText: text
+            }
+        };
+        this.notify();
+
+        window.setTimeout(() => {
+            const cleanupIdx = this.state.units.findIndex((unit) => unit.id === targetUnitId);
+            if (cleanupIdx === -1) return;
+
+            this.state.units[cleanupIdx] = {
+                ...this.state.units[cleanupIdx],
+                status: {
+                    ...this.state.units[cleanupIdx].status,
+                    missPulseText: null
+                }
+            };
+            this.notify();
+        }, 1200);
+    }
+
+    private playTilePulseLocally(key: string, kind: 'SABOTAGE' | 'ION_CANNON') {
+        this.state.tilePulse = { key, kind };
+        this.notify();
+
+        window.setTimeout(() => {
+            if (this.state.tilePulse?.key !== key || this.state.tilePulse?.kind !== kind) return;
+            this.state.tilePulse = null;
+            this.notify();
+        }, kind === 'ION_CANNON' ? 1100 : 900);
     }
 
     private handleRemoteAction(action: string, data: any) {
@@ -1342,6 +1550,24 @@ class GameService {
         // because we trust the server/opponent sends valid moves for their turn
 
         switch (action) {
+            case 'ATTACK_ANIMATION':
+                this.playRemoteAttackAnimation(data.attackerId, data.targetId);
+                break;
+            case 'SUPPORT_PULSE':
+                this.playSupportPulseLocally(data.targetUnitId, data.amount, data.pulseType);
+                break;
+            case 'DAMAGE_PULSES':
+                this.playDamagePulsesLocally(Array.isArray(data?.pulses) ? data.pulses : []);
+                break;
+            case 'CREDIT_PULSES':
+                this.playCreditPulsesLocally(Array.isArray(data?.pulses) ? data.pulses : []);
+                break;
+            case 'MISS_PULSE':
+                this.playMissPulseLocally(data.targetUnitId, data.text || 'MISS');
+                break;
+            case 'TILE_PULSE':
+                this.playTilePulseLocally(data.key, data.kind);
+                break;
             case 'ADMIN_SET_UNIT_STATS':
                 this.applyUnitStatsEdit(data.unitId, data, true);
                 break;
@@ -1438,9 +1664,33 @@ class GameService {
                         normalizedPathLength: normalizedPath.length,
                         fallbackTarget
                     });
+                    if (this.pendingMultiplayerMoveUnitId === unitId) {
+                        this.pendingMultiplayerMoveUnitId = null;
+                    }
                     this.state.previewPath = [];
+                    if (this.state.isMultiplayer && this.isSyncAuthority()) {
+                        this.replicateAuthoritativeState();
+                    }
                 } else {
+                    if (this.pendingMultiplayerMoveUnitId === unitId) {
+                        this.pendingMultiplayerMoveUnitId = null;
+                    }
                     this.queuedAuthoritativeMoveTargets.delete(unitId);
+                    if (this.state.isMultiplayer && this.isSyncAuthority()) {
+                        const acceptedUnit = this.state.units.find((u) => u.id === unitId);
+                        const acceptedPath = acceptedUnit?.movePath ?? [];
+                        if (acceptedPath.length > 0) {
+                            const lastStep = acceptedPath[acceptedPath.length - 1];
+                            this.relayPeerAction('MOVE', {
+                                unitId,
+                                path: acceptedPath.map((step) => ({ x: step.x, z: step.z })),
+                                targetX: lastStep.x,
+                                targetZ: lastStep.z
+                            });
+                        } else {
+                            this.replicateAuthoritativeState();
+                        }
+                    }
                 }
                 break;
             }
@@ -1533,7 +1783,9 @@ class GameService {
                 if (data.mapId) {
                     this.state.mapId = data.mapId;
                 }
-                this.state.terrain = data.terrain;
+                if (data.terrain) {
+                    this.state.terrain = data.terrain;
+                }
                 this.state.decks = data.decks;
                 this.state.credits = data.credits;
                 if (data.shopBudgetRemaining) {
@@ -1608,7 +1860,9 @@ class GameService {
                 if (data.playerEffects) {
                     this.state.playerEffects = data.playerEffects;
                 }
-                this.state.tilePulse = data.tilePulse ? { ...data.tilePulse } : null;
+                if (typeof data.tilePulse !== 'undefined') {
+                    this.state.tilePulse = data.tilePulse ? { ...data.tilePulse } : null;
+                }
                 if (typeof data.fogOfWarDisabled === 'boolean') {
                     this.state.fogOfWarDisabled = data.fogOfWarDisabled;
                 }
@@ -1678,7 +1932,7 @@ class GameService {
                 break;
         }
 
-        if (action !== 'SYNC_STATE' && action !== 'ADMIN_SET_UNIT_STATS') {
+        if (action !== 'SYNC_STATE' && action !== 'ADMIN_SET_UNIT_STATS' && action !== 'MOVE' && action !== 'TELEPORT' && action !== 'ATTACK') {
             this.replicateAuthoritativeState();
         }
     }
@@ -3359,7 +3613,7 @@ class GameService {
 
         if (this.state.isMultiplayer && this.isSyncAuthority()) {
             // The authority peer publishes the initial replicated game snapshot.
-            this.replicateAuthoritativeState(500);
+            this.replicateAuthoritativeState(500, true);
         }
 
         initialUnits.forEach(u => {
@@ -3684,144 +3938,31 @@ class GameService {
     }
 
     private triggerSupportPulse(targetUnitId: string, amount: number, pulseType: 'HEAL' | 'ENERGY') {
-        const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
-        if (targetIdx === -1) return;
-
-        this.state.units[targetIdx] = {
-            ...this.state.units[targetIdx],
-            status: {
-                ...this.state.units[targetIdx].status,
-                healPulseAmount: pulseType === 'HEAL' ? amount : null,
-                energyPulseAmount: pulseType === 'ENERGY' ? amount : null
-            }
-        };
-
-        this.notify();
-        this.replicateAuthoritativeState();
-
-        setTimeout(() => {
-            const cleanupIdx = this.state.units.findIndex(u => u.id === targetUnitId);
-            if (cleanupIdx === -1) return;
-
-            this.state.units[cleanupIdx] = {
-                ...this.state.units[cleanupIdx],
-                status: {
-                    ...this.state.units[cleanupIdx].status,
-                    healPulseAmount: null,
-                    energyPulseAmount: null
-                }
-            };
-            this.notify();
-            this.replicateAuthoritativeState();
-        }, 1200);
+        this.playSupportPulseLocally(targetUnitId, amount, pulseType);
+        if (this.state.isMultiplayer && this.isSyncAuthority()) {
+            this.relayPeerAction('SUPPORT_PULSE', { targetUnitId, amount, pulseType });
+        }
     }
 
     private triggerDamagePulses(pulses: Array<{ unitId: string; amount: number }>) {
-        if (pulses.length === 0) return;
-
-        const appliedUnitIds = new Set<string>();
-
-        this.state.units = this.state.units.map((unit) => {
-            const pulse = pulses.find((entry) => entry.unitId === unit.id && entry.amount > 0);
-            if (!pulse) return unit;
-
-            appliedUnitIds.add(unit.id);
-            return {
-                ...unit,
-                status: {
-                    ...unit.status,
-                    damagePulseAmount: pulse.amount
-                }
-            };
-        });
-
-        if (appliedUnitIds.size === 0) return;
-
-        window.setTimeout(() => {
-            this.state.units = this.state.units.map((unit) => {
-                if (!appliedUnitIds.has(unit.id)) return unit;
-                return {
-                    ...unit,
-                    status: {
-                        ...unit.status,
-                        damagePulseAmount: null
-                    }
-                };
-            });
-            this.notify();
-            if (this.state.isMultiplayer && this.isSyncAuthority()) {
-                this.replicateAuthoritativeState();
-            }
-        }, 1200);
+        this.playDamagePulsesLocally(pulses);
+        if (this.state.isMultiplayer && this.isSyncAuthority() && pulses.length > 0) {
+            this.relayPeerAction('DAMAGE_PULSES', { pulses });
+        }
     }
 
     private triggerCreditPulses(pulses: Array<{ unitId: string; amount: number }>) {
-        if (pulses.length === 0) return;
-
-        const appliedUnitIds = new Set<string>();
-
-        this.state.units = this.state.units.map((unit) => {
-            const pulse = pulses.find((entry) => entry.unitId === unit.id && entry.amount > 0);
-            if (!pulse) return unit;
-
-            appliedUnitIds.add(unit.id);
-            return {
-                ...unit,
-                status: {
-                    ...unit.status,
-                    creditPulseAmount: pulse.amount
-                }
-            };
-        });
-
-        if (appliedUnitIds.size === 0) return;
-
-        window.setTimeout(() => {
-            this.state.units = this.state.units.map((unit) => {
-                if (!appliedUnitIds.has(unit.id)) return unit;
-                return {
-                    ...unit,
-                    status: {
-                        ...unit.status,
-                        creditPulseAmount: null
-                    }
-                };
-            });
-            this.notify();
-            if (this.state.isMultiplayer && this.isSyncAuthority()) {
-                this.replicateAuthoritativeState();
-            }
-        }, 1200);
+        this.playCreditPulsesLocally(pulses);
+        if (this.state.isMultiplayer && this.isSyncAuthority() && pulses.length > 0) {
+            this.relayPeerAction('CREDIT_PULSES', { pulses });
+        }
     }
 
     private triggerMissPulse(targetUnitId: string, text: string = 'MISS') {
-        const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
-        if (targetIdx === -1) return;
-
-        this.state.units[targetIdx] = {
-            ...this.state.units[targetIdx],
-            status: {
-                ...this.state.units[targetIdx].status,
-                missPulseText: text
-            }
-        };
-
-        window.setTimeout(() => {
-            const cleanupIdx = this.state.units.findIndex(u => u.id === targetUnitId);
-            if (cleanupIdx === -1) return;
-
-            this.state.units[cleanupIdx] = {
-                ...this.state.units[cleanupIdx],
-                status: {
-                    ...this.state.units[cleanupIdx].status,
-                    missPulseText: null
-                }
-            };
-            this.notify();
-            if (this.state.isMultiplayer && this.isSyncAuthority()) {
-                this.replicateAuthoritativeState();
-            }
-        }, 1200);
+        this.playMissPulseLocally(targetUnitId, text);
+        if (this.state.isMultiplayer && this.isSyncAuthority()) {
+            this.relayPeerAction('MISS_PULSE', { targetUnitId, text });
+        }
     }
 
     private shouldAttackMiss(attacker: Unit, target: Unit): boolean {
@@ -3877,16 +4018,10 @@ class GameService {
     }
 
     private triggerTilePulse(key: string, kind: 'SABOTAGE' | 'ION_CANNON') {
-        this.state.tilePulse = { key, kind };
-        this.notify();
-        this.replicateAuthoritativeState();
-
-        setTimeout(() => {
-            if (this.state.tilePulse?.key !== key || this.state.tilePulse?.kind !== kind) return;
-            this.state.tilePulse = null;
-            this.notify();
-            this.replicateAuthoritativeState();
-        }, kind === 'ION_CANNON' ? 1100 : 900);
+        this.playTilePulseLocally(key, kind);
+        if (this.state.isMultiplayer && this.isSyncAuthority()) {
+            this.relayPeerAction('TILE_PULSE', { key, kind });
+        }
     }
 
     private processStructures(playerId: PlayerId) {
@@ -5972,12 +6107,20 @@ class GameService {
 
         const unit = this.state.units[unitIdx];
         const isValid = this.isValidPlacement(x, z, unit.stats.size, unit.playerId, false, isRemote);
-        if (!isValid) return;
+        if (!isValid) {
+            if (isRemote && this.state.isMultiplayer && this.isSyncAuthority()) {
+                this.replicateAuthoritativeState();
+            }
+            return;
+        }
 
         if (!isRemote && this.state.isMultiplayer) {
             this.dispatchAction('TELEPORT', { sourceUnitId, x, z });
             this.finalizeInteraction();
             return;
+        }
+        if (isRemote && this.state.isMultiplayer && this.isSyncAuthority()) {
+            this.relayPeerAction('TELEPORT', { sourceUnitId, x, z });
         }
         this.executeTeleportRelocation(sourceUnitId, { x, z }, {
             playerId: unit.playerId,
@@ -6624,10 +6767,19 @@ class GameService {
             return;
         }
 
+        if (!valid.isValid && isRemote && this.state.isMultiplayer && this.isSyncAuthority()) {
+            this.replicateAuthoritativeState();
+            return;
+        }
+
         // In multiplayer, wait for authoritative command broadcast before applying.
         if (!isRemote && this.state.isMultiplayer) {
             this.dispatchAction('ATTACK', { attackerId, targetId });
             return;
+        }
+
+        if (isRemote && this.state.isMultiplayer && this.isSyncAuthority()) {
+            this.relayPeerAction('ATTACK_ANIMATION', { attackerId, targetId });
         }
 
         const activeUnits = [...this.state.units];
@@ -7004,6 +7156,7 @@ class GameService {
             wormholeLandingZoneMode?: 'NONE' | 'SOURCE_ONLY' | 'SOURCE_AND_DESTINATION';
         }
     ) {
+        const shouldSyncToPeers = this.state.isMultiplayer && this.isSyncAuthority();
         const startUnitIdx = this.state.units.findIndex(u => u.id === unitId);
         if (startUnitIdx === -1) return;
         const sourceUnit = this.state.units[startUnitIdx];
@@ -7020,7 +7173,6 @@ class GameService {
         };
         this.state.units = startUnits;
         this.notify();
-        this.replicateAuthoritativeState();
 
         setTimeout(() => {
             const moveIdx = this.state.units.findIndex(u => u.id === unitId);
@@ -7052,7 +7204,6 @@ class GameService {
 
             this.log(options.logMessage, options.playerId);
             this.notify();
-            this.replicateAuthoritativeState();
         }, 180);
 
         setTimeout(() => {
@@ -7069,7 +7220,9 @@ class GameService {
             };
             this.state.units = endUnits;
             this.notify();
-            this.replicateAuthoritativeState();
+            if (shouldSyncToPeers) {
+                this.replicateAuthoritativeState();
+            }
         }, 420);
     }
 
@@ -7434,6 +7587,7 @@ class GameService {
         if (unitIndex === -1) return;
         const unit = this.state.units[unitIndex];
         if (unit.movePath.length === 0) return;
+        const shouldSyncToPeers = this.state.isMultiplayer && this.isSyncAuthority();
         const nextPos = unit.movePath[0];
         if (!this.canCompleteMoveStep(unit, nextPos)) {
             const newUnits = [...this.state.units];
@@ -7441,7 +7595,9 @@ class GameService {
             this.state.units = newUnits;
             this.log(`> MOVEMENT ABORTED: INVALID TERRAIN TRANSITION`, unit.playerId);
             this.notify();
-            this.replicateAuthoritativeState();
+            if (shouldSyncToPeers) {
+                this.replicateAuthoritativeState();
+            }
             return;
         }
         const remainingPath = unit.movePath.slice(1);
@@ -7506,16 +7662,20 @@ class GameService {
 
         if (unitBledOut) {
             this.notify();
+            if (shouldSyncToPeers) {
+                this.replicateAuthoritativeState();
+            }
+            return;
+        }
+
+        if (remainingPath.length === 0 && shouldSyncToPeers) {
+            this.processQueuedAuthoritativeMove(unit.id);
+            this.notify();
             this.replicateAuthoritativeState();
             return;
         }
 
-        if (remainingPath.length === 0 && this.state.isMultiplayer && this.isSyncAuthority()) {
-            this.processQueuedAuthoritativeMove(unit.id);
-        }
-
         this.notify();
-        this.replicateAuthoritativeState();
     }
 
     public triggerCharacterAction(actionId: string, isRemote: boolean = false) {
@@ -7993,6 +8153,9 @@ class GameService {
                 if (uIdx !== -1) {
                     this.state.units[uIdx].status.attackTargetId = targetId;
                 }
+                if (this.state.isMultiplayer && this.isSyncAuthority()) {
+                    this.relayPeerAction('ATTACK_ANIMATION', { attackerId: attacker.id, targetId });
+                }
 
                 const remaining = attacker.stats.maxAttacks - attacker.status.attacksUsed - 1;
                 this.log(`> AUTO-ATTACK ENGAGED: ${attacker.type} -> ${target.type} ${remaining > 0 ? '(MULTI-STRIKE)' : ''}`, playerId);
@@ -8024,6 +8187,21 @@ class GameService {
 
     private finalizeTurnLogic() {
         const finalize = () => {
+            const overtimeDamage = this.state.turnOvertimeDamageApplied;
+            if (overtimeDamage > 0) {
+                const overtimePlayer = this.state.currentTurn;
+                this.log(`> OVERTIME PENALTY: ${overtimePlayer} MAIN TAKES ${overtimeDamage} DAMAGE`, overtimePlayer);
+                this.state.turnOvertimeDamageApplied = 0;
+                const portalDestroyed = this.applyTurnTimerDamage(overtimePlayer, overtimeDamage);
+                this.notify();
+                if (portalDestroyed) {
+                    if (this.state.isMultiplayer && this.isSyncAuthority()) {
+                        this.replicateAuthoritativeState();
+                    }
+                    return;
+                }
+            }
+
             this.processEffects(this.state.currentTurn);
             this.processStructures(this.state.currentTurn);
             this.processPassiveTalents(this.state.currentTurn);
