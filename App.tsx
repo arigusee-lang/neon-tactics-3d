@@ -586,6 +586,7 @@ const App: React.FC = () => {
                     fogOfWarDisabled={gameState.fogOfWarDisabled}
                     isMultiplayer={gameState.isMultiplayer}
                     isDevMode={gameState.isDevMode}
+                    pauseBlockedReason={gameState.isAwaitingReconnect ? `Waiting for ${gameState.disconnectedPlayerIds.join(', ')} to reconnect.` : null}
                 />
             )}
 

@@ -237,6 +237,7 @@ class GameService {
     private pendingMultiplayerMoveUnitId: string | null = null;
     private queuedAuthoritativeMoveTargets: Map<string, Position> = new Map();
     private pendingStartConfig: PendingStartConfig | null = null;
+    private reconnectResumeAppStatus: AppStatus | null = null;
     private readonly authoritativeActions = new Set<string>([
         'SYNC_STATE',
         'ADMIN_SET_UNIT_STATS',
@@ -690,6 +691,7 @@ class GameService {
         this.clearPendingSyncTimer();
         this.pendingMultiplayerMoveUnitId = null;
         this.queuedAuthoritativeMoveTargets.clear();
+        this.reconnectResumeAppStatus = null;
         this.authoritySocketId = null;
         this.state.roomId = null;
         this.state.lobbyMapId = null;
@@ -698,10 +700,62 @@ class GameService {
         this.state.hostAdminEnabled = false;
         this.state.fogOfWarDisabled = false;
         this.state.isInGameAdmin = false;
+        this.state.connectedPlayerIds = [];
+        this.state.disconnectedPlayerIds = [];
+        this.state.isAwaitingReconnect = false;
         this.state.isMultiplayer = false;
         this.state.myPlayerId = null;
         this.state.appStatus = AppStatus.MENU;
         this.log(`> MULTIPLAYER SESSION RESET: ${reason}`);
+    }
+
+    private tryRestoreActiveMultiplayerSession() {
+        if (!this.socket?.connected) return;
+
+        if (!this.state.roomId || !this.state.myPlayerId) return;
+
+        this.socket.emit('join_lobby', {
+            roomId: this.state.roomId,
+            preferredPlayerId: this.state.myPlayerId,
+            restoreSession: true
+        });
+    }
+
+    private setReconnectPause(disconnectedPlayerIds: PlayerId[], connectedPlayerIds: PlayerId[], message: string) {
+        const uniqueDisconnectedPlayerIds = Array.from(new Set(disconnectedPlayerIds));
+        const uniqueConnectedPlayerIds = Array.from(new Set(connectedPlayerIds));
+        const shouldPause = uniqueDisconnectedPlayerIds.length > 0;
+        const previousDisconnectedKey = this.state.disconnectedPlayerIds.join(',');
+        const nextDisconnectedKey = uniqueDisconnectedPlayerIds.join(',');
+        const wasAwaitingReconnect = this.state.isAwaitingReconnect;
+
+        this.state.disconnectedPlayerIds = uniqueDisconnectedPlayerIds;
+        this.state.connectedPlayerIds = uniqueConnectedPlayerIds;
+        this.state.isAwaitingReconnect = shouldPause;
+
+        if (shouldPause) {
+            if (this.reconnectResumeAppStatus === null) {
+                this.reconnectResumeAppStatus = this.state.appStatus;
+            }
+
+            if ([AppStatus.PLAYING, AppStatus.SHOP, AppStatus.TALENT_SELECTION].includes(this.state.appStatus)) {
+                this.state.appStatus = AppStatus.PAUSED;
+            }
+
+            if (!wasAwaitingReconnect || previousDisconnectedKey !== nextDisconnectedKey) {
+                this.log(message);
+            }
+            return;
+        }
+
+        if (this.state.isMultiplayer && this.reconnectResumeAppStatus !== null) {
+            this.state.appStatus = this.reconnectResumeAppStatus;
+        }
+
+        this.reconnectResumeAppStatus = null;
+        if (wasAwaitingReconnect) {
+            this.log('> PLAYER CONNECTION RESTORED. MATCH RESUMED.');
+        }
     }
 
     private processQueuedAuthoritativeMove(unitId: string) {
@@ -887,17 +941,45 @@ class GameService {
         // production: this.socket = io(); 
         // dev: this.socket = io('http://localhost:3001');
         const url = window.location.hostname === 'localhost' ? 'http://localhost:3001' : '/';
-        this.socket = io(url);
+        this.socket = io(url, {
+            reconnection: true,
+            reconnectionAttempts: Infinity,
+            reconnectionDelay: 1000,
+            reconnectionDelayMax: 5000,
+            timeout: 20000
+        });
 
         this.socket.on('connect', () => {
             console.log('Connected to server:', this.socket?.id);
+            this.tryRestoreActiveMultiplayerSession();
         });
 
-        this.socket.on('lobby_state', (payload: { roomId: string; mapId?: string; mapData?: MapJsonShape | null; players: string[]; playerIds?: PlayerId[]; maxPlayers: number; started: boolean; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean }) => {
+        this.socket.on('disconnect', (reason: string) => {
+            console.warn('Disconnected from server:', reason);
+            if (!this.state.isMultiplayer || !this.state.roomId || !this.state.myPlayerId) {
+                return;
+            }
+
+            const remainingConnectedPlayers = this.state.connectedPlayerIds.filter((playerId) => playerId !== this.state.myPlayerId);
+            const disconnectedPlayers = Array.from(new Set([
+                this.state.myPlayerId,
+                ...this.state.disconnectedPlayerIds
+            ]));
+            this.setReconnectPause(disconnectedPlayers, remainingConnectedPlayers, '> CONNECTION LOST. ATTEMPTING TO RESTORE SESSION...');
+            this.notify();
+        });
+
+        this.socket.on('connect_error', (error) => {
+            console.warn('Socket connection error:', error.message);
+        });
+
+        this.socket.on('lobby_state', (payload: { roomId: string; mapId?: string; mapData?: MapJsonShape | null; players: Array<string | null>; playerIds?: PlayerId[]; connectedPlayerIds?: PlayerId[]; disconnectedPlayerIds?: PlayerId[]; maxPlayers: number; started: boolean; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean; pausedForDisconnect?: boolean }) => {
             this.syncLobbyMap(payload.mapId, payload.mapData);
             this.state.roomId = payload.roomId;
             this.state.lobbyMapId = payload.mapId || null;
-            this.state.lobbyPlayerCount = Array.isArray(payload.players) ? payload.players.length : 0;
+            this.state.lobbyPlayerCount = Array.isArray(payload.connectedPlayerIds)
+                ? payload.connectedPlayerIds.length
+                : payload.players.filter(Boolean).length;
             this.state.lobbyMaxPlayers = payload.maxPlayers || 0;
             this.state.hostAdminEnabled = !!payload.hostAdminEnabled;
             this.state.fogOfWarDisabled = !!payload.fogOfWarDisabled;
@@ -909,22 +991,41 @@ class GameService {
             const myIndex = mySocketId ? payload.players.indexOf(mySocketId) : -1;
             const resolvedPlayerId = myIndex >= 0
                 ? (payload.playerIds?.[myIndex] || CONTESTED_PLAYER_IDS[myIndex] || null)
-                : null;
+                : (this.state.roomId === payload.roomId ? this.state.myPlayerId : null);
 
             if (resolvedPlayerId) {
                 this.state.myPlayerId = resolvedPlayerId;
             }
+
+            this.state.connectedPlayerIds = Array.isArray(payload.connectedPlayerIds)
+                ? [...payload.connectedPlayerIds]
+                : (payload.playerIds || []).filter((_, index) => !!payload.players[index]);
+            this.state.disconnectedPlayerIds = Array.isArray(payload.disconnectedPlayerIds)
+                ? [...payload.disconnectedPlayerIds]
+                : [];
 
             if (Array.isArray(payload.playerIds) && payload.playerIds.length > 0) {
                 this.state.activePlayerIds = [...payload.playerIds];
                 this.state.turnOrder = [...payload.playerIds];
             }
 
+            if (payload.pausedForDisconnect) {
+                const waitingOn = this.state.disconnectedPlayerIds.join(', ');
+                this.setReconnectPause(
+                    this.state.disconnectedPlayerIds,
+                    this.state.connectedPlayerIds,
+                    `> LINK LOST: WAITING FOR ${waitingOn} TO RECONNECT.`
+                );
+            } else if (this.state.isAwaitingReconnect) {
+                this.setReconnectPause([], this.state.connectedPlayerIds, '');
+            }
+
             this.notify();
         });
 
-        this.socket.on('lobby_created', (payload: string | { roomId: string; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean }) => {
+        this.socket.on('lobby_created', (payload: string | { roomId: string; playerId?: PlayerId; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean }) => {
             const roomId = typeof payload === 'string' ? payload : payload.roomId;
+            const playerId = typeof payload === 'string' ? PlayerId.ONE : (payload.playerId || PlayerId.ONE);
             const mapId = typeof payload === 'string' ? null : (payload.mapId || null);
             const mapData = typeof payload === 'string' ? null : (payload.mapData || null);
             const authoritySocketId = typeof payload === 'string' ? null : (payload.authoritySocketId || null);
@@ -937,42 +1038,97 @@ class GameService {
             this.state.lobbyMapId = mapId;
             this.state.hostAdminEnabled = hostAdminEnabled;
             this.state.fogOfWarDisabled = fogOfWarDisabled;
-            this.state.myPlayerId = PlayerId.ONE;
+            this.state.connectedPlayerIds = [playerId];
+            this.state.disconnectedPlayerIds = [];
+            this.state.isAwaitingReconnect = false;
+            this.state.myPlayerId = playerId;
             this.authoritySocketId = authoritySocketId || this.socket?.id || null;
             this.updateInGameAdminState();
-            this.log(`> LOBBY ESTABLISHED: ${roomId}${mapId ? ` [${mapId}]` : ''}`, PlayerId.ONE);
+            this.log(`> LOBBY ESTABLISHED: ${roomId}${mapId ? ` [${mapId}]` : ''}`, playerId);
             this.notify();
         });
 
-        this.socket.on('game_start', (data: { roomId: string; players: string[]; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean; turnOrder?: PlayerId[] }) => {
+        this.socket.on('game_start', (data: { roomId: string; players: Array<string | null>; playerIds?: PlayerId[]; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean; turnOrder?: PlayerId[] }) => {
             console.log('Game Start:', data);
             this.syncLobbyMap(data.mapId, data.mapData);
             this.state.roomId = data.roomId;
             this.state.isMultiplayer = true;
             this.state.lobbyMapId = data.mapId || null;
-            this.state.lobbyPlayerCount = data.players.length;
-            this.state.lobbyMaxPlayers = data.turnOrder?.length || data.players.length;
+            this.state.lobbyPlayerCount = data.players.filter(Boolean).length;
+            this.state.lobbyMaxPlayers = data.turnOrder?.length || data.playerIds?.length || data.players.length;
             this.state.hostAdminEnabled = !!data.hostAdminEnabled;
             this.state.fogOfWarDisabled = !!data.fogOfWarDisabled;
-            this.authoritySocketId = data.authoritySocketId || data.players[0] || null;
+            this.authoritySocketId = data.authoritySocketId || (data.players.find(Boolean) ?? null);
             this.updateInGameAdminState();
 
             // Resolve role from server socket order: fixed slot assignment follows join order.
             const mySocketId = this.socket?.id;
             const myIndex = mySocketId ? data.players.indexOf(mySocketId) : -1;
-            const resolvedPlayerId = myIndex >= 0 ? CONTESTED_PLAYER_IDS[myIndex] : null;
+            const resolvedPlayerId = myIndex >= 0
+                ? (data.playerIds?.[myIndex] || CONTESTED_PLAYER_IDS[myIndex] || null)
+                : null;
             if (resolvedPlayerId) {
                 this.state.myPlayerId = resolvedPlayerId;
             } else if (!this.state.myPlayerId) {
                 // Fallback for unexpected payloads/reconnect race.
                 this.state.myPlayerId = data.turnOrder?.[0] || PlayerId.ONE;
             }
-            this.state.activePlayerIds = data.turnOrder ? [...data.turnOrder] : CONTESTED_PLAYER_IDS.slice(0, data.players.length);
+            this.state.connectedPlayerIds = (data.playerIds || []).filter((_, index) => !!data.players[index]);
+            this.state.disconnectedPlayerIds = [];
+            this.state.isAwaitingReconnect = false;
+            this.state.activePlayerIds = data.turnOrder ? [...data.turnOrder] : (data.playerIds || CONTESTED_PLAYER_IDS.slice(0, data.players.length));
             this.state.turnOrder = data.turnOrder ? [...data.turnOrder] : [...this.state.activePlayerIds];
 
             this.beginMatchSetup(data.mapId || 'MAP_1', false);
             this.log(`> MULTIPLAYER LINK ESTABLISHED. YOU ARE ${this.state.myPlayerId}`, this.state.myPlayerId!);
             this.notify();
+        });
+
+        this.socket.on('game_resume', (data: { roomId: string; playerId: PlayerId; players: Array<string | null>; playerIds?: PlayerId[]; connectedPlayerIds?: PlayerId[]; disconnectedPlayerIds?: PlayerId[]; maxPlayers: number; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean; turnOrder?: PlayerId[]; phase?: 'CHARACTER_SELECTION' | 'IN_PROGRESS'; selectedCharacters?: Record<PlayerId, string | null>; gameState?: any }) => {
+            console.log('Game Resume:', data);
+            this.syncLobbyMap(data.mapId, data.mapData);
+            this.state.roomId = data.roomId;
+            this.state.isMultiplayer = true;
+            this.state.lobbyMapId = data.mapId || null;
+            this.state.lobbyPlayerCount = Array.isArray(data.connectedPlayerIds)
+                ? data.connectedPlayerIds.length
+                : data.players.filter(Boolean).length;
+            this.state.lobbyMaxPlayers = data.maxPlayers || data.turnOrder?.length || data.players.length;
+            this.state.hostAdminEnabled = !!data.hostAdminEnabled;
+            this.state.fogOfWarDisabled = !!data.fogOfWarDisabled;
+            this.state.myPlayerId = data.playerId;
+            this.state.connectedPlayerIds = Array.isArray(data.connectedPlayerIds) ? [...data.connectedPlayerIds] : [];
+            this.state.disconnectedPlayerIds = Array.isArray(data.disconnectedPlayerIds) ? [...data.disconnectedPlayerIds] : [];
+            this.authoritySocketId = data.authoritySocketId || null;
+            this.updateInGameAdminState();
+            this.state.activePlayerIds = data.turnOrder ? [...data.turnOrder] : (data.playerIds || []);
+            this.state.turnOrder = data.turnOrder ? [...data.turnOrder] : [...this.state.activePlayerIds];
+
+            if (data.phase === 'CHARACTER_SELECTION' || !data.gameState) {
+                this.beginMatchSetup(data.mapId || 'MAP_1', false);
+                this.state.playerCharacters = {
+                    ...this.createEmptyPlayerCharacters(),
+                    ...(data.selectedCharacters || {})
+                };
+                this.setReconnectPause(this.state.disconnectedPlayerIds, this.state.connectedPlayerIds, `> LINK LOST: WAITING FOR ${this.state.disconnectedPlayerIds.join(', ')} TO RECONNECT.`);
+                this.notify();
+                return;
+            }
+
+            this.handleRemoteAction('SYNC_STATE', {
+                ...data.gameState,
+                mapId: data.mapId || this.state.mapId
+            });
+            if (this.state.disconnectedPlayerIds.length > 0) {
+                this.setReconnectPause(this.state.disconnectedPlayerIds, this.state.connectedPlayerIds, `> LINK LOST: WAITING FOR ${this.state.disconnectedPlayerIds.join(', ')} TO RECONNECT.`);
+                this.notify();
+                return;
+            }
+
+            if (this.state.isAwaitingReconnect) {
+                this.setReconnectPause([], this.state.connectedPlayerIds, '');
+                this.notify();
+            }
         });
 
         this.socket.on('character_selection_update', (payload: { playerCharacters: Record<PlayerId, string | null> }) => {
@@ -1019,6 +1175,21 @@ class GameService {
             this.handleRemoteAction(payload.action, payload.data);
         });
 
+        this.socket.on('player_connection_state', (payload: { playerId: PlayerId; connected: boolean; disconnectedPlayerIds?: PlayerId[]; connectedPlayerIds?: PlayerId[] }) => {
+            const connectedPlayerIds = Array.isArray(payload.connectedPlayerIds) ? payload.connectedPlayerIds : this.state.connectedPlayerIds;
+            const disconnectedPlayerIds = Array.isArray(payload.disconnectedPlayerIds) ? payload.disconnectedPlayerIds : this.state.disconnectedPlayerIds;
+            if (disconnectedPlayerIds.length > 0) {
+                this.setReconnectPause(
+                    disconnectedPlayerIds,
+                    connectedPlayerIds,
+                    `> LINK LOST: WAITING FOR ${disconnectedPlayerIds.join(', ')} TO RECONNECT.`
+                );
+            } else if (this.state.isAwaitingReconnect) {
+                this.setReconnectPause([], connectedPlayerIds, '');
+            }
+            this.notify();
+        });
+
         this.socket.on('command_rejected', (payload: { action: string, reason: string }) => {
             if (payload.action === 'MOVE') {
                 this.pendingMultiplayerMoveUnitId = null;
@@ -1026,8 +1197,23 @@ class GameService {
             if (payload.reason === 'ROOM_NOT_FOUND' || payload.reason === 'NOT_IN_ROOM') {
                 this.resetMultiplayerSessionState(payload.reason);
             }
+            if (payload.reason === 'GAME_PAUSED_PLAYER_DISCONNECTED') {
+                this.setReconnectPause(
+                    this.state.disconnectedPlayerIds,
+                    this.state.connectedPlayerIds,
+                    `> LINK LOST: WAITING FOR ${this.state.disconnectedPlayerIds.join(', ')} TO RECONNECT.`
+                );
+            }
             this.log(`> COMMAND REJECTED [${payload.action}]: ${payload.reason}`);
             this.notify();
+        });
+
+        this.socket.on('session_restore_failed', (payload: { roomId: string; reason: string }) => {
+            console.warn('Session restore failed:', payload);
+            if (this.state.roomId === payload.roomId || this.state.isMultiplayer) {
+                this.resetMultiplayerSessionState(payload.reason);
+                this.notify();
+            }
         });
 
         this.socket.on('error_message', (msg: string) => {
@@ -1058,7 +1244,12 @@ class GameService {
             this.state.hostAdminEnabled = false;
             this.state.fogOfWarDisabled = false;
             this.state.isInGameAdmin = false;
-            this.socket.emit('join_lobby', roomId);
+            this.state.connectedPlayerIds = [];
+            this.state.disconnectedPlayerIds = [];
+            this.state.isAwaitingReconnect = false;
+            this.socket.emit('join_lobby', {
+                roomId
+            });
         }
     }
 
@@ -1091,6 +1282,7 @@ class GameService {
 
     private buildSyncStatePayload() {
         return {
+            mapId: this.state.mapId,
             terrain: this.state.terrain,
             decks: this.createPerPlayerRecord((playerId) =>
                 this.state.decks[playerId].map((card) => this.cloneCardForSync(card))
@@ -1338,6 +1530,9 @@ class GameService {
                 const syncedShopAvailable = typeof data.shopAvailable === 'boolean'
                     ? data.shopAvailable
                     : this.state.shopAvailable;
+                if (data.mapId) {
+                    this.state.mapId = data.mapId;
+                }
                 this.state.terrain = data.terrain;
                 this.state.decks = data.decks;
                 this.state.credits = data.credits;
@@ -1478,6 +1673,7 @@ class GameService {
                 this.state.interactionState = shouldApplyInteractionState
                     ? syncedInteractionState
                     : { mode: 'NORMAL' };
+                this.updateFogOfWar();
                 this.notify();
                 break;
         }
@@ -1573,6 +1769,9 @@ class GameService {
             hostAdminEnabled: false,
             fogOfWarDisabled: false,
             isInGameAdmin: false,
+            connectedPlayerIds: [],
+            disconnectedPlayerIds: [],
+            isAwaitingReconnect: false,
             myPlayerId: null,
             availableMaps: getAvailableMaps()
         };
@@ -3174,6 +3373,11 @@ class GameService {
 
     public togglePause() {
         if (this.state.appStatus === AppStatus.MENU || this.state.appStatus === AppStatus.GAME_OVER || this.state.appStatus === AppStatus.MAP_SELECTION) return;
+        if (this.state.isAwaitingReconnect) {
+            this.log(`> MATCH PAUSED: WAITING FOR ${this.state.disconnectedPlayerIds.join(', ')} TO RECONNECT.`);
+            this.notify();
+            return;
+        }
 
         if (this.state.appStatus === AppStatus.PLAYING) {
             this.state.appStatus = AppStatus.PAUSED;
@@ -3192,6 +3396,7 @@ class GameService {
         const showUnitLevelLabels = this.state.showUnitLevelLabels;
         const newState = this.getInitialState();
         this.pendingStartConfig = null;
+        this.reconnectResumeAppStatus = null;
         this.authoritySocketId = null;
         this.state = { ...newState, lightMode, showUnitNameLabels, showUnitLevelLabels };
         this.log("REBOOTING SIMULATION...");
@@ -3550,6 +3755,45 @@ class GameService {
         }, 1200);
     }
 
+    private triggerCreditPulses(pulses: Array<{ unitId: string; amount: number }>) {
+        if (pulses.length === 0) return;
+
+        const appliedUnitIds = new Set<string>();
+
+        this.state.units = this.state.units.map((unit) => {
+            const pulse = pulses.find((entry) => entry.unitId === unit.id && entry.amount > 0);
+            if (!pulse) return unit;
+
+            appliedUnitIds.add(unit.id);
+            return {
+                ...unit,
+                status: {
+                    ...unit.status,
+                    creditPulseAmount: pulse.amount
+                }
+            };
+        });
+
+        if (appliedUnitIds.size === 0) return;
+
+        window.setTimeout(() => {
+            this.state.units = this.state.units.map((unit) => {
+                if (!appliedUnitIds.has(unit.id)) return unit;
+                return {
+                    ...unit,
+                    status: {
+                        ...unit.status,
+                        creditPulseAmount: null
+                    }
+                };
+            });
+            this.notify();
+            if (this.state.isMultiplayer && this.isSyncAuthority()) {
+                this.replicateAuthoritativeState();
+            }
+        }, 1200);
+    }
+
     private triggerMissPulse(targetUnitId: string, text: string = 'MISS') {
         const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
         if (targetIdx === -1) return;
@@ -3582,6 +3826,50 @@ class GameService {
 
     private shouldAttackMiss(attacker: Unit, target: Unit): boolean {
         return target.level >= attacker.level + 10 && Math.random() < 0.25;
+    }
+
+    private applyFinishingBlowRewards(
+        units: Unit[],
+        sourceUnitId: string,
+        defeatedUnit: Unit
+    ): { units: Unit[]; creditPulse: { unitId: string; amount: number } | null } {
+        const sourceIdx = units.findIndex((unit) => unit.id === sourceUnitId);
+        if (sourceIdx === -1) {
+            return { units, creditPulse: null };
+        }
+
+        const sourceUnit = units[sourceIdx];
+        const eligibleKill = defeatedUnit.playerId === PlayerId.NEUTRAL
+            || this.arePlayersHostile(sourceUnit.playerId, defeatedUnit.playerId);
+
+        if (!eligibleKill || sourceUnit.playerId === PlayerId.NEUTRAL) {
+            return { units, creditPulse: null };
+        }
+
+        const nextLevel = Math.max(1, (sourceUnit.level || 1) + 1);
+        units[sourceIdx] = {
+            ...sourceUnit,
+            level: nextLevel
+        };
+        this.log(`> ${sourceUnit.type} LEVEL UP: ${nextLevel}`, sourceUnit.playerId);
+
+        if (defeatedUnit.playerId !== PlayerId.NEUTRAL) {
+            return { units, creditPulse: null };
+        }
+
+        const baseCost = CARD_CONFIG[defeatedUnit.type]?.cost || 0;
+        const bounty = Math.max(0, Math.round(baseCost * 0.1));
+        if (bounty <= 0) {
+            return { units, creditPulse: null };
+        }
+
+        this.state.credits[sourceUnit.playerId] += bounty;
+        this.log(`> NEUTRAL BOUNTY: +$${bounty} FOR ${defeatedUnit.type}`, sourceUnit.playerId);
+
+        return {
+            units,
+            creditPulse: { unitId: defeatedUnit.id, amount: bounty }
+        };
     }
 
     private canMindControlTarget(hacker: Unit, target: Unit): boolean {
@@ -6385,6 +6673,7 @@ class GameService {
 	        const attackerIdx = this.state.units.findIndex(u => u.id === attackerId);
 	        const targetIdx = this.state.units.findIndex(u => u.id === targetId);
             let directDamagePulse: { unitId: string; amount: number } | null = null;
+            let directCreditPulse: { unitId: string; amount: number } | null = null;
             let directMissPulseTargetId: string | null = null;
             let attackMissed = false;
 
@@ -6453,8 +6742,24 @@ class GameService {
 
                     if (updatedUnits[targetIdx].stats.hp === 0) {
                         this.log(`> TARGET ELIMINATED: ${target.type}`, attacker.playerId);
-                        updatedUnits[targetIdx].status.isDying = true;
-                        updatedUnits[attackerIdx].status.autoAttackTargetId = null;
+                        updatedUnits[targetIdx] = {
+                            ...updatedUnits[targetIdx],
+                            movePath: [],
+                            status: {
+                                ...updatedUnits[targetIdx].status,
+                                isDying: true
+                            }
+                        };
+                        updatedUnits[attackerIdx] = {
+                            ...updatedUnits[attackerIdx],
+                            status: {
+                                ...updatedUnits[attackerIdx].status,
+                                autoAttackTargetId: null
+                            }
+                        };
+                        const rewardResult = this.applyFinishingBlowRewards(updatedUnits, attacker.id, target);
+                        updatedUnits = rewardResult.units;
+                        directCreditPulse = rewardResult.creditPulse;
                         setTimeout(() => { this.removeUnit(targetId); }, 1500);
                     }
                 }
@@ -6477,6 +6782,9 @@ class GameService {
             if (directDamagePulse) {
                 this.triggerDamagePulses([directDamagePulse]);
             }
+            if (directCreditPulse) {
+                this.triggerCreditPulses([directCreditPulse]);
+            }
             if (directMissPulseTargetId) {
                 this.triggerMissPulse(directMissPulseTargetId);
             }
@@ -6486,46 +6794,71 @@ class GameService {
 
 	    private applyAreaDamage(center: Position, radius: number, damage: number, sourceUnitId: string, excludeUnitId?: string) {
             const damagePulses: Array<{ unitId: string; amount: number }> = [];
-	        const hitUnits = this.state.units.map(u => {
-	            if (u.id === sourceUnitId) return u;
-	            if (excludeUnitId && u.id === excludeUnitId) return u;
+            const creditPulses: Array<{ unitId: string; amount: number }> = [];
+            const deadUnitIds: string[] = [];
+            let hitUnits = [...this.state.units];
+            const sourcePlayerId = hitUnits.find((unit) => unit.id === sourceUnitId)?.playerId;
 
-            const dx = u.position.x - center.x;
-            const dz = u.position.z - center.z;
-            const dist = Math.sqrt(dx * dx + dz * dz);
+            for (let i = 0; i < hitUnits.length; i++) {
+                const unit = hitUnits[i];
+                if (unit.id === sourceUnitId) continue;
+                if (excludeUnitId && unit.id === excludeUnitId) continue;
 
-	            if (dist <= radius) {
-                    const damageResult = this.applyDamageToUnit(u, damage);
-                    if (damageResult.wasInvulnerable) {
-                        this.log(`> BLAST DEFLECTED: IMMORTALITY SHIELD`, u.playerId);
-                        return u;
+                const dx = unit.position.x - center.x;
+                const dz = unit.position.z - center.z;
+                const dist = Math.sqrt(dx * dx + dz * dz);
+
+                if (dist > radius) continue;
+
+                const damageResult = this.applyDamageToUnit(unit, damage);
+                if (damageResult.wasInvulnerable) {
+                    this.log(`> BLAST DEFLECTED: IMMORTALITY SHIELD`, unit.playerId);
+                    continue;
+                }
+
+                const absorptionSuffix = damageResult.shieldAbsorbed > 0
+                    ? ` (${damageResult.shieldAbsorbed} ABSORBED${damageResult.shieldBroken ? ', SHIELD DOWN' : ''})`
+                    : '';
+
+                if (damageResult.hpDamage > 0) {
+                    this.log(`> BLAST HIT ${unit.type}: -${damageResult.hpDamage} HP${absorptionSuffix}`);
+                    damagePulses.push({ unitId: unit.id, amount: damageResult.hpDamage });
+                } else if (damageResult.shieldAbsorbed > 0) {
+                    this.log(`> BLAST HIT ${unit.type}: KINETIC SHIELD ABSORBS ${damageResult.shieldAbsorbed}${damageResult.shieldBroken ? ' AND COLLAPSES' : ''}`);
+                }
+
+                let nextUnit = damageResult.unit;
+                if (nextUnit.stats.hp === 0) {
+                    this.log(`> TARGET ELIMINATED: ${unit.type}`, sourcePlayerId);
+                    nextUnit = {
+                        ...nextUnit,
+                        movePath: [],
+                        status: {
+                            ...nextUnit.status,
+                            isDying: true
+                        }
+                    };
+                    hitUnits[i] = nextUnit;
+                    deadUnitIds.push(unit.id);
+                    const rewardResult = this.applyFinishingBlowRewards(hitUnits, sourceUnitId, unit);
+                    hitUnits = rewardResult.units;
+                    if (rewardResult.creditPulse) {
+                        creditPulses.push(rewardResult.creditPulse);
                     }
+                    continue;
+                }
 
-                    const absorptionSuffix = damageResult.shieldAbsorbed > 0
-                        ? ` (${damageResult.shieldAbsorbed} ABSORBED${damageResult.shieldBroken ? ', SHIELD DOWN' : ''})`
-                        : '';
-
-                    if (damageResult.hpDamage > 0) {
-                        this.log(`> BLAST HIT ${u.type}: -${damageResult.hpDamage} HP${absorptionSuffix}`);
-                        damagePulses.push({ unitId: u.id, amount: damageResult.hpDamage });
-                    } else if (damageResult.shieldAbsorbed > 0) {
-                        this.log(`> BLAST HIT ${u.type}: KINETIC SHIELD ABSORBS ${damageResult.shieldAbsorbed}${damageResult.shieldBroken ? ' AND COLLAPSES' : ''}`);
-                    }
-
-	                return damageResult.unit;
-	            }
-	            return u;
-	        });
+                hitUnits[i] = nextUnit;
+            }
 
 	        this.state.units = hitUnits;
             if (damagePulses.length > 0) {
                 this.triggerDamagePulses(damagePulses);
             }
-	        const deadUnitIds = hitUnits
-            .filter(u => u.stats.hp === 0 && !u.status.isDying)
-            .map(u => u.id);
-
-        deadUnitIds.forEach((unitId) => this.removeUnit(unitId));
+            if (creditPulses.length > 0) {
+                this.triggerCreditPulses(creditPulses);
+            }
+            deadUnitIds.forEach((unitId) => window.setTimeout(() => this.removeUnit(unitId), 1500));
         if (deadUnitIds.length === 0) {
             this.checkWinCondition();
         }

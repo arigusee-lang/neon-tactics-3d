@@ -18,6 +18,7 @@ interface MainMenuProps {
   fogOfWarDisabled: boolean;
   isMultiplayer: boolean;
   isDevMode: boolean;
+  pauseBlockedReason?: string | null;
 }
 
 type MenuView = 'ROOT' | 'START' | 'SOLO_MAPS' | 'DEV_MAPS' | 'MULTIPLAYER';
@@ -35,7 +36,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   hostAdminEnabled,
   fogOfWarDisabled,
   isMultiplayer,
-  isDevMode
+  isDevMode,
+  pauseBlockedReason = null
 }) => {
   const [menuView, setMenuView] = useState<MenuView>('ROOT');
   const [roomCodeInput, setRoomCodeInput] = useState('');
@@ -789,11 +791,18 @@ const MainMenu: React.FC<MainMenuProps> = ({
               <>
                 <button
                   onClick={onResume}
+                  disabled={!!pauseBlockedReason}
                   className="group relative overflow-hidden border border-cyan-500/50 bg-cyan-900/40 px-8 py-3 font-mono font-bold uppercase tracking-widest text-cyan-400 transition-all duration-200 hover:border-cyan-400 hover:bg-cyan-600/20 hover:text-white"
                 >
                   <div className="absolute inset-0 translate-y-full bg-cyan-400/10 transition-transform duration-300 group-hover:translate-y-0" />
-                  Resume Simulation
+                  {pauseBlockedReason ? 'Waiting For Reconnect' : 'Resume Simulation'}
                 </button>
+
+                {pauseBlockedReason && (
+                  <div className="max-w-md text-center text-[11px] font-mono uppercase tracking-[0.18em] text-amber-300/85">
+                    {pauseBlockedReason}
+                  </div>
+                )}
 
                 {canRestartCurrentMap && (
                   <button

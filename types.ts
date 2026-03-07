@@ -189,6 +189,7 @@ export interface UnitStatus {
   healPulseAmount?: number | null;
   energyPulseAmount?: number | null;
   damagePulseAmount?: number | null;
+  creditPulseAmount?: number | null;
   missPulseText?: string | null;
   attackTargetId?: string | null;     // Transient: For current animation frame
   autoAttackTargetId?: string | null; // Persistent: For "Nemesis" logic
@@ -366,6 +367,9 @@ export interface GameState {
   hostAdminEnabled: boolean;
   fogOfWarDisabled: boolean;
   isInGameAdmin: boolean;
+  connectedPlayerIds: PlayerId[];
+  disconnectedPlayerIds: PlayerId[];
+  isAwaitingReconnect: boolean;
   myPlayerId: PlayerId | null; // The player ID that THIS client controls
 
   // Developer Mode Flag

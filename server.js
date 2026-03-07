@@ -59,7 +59,9 @@ const io = new Server(httpServer, {
   cors: {
     origin: "*", // Adjust for production
     methods: ["GET", "POST"]
-  }
+  },
+  pingInterval: 25000,
+  pingTimeout: 60000
 });
 
 app.use(express.static(path.join(__dirname, 'dist')));
@@ -124,9 +126,8 @@ function getLobbyCapacityFromMapPayload(mapId, mapData) {
 }
 
 // Lobby management
-// Keep an explicit simulation authority socket so the transport layer can evolve
-// independently from the current 2-player P1/P2 game rules.
-const lobbies = {}; // { roomId: { players: [socketId], authoritySocketId: string, gameState: any, mapId: string, currentTurn: string, turnOrder: string[], maxPlayers: number, started: boolean } }
+// Keep stable player slots so transient socket disconnects do not destroy the room.
+const lobbies = {}; // { roomId: { playerSlots: [...], authorityPlayerId: string, authoritySocketId: string | null, gameState: any, mapId: string, currentTurn: string, turnOrder: string[], maxPlayers: number, started: boolean } }
 
 const PLAYER_ONE = 'P1';
 const PLAYER_TWO = 'P2';
@@ -210,15 +211,6 @@ const ACTIONS_WITH_EXPLICIT_PLAYER = new Set([
   'TALENT_CHOOSE'
 ]);
 
-function getPlayerIdForSocket(lobby, socketId) {
-  const index = lobby.players.indexOf(socketId);
-  if (index === 0) return PLAYER_ONE;
-  if (index === 1) return PLAYER_TWO;
-  if (index === 2) return PLAYER_THREE;
-  if (index === 3) return PLAYER_FOUR;
-  return null;
-}
-
 function getNextTurn(currentTurn, turnOrder = PLAYER_IDS) {
   const currentIndex = turnOrder.indexOf(currentTurn);
   if (currentIndex === -1 || turnOrder.length === 0) {
@@ -237,10 +229,72 @@ function createEmptyCharacterSelections() {
   };
 }
 
-function getLobbyPlayerIds(lobby) {
-  return lobby.players
-    .map((socketId) => getPlayerIdForSocket(lobby, socketId))
+function createPlayerSlots(turnOrder, initialSocketId) {
+  return turnOrder.map((playerId, index) => ({
+    playerId,
+    socketId: index === 0 ? initialSocketId : null,
+    connectionState: index === 0 ? 'connected' : 'open',
+    joinedAt: index === 0 ? Date.now() : null,
+    disconnectedAt: null,
+    lastSeenAt: index === 0 ? Date.now() : null
+  }));
+}
+
+function getPlayerSlotByPlayerId(lobby, playerId) {
+  return lobby.playerSlots.find((slot) => slot.playerId === playerId) || null;
+}
+
+function getPlayerSlotBySocketId(lobby, socketId) {
+  return lobby.playerSlots.find((slot) => slot.socketId === socketId) || null;
+}
+
+function getPlayerIdForSocket(lobby, socketId) {
+  return getPlayerSlotBySocketId(lobby, socketId)?.playerId || null;
+}
+
+function getConnectedSlots(lobby) {
+  return lobby.playerSlots.filter((slot) => slot.connectionState === 'connected' && !!slot.socketId);
+}
+
+function getDisconnectedSlots(lobby) {
+  return lobby.playerSlots.filter((slot) => slot.connectionState === 'disconnected');
+}
+
+function getOpenSlots(lobby) {
+  return lobby.playerSlots.filter((slot) => slot.connectionState === 'open');
+}
+
+function getJoinedSlots(lobby) {
+  return lobby.playerSlots.filter((slot) => slot.connectionState !== 'open');
+}
+
+function getConnectedSocketIds(lobby) {
+  return getConnectedSlots(lobby)
+    .map((slot) => slot.socketId)
     .filter(Boolean);
+}
+
+function getLobbyPlayerIds(lobby) {
+  return lobby.playerSlots.map((slot) => slot.playerId);
+}
+
+function refreshLobbyAuthority(lobby) {
+  const authoritySlot = getPlayerSlotByPlayerId(lobby, lobby.authorityPlayerId);
+  lobby.authoritySocketId = authoritySlot?.connectionState === 'connected' ? authoritySlot.socketId : null;
+}
+
+function isLobbyFull(lobby) {
+  return getJoinedSlots(lobby).length === lobby.maxPlayers;
+}
+
+function isLobbyPausedForDisconnect(lobby) {
+  return !!lobby.started && getDisconnectedSlots(lobby).length > 0;
+}
+
+function getLobbyPhase(lobby) {
+  if (!lobby.started) return 'LOBBY';
+  if (!lobby.gameState) return 'CHARACTER_SELECTION';
+  return 'IN_PROGRESS';
 }
 
 function emitLobbyState(roomId, lobby) {
@@ -248,49 +302,185 @@ function emitLobbyState(roomId, lobby) {
     roomId,
     mapId: lobby.mapId || 'MAP_1',
     mapData: lobby.mapData || null,
-    players: [...lobby.players],
+    players: lobby.playerSlots.map((slot) => slot.socketId),
     playerIds: getLobbyPlayerIds(lobby),
+    connectedPlayerIds: getConnectedSlots(lobby).map((slot) => slot.playerId),
+    disconnectedPlayerIds: getDisconnectedSlots(lobby).map((slot) => slot.playerId),
     maxPlayers: lobby.maxPlayers || 2,
     started: !!lobby.started,
     authoritySocketId: lobby.authoritySocketId || null,
     hostAdminEnabled: !!lobby.hostAdminEnabled,
-    fogOfWarDisabled: !!lobby.fogOfWarDisabled
+    fogOfWarDisabled: !!lobby.fogOfWarDisabled,
+    phase: getLobbyPhase(lobby),
+    pausedForDisconnect: isLobbyPausedForDisconnect(lobby)
   });
 }
 
-function removePlayerFromLobby(socket, roomId, lobby, departureMessage = 'Opponent disconnected') {
-  if (!lobby.players.includes(socket.id)) return;
+function assignSocketToSlot(socket, roomId, lobby, slot) {
+  socket.join(roomId);
+  socket.data.roomId = roomId;
+  socket.data.playerId = slot.playerId;
+  slot.socketId = socket.id;
+  slot.connectionState = 'connected';
+  slot.joinedAt = slot.joinedAt || Date.now();
+  slot.disconnectedAt = null;
+  slot.lastSeenAt = Date.now();
+  refreshLobbyAuthority(lobby);
+}
 
-  const departingPlayerId = getPlayerIdForSocket(lobby, socket.id);
+function releaseSocketFromLobby(socket, roomId) {
   socket.leave(roomId);
+  socket.data.roomId = null;
+  socket.data.playerId = null;
+}
 
-  lobby.players = lobby.players.filter((id) => id !== socket.id);
+function removePlayerFromLobby(socket, roomId, lobby, departureMessage = 'Opponent left the lobby') {
+  const departingSlot = getPlayerSlotBySocketId(lobby, socket.id);
+  if (!departingSlot) return;
 
-  if (departingPlayerId) {
-    lobby.selectedCharacters = {
-      ...createEmptyCharacterSelections(),
-      ...(lobby.selectedCharacters || {}),
-      [departingPlayerId]: null
-    };
-  }
+  releaseSocketFromLobby(socket, roomId);
 
-  if (lobby.players.length === 0) {
+  departingSlot.socketId = null;
+  departingSlot.connectionState = 'open';
+  departingSlot.joinedAt = null;
+  departingSlot.disconnectedAt = null;
+  departingSlot.lastSeenAt = Date.now();
+
+  lobby.selectedCharacters = {
+    ...createEmptyCharacterSelections(),
+    ...(lobby.selectedCharacters || {}),
+    [departingSlot.playerId]: null
+  };
+
+  if (getConnectedSlots(lobby).length === 0) {
+    console.log(`[ROOM][CLEANUP] room=${roomId} reason=all_players_left`);
     delete lobbies[roomId];
     return;
   }
 
-  lobby.authoritySocketId = lobby.players[0];
   lobby.started = false;
   lobby.currentTurn = lobby.turnOrder?.[0] || PLAYER_ONE;
   lobby.gameState = null;
   lobby.selectedCharacters = createEmptyCharacterSelections();
+  refreshLobbyAuthority(lobby);
 
   emitLobbyState(roomId, lobby);
   io.to(roomId).emit('error_message', departureMessage);
 }
 
+function markPlayerDisconnected(socket, roomId, lobby, reason = 'transport disconnect') {
+  const departingSlot = getPlayerSlotBySocketId(lobby, socket.id);
+  if (!departingSlot) return;
+
+  departingSlot.socketId = null;
+  departingSlot.connectionState = 'disconnected';
+  departingSlot.disconnectedAt = Date.now();
+  departingSlot.lastSeenAt = Date.now();
+  socket.data.roomId = null;
+  socket.data.playerId = null;
+  refreshLobbyAuthority(lobby);
+
+  const connectedCount = getConnectedSlots(lobby).length;
+  const joinedCount = getJoinedSlots(lobby).length;
+  console.warn(`[ROOM][DISCONNECT] room=${roomId} player=${departingSlot.playerId} socket=${socket.id} reason=${reason} connected=${connectedCount}/${joinedCount} phase=${getLobbyPhase(lobby)}`);
+
+  if (connectedCount === 0) {
+    console.log(`[ROOM][CLEANUP] room=${roomId} reason=all_players_disconnected`);
+    delete lobbies[roomId];
+    return;
+  }
+
+  emitLobbyState(roomId, lobby);
+  io.to(roomId).emit('player_connection_state', {
+    roomId,
+    playerId: departingSlot.playerId,
+    connected: false,
+    reason,
+    disconnectedPlayerIds: getDisconnectedSlots(lobby).map((slot) => slot.playerId),
+    connectedPlayerIds: getConnectedSlots(lobby).map((slot) => slot.playerId),
+    phase: getLobbyPhase(lobby)
+  });
+}
+
+function emitGameStart(roomId, lobby) {
+  io.to(roomId).emit('game_start', {
+    roomId,
+    players: lobby.playerSlots.map((slot) => slot.socketId),
+    playerIds: getLobbyPlayerIds(lobby),
+    mapId: lobby.mapId || 'MAP_1',
+    mapData: lobby.mapData || null,
+    authoritySocketId: lobby.authoritySocketId,
+    hostAdminEnabled: !!lobby.hostAdminEnabled,
+    fogOfWarDisabled: !!lobby.fogOfWarDisabled,
+    turnOrder: lobby.turnOrder
+  });
+}
+
+function emitGameResume(socket, roomId, lobby, playerId) {
+  socket.emit('game_resume', {
+    roomId,
+    playerId,
+    players: lobby.playerSlots.map((slot) => slot.socketId),
+    playerIds: getLobbyPlayerIds(lobby),
+    connectedPlayerIds: getConnectedSlots(lobby).map((slot) => slot.playerId),
+    disconnectedPlayerIds: getDisconnectedSlots(lobby).map((slot) => slot.playerId),
+    maxPlayers: lobby.maxPlayers,
+    mapId: lobby.mapId || 'MAP_1',
+    mapData: lobby.mapData || null,
+    authoritySocketId: lobby.authoritySocketId,
+    hostAdminEnabled: !!lobby.hostAdminEnabled,
+    fogOfWarDisabled: !!lobby.fogOfWarDisabled,
+    turnOrder: lobby.turnOrder,
+    phase: getLobbyPhase(lobby),
+    selectedCharacters: lobby.selectedCharacters || createEmptyCharacterSelections(),
+    gameState: lobby.gameState || null
+  });
+}
+
+function normalizeJoinLobbyPayload(payload) {
+  if (typeof payload === 'string') {
+    return {
+      roomId: payload,
+      preferredPlayerId: null,
+      restoreSession: false
+    };
+  }
+
+  return {
+    roomId: typeof payload?.roomId === 'string' ? payload.roomId : '',
+    preferredPlayerId: typeof payload?.preferredPlayerId === 'string' ? payload.preferredPlayerId : null,
+    restoreSession: !!payload?.restoreSession
+  };
+}
+
+function resolveJoinSlot(lobby, preferredPlayerId) {
+  if (preferredPlayerId) {
+    const preferredSlot = getPlayerSlotByPlayerId(lobby, preferredPlayerId);
+    if (preferredSlot && preferredSlot.connectionState !== 'connected') {
+      return preferredSlot;
+    }
+  }
+
+  if (!lobby.started) {
+    return getOpenSlots(lobby)[0] || (getDisconnectedSlots(lobby).length === 1 ? getDisconnectedSlots(lobby)[0] : null);
+  }
+
+  return getDisconnectedSlots(lobby).length === 1 ? getDisconnectedSlots(lobby)[0] : null;
+}
+
+function emitJoinFailure(socket, restoreSession, roomId, reason, message) {
+  if (restoreSession) {
+    socket.emit('session_restore_failed', { roomId, reason });
+    return;
+  }
+
+  socket.emit('error_message', message);
+}
+
 io.on('connection', (socket) => {
   console.log(`User connected: ${socket.id}`);
+  socket.data.roomId = null;
+  socket.data.playerId = null;
 
   // 1. Create Lobby
   socket.on('create_lobby', (payload = {}) => {
@@ -301,8 +491,10 @@ io.on('connection', (socket) => {
     const maxPlayers = getLobbyCapacityFromMapPayload(mapId, mapData);
     const turnOrder = PLAYER_IDS.slice(0, maxPlayers);
     const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const playerSlots = createPlayerSlots(turnOrder, socket.id);
     lobbies[roomId] = {
-      players: [socket.id],
+      playerSlots,
+      authorityPlayerId: turnOrder[0] || PLAYER_ONE,
       authoritySocketId: socket.id,
       hostAdminEnabled,
       fogOfWarDisabled,
@@ -316,45 +508,72 @@ io.on('connection', (socket) => {
       started: false
     };
     socket.join(roomId);
+    socket.data.roomId = roomId;
+    socket.data.playerId = turnOrder[0] || PLAYER_ONE;
     emitLobbyState(roomId, lobbies[roomId]);
     socket.emit('lobby_created', {
       roomId,
+      playerId: turnOrder[0] || PLAYER_ONE,
       mapId,
       mapData,
       authoritySocketId: socket.id,
       hostAdminEnabled,
       fogOfWarDisabled
     });
-    console.log(`Lobby created: ${roomId} by ${socket.id} | map=${mapId} | hostAdmin=${hostAdminEnabled} | fogOff=${fogOfWarDisabled}`);
+    console.log(`[ROOM][CREATE] room=${roomId} hostSocket=${socket.id} player=${turnOrder[0] || PLAYER_ONE} map=${mapId} maxPlayers=${maxPlayers} hostAdmin=${hostAdminEnabled} fogOff=${fogOfWarDisabled}`);
   });
 
   // 2. Join Lobby
-  socket.on('join_lobby', (roomId) => {
+  socket.on('join_lobby', (payload) => {
+    const { roomId, preferredPlayerId, restoreSession } = normalizeJoinLobbyPayload(payload);
     const lobby = lobbies[roomId];
-    if (lobby && lobby.players.length < lobby.maxPlayers) {
+
+    if (!lobby) {
+      emitJoinFailure(socket, restoreSession, roomId, 'ROOM_NOT_FOUND', 'Lobby not found or full');
+      return;
+    }
+
+    const slot = resolveJoinSlot(lobby, preferredPlayerId);
+    if (!slot) {
+      const reason = lobby.started ? 'REJOIN_SLOT_UNAVAILABLE' : 'LOBBY_FULL';
+      const message = lobby.started
+        ? 'Game is waiting for a disconnected player to reconnect'
+        : 'Lobby not found or full';
+      emitJoinFailure(socket, restoreSession, roomId, reason, message);
+      return;
+    }
+
+    if (slot.connectionState === 'open') {
       lobby.selectedCharacters = createEmptyCharacterSelections();
       lobby.gameState = null;
-      lobby.players.push(socket.id);
-      lobby.started = lobby.players.length === lobby.maxPlayers;
       lobby.currentTurn = lobby.turnOrder?.[0] || PLAYER_ONE;
-      socket.join(roomId);
-      emitLobbyState(roomId, lobby);
+    }
 
-      if (lobby.started) {
-        io.to(roomId).emit('game_start', {
-          roomId,
-          players: lobby.players,
-          mapId: lobby.mapId || 'MAP_1',
-          mapData: lobby.mapData || null,
-          authoritySocketId: lobby.authoritySocketId,
-          hostAdminEnabled: !!lobby.hostAdminEnabled,
-          fogOfWarDisabled: !!lobby.fogOfWarDisabled,
-          turnOrder: lobby.turnOrder
-        });
-        console.log(`Player ${socket.id} joined lobby ${roomId} (${lobby.players.length}/${lobby.maxPlayers})`);
-      }
-    } else {
-      socket.emit('error_message', 'Lobby not found or full');
+    assignSocketToSlot(socket, roomId, lobby, slot);
+    emitLobbyState(roomId, lobby);
+
+    const connectedCount = getConnectedSlots(lobby).length;
+    console.log(`[ROOM][JOIN] room=${roomId} socket=${socket.id} player=${slot.playerId} restore=${restoreSession} connected=${connectedCount}/${lobby.maxPlayers} phase=${getLobbyPhase(lobby)}`);
+
+    if (!lobby.started && isLobbyFull(lobby)) {
+      lobby.started = true;
+      emitLobbyState(roomId, lobby);
+      emitGameStart(roomId, lobby);
+      console.log(`[ROOM][START] room=${roomId} players=${getLobbyPlayerIds(lobby).join(',')} map=${lobby.mapId || 'MAP_1'}`);
+      return;
+    }
+
+    if (lobby.started) {
+      io.to(roomId).emit('player_connection_state', {
+        roomId,
+        playerId: slot.playerId,
+        connected: true,
+        reason: restoreSession ? 'session_restore' : 'join_lobby',
+        disconnectedPlayerIds: getDisconnectedSlots(lobby).map((entry) => entry.playerId),
+        connectedPlayerIds: getConnectedSlots(lobby).map((entry) => entry.playerId),
+        phase: getLobbyPhase(lobby)
+      });
+      emitGameResume(socket, roomId, lobby, slot.playerId);
     }
   });
 
@@ -373,7 +592,7 @@ io.on('connection', (socket) => {
     }
 
     const lobby = lobbies[roomId];
-    if (!lobby || !lobby.players.includes(socket.id)) {
+    if (!lobby || !getPlayerSlotBySocketId(lobby, socket.id)) {
       socket.emit('error_message', 'Lobby not found');
       return;
     }
@@ -399,8 +618,8 @@ io.on('connection', (socket) => {
       playerCharacters: lobby.selectedCharacters
     });
 
-    const requiredPlayerIds = getLobbyPlayerIds(lobby);
-    const allSelected = requiredPlayerIds.length === lobby.players.length
+    const requiredPlayerIds = getJoinedSlots(lobby).map((slot) => slot.playerId);
+    const allSelected = requiredPlayerIds.length > 0
       && requiredPlayerIds.every((id) => lobby.selectedCharacters?.[id]);
 
     if (allSelected) {
@@ -439,13 +658,18 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (!lobby.players.includes(socket.id)) {
+    if (!getPlayerSlotBySocketId(lobby, socket.id)) {
       reject('NOT_IN_ROOM');
       return;
     }
 
     if (!lobby.started) {
       reject('GAME_NOT_STARTED');
+      return;
+    }
+
+    if (action !== 'SYNC_STATE' && isLobbyPausedForDisconnect(lobby)) {
+      reject('GAME_PAUSED_PLAYER_DISCONNECTED');
       return;
     }
 
@@ -533,18 +757,25 @@ io.on('connection', (socket) => {
   // We simply relay the action to the OTHER player in the room.
   socket.on('game_action', (payload = {}) => {
     // payload should contain { roomId, action, data }
-    if (payload.roomId && lobbies[payload.roomId] && lobbies[payload.roomId].players.includes(socket.id)) {
+    const lobby = payload.roomId ? lobbies[payload.roomId] : null;
+    if (payload.roomId && lobby && getPlayerSlotBySocketId(lobby, socket.id) && !isLobbyPausedForDisconnect(lobby)) {
       socket.to(payload.roomId).emit('game_action', payload);
       // console.log(`Action forwarded in ${payload.roomId}:`, payload.action);
     }
   });
 
-  socket.on('disconnect', () => {
-    console.log(`User disconnected: ${socket.id}`);
-    Object.entries(lobbies).forEach(([roomId, lobby]) => {
-      removePlayerFromLobby(socket, roomId, lobby, 'Opponent disconnected');
-    });
+  socket.on('disconnect', (reason) => {
+    console.log(`User disconnected: ${socket.id} | reason=${reason}`);
+    const roomId = socket.data?.roomId;
+    if (!roomId) return;
+    const lobby = lobbies[roomId];
+    if (!lobby) return;
+    markPlayerDisconnected(socket, roomId, lobby, reason);
   });
+});
+
+io.engine.on('connection_error', (err) => {
+  console.warn(`[SOCKET][ENGINE_ERROR] code=${err.code} message=${err.message} context=${JSON.stringify(err.context || {})}`);
 });
 
 const PORT = process.env.PORT || 3001;

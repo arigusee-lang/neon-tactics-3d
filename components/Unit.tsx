@@ -485,7 +485,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
     const [hovered, setHovered] = useState(false);
     const [isMoving, setIsMoving] = useState(false);
     const [supportPulseAmount, setSupportPulseAmount] = useState<number | null>(null);
-    const [supportPulseKind, setSupportPulseKind] = useState<'HEAL' | 'ENERGY' | 'DAMAGE' | 'MISS' | null>(null);
+    const [supportPulseKind, setSupportPulseKind] = useState<'HEAL' | 'ENERGY' | 'DAMAGE' | 'MISS' | 'CREDITS' | null>(null);
     const [supportPulseLabel, setSupportPulseLabel] = useState<string | null>(null);
 
     const [attackTargetPos, setAttackTargetPos] = useState<Vector3 | null>(null);
@@ -633,10 +633,13 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
         const healAmount = data.status.healPulseAmount || 0;
         const energyAmount = data.status.energyPulseAmount || 0;
         const damageAmount = data.status.damagePulseAmount || 0;
+        const creditAmount = data.status.creditPulseAmount || 0;
         const missText = data.status.missPulseText?.trim() || null;
-        const nextKind = damageAmount > 0 ? 'DAMAGE' : healAmount > 0 ? 'HEAL' : energyAmount > 0 ? 'ENERGY' : missText ? 'MISS' : null;
-        const nextAmount = damageAmount > 0 ? damageAmount : healAmount > 0 ? healAmount : energyAmount > 0 ? energyAmount : null;
-        const nextLabel = nextKind === 'DAMAGE'
+        const nextKind = creditAmount > 0 ? 'CREDITS' : damageAmount > 0 ? 'DAMAGE' : healAmount > 0 ? 'HEAL' : energyAmount > 0 ? 'ENERGY' : missText ? 'MISS' : null;
+        const nextAmount = creditAmount > 0 ? creditAmount : damageAmount > 0 ? damageAmount : healAmount > 0 ? healAmount : energyAmount > 0 ? energyAmount : null;
+        const nextLabel = nextKind === 'CREDITS'
+            ? `+$${nextAmount}`
+            : nextKind === 'DAMAGE'
             ? `-${nextAmount}`
             : nextKind === 'HEAL'
                 ? `+${nextAmount} HP`
@@ -659,7 +662,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
         }, 1200);
 
         return () => window.clearTimeout(timeoutId);
-    }, [data.status.damagePulseAmount, data.status.healPulseAmount, data.status.energyPulseAmount, data.status.missPulseText]);
+    }, [data.status.creditPulseAmount, data.status.damagePulseAmount, data.status.healPulseAmount, data.status.energyPulseAmount, data.status.missPulseText]);
 
 
     useEffect(() => {
@@ -812,14 +815,18 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
     const baseHeight = getUnitBaseHeight(data.position.x, data.position.z);
     const ringY = -baseHeight + 0.05;
     const frozenY = (size / 2) - 0.5;
-    const supportPulseColor = supportPulseKind === 'ENERGY'
+    const supportPulseColor = supportPulseKind === 'CREDITS'
+        ? '#fbbf24'
+        : supportPulseKind === 'ENERGY'
         ? '#a855f7'
         : supportPulseKind === 'DAMAGE'
             ? '#fb7185'
             : supportPulseKind === 'MISS'
                 ? '#e2e8f0'
                 : '#34d399';
-    const supportPulseClassName = supportPulseKind === 'ENERGY'
+    const supportPulseClassName = supportPulseKind === 'CREDITS'
+        ? 'rounded border border-amber-300/80 bg-amber-500/15 px-2 py-0.5 text-[11px] font-black text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.35)] backdrop-blur-sm'
+        : supportPulseKind === 'ENERGY'
         ? 'rounded border border-purple-300/70 bg-purple-500/15 px-2 py-0.5 text-[11px] font-black text-purple-300 shadow-[0_0_16px_rgba(168,85,247,0.35)] backdrop-blur-sm'
         : supportPulseKind === 'DAMAGE'
             ? 'rounded border border-rose-300/70 bg-rose-500/15 px-2 py-0.5 text-[11px] font-black text-rose-300 shadow-[0_0_16px_rgba(251,113,133,0.35)] backdrop-blur-sm'
