@@ -129,7 +129,8 @@ const buildMapMetadata = (mapId: string, mapData: MapJsonShape): MapMetadata => 
         description: normalizeMapDescription(mapData.description),
         players,
         mode: normalizeMatchMode(mapData.mode, players),
-        isImported: importedMapIds.has(mapId)
+        isImported: importedMapIds.has(mapId),
+        isMultiplayerHostable: players !== 'dev'
     };
 };
 
@@ -138,7 +139,8 @@ const BUILT_IN_MAPS: MapMetadata[] = [
         id: 'MAP_1',
         description: 'Classic starter battlefield.',
         players: 2,
-        mode: 'duel'
+        mode: 'duel',
+        isMultiplayerHostable: false
     }
 ];
 

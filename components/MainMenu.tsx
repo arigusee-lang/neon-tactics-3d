@@ -81,7 +81,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const emptyMinDepth = emptyPlayerCount > 2 ? 7 : 6;
 
   const multiplayerMaps = useMemo(() => {
-    return availableMaps.filter((map) => map.players !== 'dev');
+    return availableMaps.filter((map) => map.isMultiplayerHostable !== false);
   }, [availableMaps]);
 
   const selectedSoloMapMeta = useMemo(() => {

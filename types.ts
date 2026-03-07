@@ -105,6 +105,7 @@ export interface MapMetadata {
   players: MapPlayerSupport;
   mode: MatchMode;
   isImported?: boolean;
+  isMultiplayerHostable?: boolean;
 }
 
 export interface MapPreviewData extends MapMetadata {
