@@ -783,6 +783,7 @@ const App: React.FC = () => {
                                     }}
                                     playerColor={playerColor}
                                     deliveredCardIds={gameState.recentlyDeliveredCardIds[gameState.currentTurn]}
+                                    isDevMode={gameState.isDevMode}
                                 />
                             </div>
                         </div>

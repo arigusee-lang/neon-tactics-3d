@@ -9,7 +9,7 @@ export const BOARD_OFFSET = (BOARD_SIZE * (TILE_SIZE + TILE_SPACING)) / 2 - (TIL
 export const ELEVATION_HEIGHT = 0.5; // Visual height per elevation level (Matches approx 30 deg slope)
 export const INITIAL_CREDITS = 500;
 export const MAX_INVENTORY_CAPACITY = 30;
-export const INCOME_PER_TURN = 0; // Disabled in favor of milestone injections
+export const INCOME_PER_TURN = 20;
 export const TURN_TIMER_SECONDS = 60;
 
 export const COLORS = {
@@ -58,7 +58,8 @@ export const MACHINE_TYPES = [
 export const NEGATIVE_UNIT_EFFECT_NAMES = [
   'CRYO STASIS',
   'SYSTEM FREEZE',
-  'MOBILITY SABOTAGE'
+  'MOBILITY SABOTAGE',
+  'BLEED'
 ] as const;
 
 export const getUnitClassificationLabel = (unitType: UnitType): 'BUILDING' | 'MACHINE' | 'CREATURE' => {
@@ -76,8 +77,7 @@ export const getUnitClassificationLabel = (unitType: UnitType): 'BUILDING' | 'MA
 // Visible in catalogue/dev mode, but excluded from normal shop + initial deck generation.
 export const DEV_ONLY_UNITS: UnitType[] = [
   UnitType.PORTAL,
-  UnitType.ARC_PORTAL,
-  UnitType.WALL
+  UnitType.ARC_PORTAL
 ];
 
 export const FLUX_TOWER_ATTACK_UPGRADE_COST = 25;
@@ -316,6 +316,12 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     category: CardCategory.ACTION,
     name: 'Mobility Surge',
     description: 'Give all of your mobile battlefield units +3 Mobility until end of turn.',
+    cost: 150
+  },
+  [UnitType.BLEED]: {
+    category: CardCategory.ACTION,
+    name: 'Bleed',
+    description: 'Apply Bleed to all enemy mobile units for 3 turns. Bleeding units suffer 3 damage after each tile moved.',
     cost: 150
   },
   [UnitType.SILENCE]: {

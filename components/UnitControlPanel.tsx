@@ -55,6 +55,13 @@ const EffectBadgeIcon: React.FC<{ effect: Effect }> = ({ effect }) => {
                     <path d="M7 21H17" strokeLinecap="round" />
                 </svg>
             );
+        case 'BLEED':
+            return (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4 text-rose-300">
+                    <path d="M12 3C9.5 6.5 7 9.2 7 13A5 5 0 0 0 17 13C17 9.2 14.5 6.5 12 3Z" strokeLinejoin="round" />
+                    <path d="M8 18C9.2 16.8 10.6 16.2 12 16.2C13.4 16.2 14.8 16.8 16 18" strokeLinecap="round" />
+                </svg>
+            );
         case 'SYSTEM FREEZE':
         case 'CRYO STASIS':
             return (

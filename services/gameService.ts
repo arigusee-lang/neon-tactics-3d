@@ -1,6 +1,6 @@
 
 import { GameState, PlayerId, Unit, PlacePayload, UnitType, Card, Position, CardCategory, LogEntry, InteractionMode, AppStatus, Effect, Talent, TerrainData, TerrainTool, ShopItem, UnitStats, DebugClickTraceEntry, DebugClickResult, DebugPointerMeta, MapBounds, MapMetadata, MapPlayerSupport, MapPreviewData, ALL_PLAYER_IDS, CONTESTED_PLAYER_IDS, MatchMode, EmptyMapConfig } from '../types';
-import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS, TURN_TIMER_SECONDS, NEGATIVE_UNIT_EFFECT_NAMES, getUnitClassificationLabel, FLUX_TOWER_ATTACK_UPGRADE_AMOUNT, FLUX_TOWER_ATTACK_UPGRADE_COST, FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP, TALENT_SELECTION_LEVEL_STEP } from '../constants';
+import { BOARD_SIZE, INITIAL_FIELD_SIZE, CARD_CONFIG, INITIAL_CREDITS, INCOME_PER_TURN, TILE_SIZE, TILE_SPACING, BOARD_OFFSET, BUILDING_TYPES, COLORS, CHARACTERS, MAX_INVENTORY_CAPACITY, DEV_ONLY_UNITS, TURN_TIMER_SECONDS, NEGATIVE_UNIT_EFFECT_NAMES, getUnitClassificationLabel, FLUX_TOWER_ATTACK_UPGRADE_AMOUNT, FLUX_TOWER_ATTACK_UPGRADE_COST, FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP, TALENT_SELECTION_LEVEL_STEP } from '../constants';
 import { ENABLE_CHARACTER_SYSTEM } from '../featureFlags';
 import { findPath } from '../utils/pathfinding';
 import { clampTerrainBrushSize, getTerrainBrushFootprint, isBrushEnabledTerrainTool } from '../utils/terrainBrush';
@@ -331,6 +331,23 @@ class GameService {
 
     private createEmptyPlayerCharacters(): Record<PlayerId, string | null> {
         return this.createPerPlayerRecord(() => null);
+    }
+
+    private isSupplyInjectionRound(round: number): boolean {
+        return [10, 25, 50].includes(round);
+    }
+
+    private awardTurnStartIncome(playerId: PlayerId, round: number) {
+        if (!this.isContestedPlayer(playerId) || !this.state.activePlayerIds.includes(playerId)) {
+            return;
+        }
+
+        if (this.isSupplyInjectionRound(round)) {
+            return;
+        }
+
+        this.state.credits[playerId] += INCOME_PER_TURN;
+        this.log(`> TURN INCOME: +${INCOME_PER_TURN} CREDITS`, playerId);
     }
 
     private getBaseUnlockedUnitPool(): UnitType[] {
@@ -1303,6 +1320,10 @@ class GameService {
         return unit.effects.some((effect) => effect.name === 'MOBILITY BOOST');
     }
 
+    private hasBleed(unit: Unit): boolean {
+        return unit.effects.some((effect) => effect.name === 'BLEED');
+    }
+
     private getEffectiveMovement(unit: Unit): number {
         const mobilityBonus = this.hasMobilityBoost(unit) ? 3 : 0;
         const mobilityPenalty = this.hasMobilitySabotage(unit) ? 2 : 0;
@@ -1328,6 +1349,17 @@ class GameService {
             icon: 'mobility_boost',
             duration: 1,
             maxDuration: 1
+        };
+    }
+
+    private createBleedEffect(unitId: string, existingEffectId?: string): Effect {
+        return {
+            id: existingEffectId ?? `ue-${unitId}-${Date.now()}-${Math.random()}`,
+            name: 'BLEED',
+            description: 'Suffers 3 damage after each tile moved for 3 turns.',
+            icon: 'bleed',
+            duration: 3,
+            maxDuration: 3
         };
     }
 
@@ -1374,6 +1406,27 @@ class GameService {
             ...unit,
             effects: existingEffect
                 ? unit.effects.map((effect) => effect.name === 'MOBILITY BOOST' ? refreshedEffect : effect)
+                : [...unit.effects, refreshedEffect]
+        };
+
+        const newUnits = [...this.state.units];
+        newUnits[unitIndex] = updatedUnit;
+        this.state.units = newUnits;
+
+        this.log(`> EFFECT APPLIED TO UNIT: ${refreshedEffect.name}`);
+    }
+
+    private applyBleedEffect(unitId: string) {
+        const unitIndex = this.state.units.findIndex((unit) => unit.id === unitId);
+        if (unitIndex === -1) return;
+
+        const unit = this.state.units[unitIndex];
+        const existingEffect = unit.effects.find((effect) => effect.name === 'BLEED');
+        const refreshedEffect = this.createBleedEffect(unitId, existingEffect?.id);
+        const updatedUnit: Unit = {
+            ...unit,
+            effects: existingEffect
+                ? unit.effects.map((effect) => effect.name === 'BLEED' ? refreshedEffect : effect)
                 : [...unit.effects, refreshedEffect]
         };
 
@@ -2288,6 +2341,7 @@ class GameService {
         };
 
         this.generateShopStock(10);
+        this.awardTurnStartIncome(this.state.currentTurn, this.state.roundNumber);
 
         if (this.state.isMultiplayer && this.isSyncAuthority()) {
             // The authority peer publishes the initial replicated game snapshot.
@@ -3754,6 +3808,11 @@ class GameService {
                 return;
             }
 
+            if (card.type === UnitType.BLEED) {
+                this.applyBleed(playerId);
+                return;
+            }
+
             if (card.type === UnitType.SILENCE) {
                 this.applySilence(playerId);
                 return;
@@ -3859,7 +3918,7 @@ class GameService {
             this.state.interactionState = {
                 mode: 'WALL_PLACEMENT',
                 playerId: playerId,
-                remaining: 3, // Chain length
+                remaining: 4, // Chain length after the initial wall, for 5 total
                 unitType: UnitType.WALL,
                 lastPos: position
             };
@@ -4309,6 +4368,22 @@ class GameService {
 
         this.consumeActionCard(playerId, UnitType.MOBILITY_SURGE, this.state.selectedCardId);
         this.log(`> MOBILITY SURGE DEPLOYED: ${friendlyUnits.length} FRIENDLY UNITS OVERCLOCKED`, playerId);
+        this.notify();
+    }
+
+    private applyBleed(playerId: PlayerId) {
+        const hostileUnits = this.state.units.filter((unit) =>
+            this.arePlayersHostile(playerId, unit.playerId) &&
+            unit.stats.movement > 0 &&
+            !unit.status.isDying
+        );
+
+        hostileUnits.forEach((unit) => {
+            this.applyBleedEffect(unit.id);
+        });
+
+        this.consumeActionCard(playerId, UnitType.BLEED, this.state.selectedCardId);
+        this.log(`> BLEED DEPLOYED: ${hostileUnits.length} HOSTILE MOBILE UNITS AFFECTED`, playerId);
         this.notify();
     }
 
@@ -4949,9 +5024,17 @@ class GameService {
         const hasEast = adj.some(u => u.position.x === unit.position.x + 1);
         const hasWest = adj.some(u => u.position.x === unit.position.x - 1);
 
-        if ((hasNorth || hasSouth) && !hasEast && !hasWest) unit.rotation = Math.PI / 2;
-        else if ((hasEast || hasWest) && !hasNorth && !hasSouth) unit.rotation = 0;
-        else if (hasNorth && hasEast) unit.rotation = Math.PI / 4;
+        if ((hasNorth && hasSouth) || ((hasNorth || hasSouth) && !hasEast && !hasWest)) {
+            unit.rotation = Math.PI / 2;
+        } else if ((hasEast && hasWest) || ((hasEast || hasWest) && !hasNorth && !hasSouth)) {
+            unit.rotation = 0;
+        } else if ((hasNorth && hasEast) || (hasSouth && hasWest)) {
+            unit.rotation = -Math.PI / 4;
+        } else if ((hasNorth && hasWest) || (hasSouth && hasEast)) {
+            unit.rotation = Math.PI / 4;
+        } else {
+            unit.rotation = 0;
+        }
     }
 
     private getAdjacentWalls(unit: Unit): Unit[] {
@@ -5747,6 +5830,50 @@ class GameService {
         this.replicateAuthoritativeState();
     }
 
+    private applyBleedStepDamage(unitId: string): boolean {
+        const unitIndex = this.state.units.findIndex((unit) => unit.id === unitId);
+        if (unitIndex === -1) return false;
+
+        const unit = this.state.units[unitIndex];
+        if (!this.hasBleed(unit) || unit.status.isDying) {
+            return false;
+        }
+
+        if (this.isInvulnerable(unit)) {
+            this.log(`> BLEED DEFLECTED: IMMORTALITY SHIELD`, unit.playerId);
+            return false;
+        }
+
+        const damage = 3;
+        const nextHp = Math.max(0, unit.stats.hp - damage);
+        const updatedUnit: Unit = {
+            ...unit,
+            movePath: nextHp === 0 ? [] : unit.movePath,
+            stats: {
+                ...unit.stats,
+                hp: nextHp
+            },
+            status: {
+                ...unit.status,
+                isDying: nextHp === 0 ? true : unit.status.isDying
+            }
+        };
+
+        const newUnits = [...this.state.units];
+        newUnits[unitIndex] = updatedUnit;
+        this.state.units = newUnits;
+        this.triggerDamagePulses([{ unitId, amount: damage }]);
+        this.log(`> BLEED TRIGGERS ON ${unit.type}: -${damage} HP`, unit.playerId);
+
+        if (nextHp === 0) {
+            this.log(`> TARGET ELIMINATED: ${unit.type}`, unit.playerId);
+            setTimeout(() => { this.removeUnit(unitId); }, 1500);
+            return true;
+        }
+
+        return false;
+    }
+
     public previewMove(targetX: number, targetZ: number) {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
         if (this.checkPlayerRestricted(this.state.currentTurn)) return;
@@ -5992,11 +6119,18 @@ class GameService {
             }
         }
 
+        const unitBledOut = this.applyBleedStepDamage(unit.id);
         this.updateFogOfWar();
 
         if (shouldTriggerBonusTalentPick) {
             this.state.pendingTalentResumePlayerId = unit.playerId;
             this.triggerTalentSelection(unit.playerId);
+            return;
+        }
+
+        if (unitBledOut) {
+            this.notify();
+            this.replicateAuthoritativeState();
             return;
         }
 
@@ -6321,6 +6455,7 @@ class GameService {
                     selectedUnitId: null,
                     interactionState: { mode: 'NORMAL' }
                 };
+                this.awardTurnStartIncome(nextTurn, nextRound);
 
                 if (this.checkPlayerRestricted(nextTurn)) {
                     this.log(`> WARNING: PLAYER ${nextTurn} SYSTEMS COMPROMISED`);

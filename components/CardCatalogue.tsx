@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stage } from '@react-three/drei';
 import { UnitType, CardCategory } from '../types';
-import { CARD_CONFIG, COLORS } from '../constants';
+import { CARD_CONFIG, COLORS, DEV_ONLY_UNITS } from '../constants';
 import { TALENT_POOL } from '../services/gameService';
 import UnitPreview from './UnitPreview';
 
@@ -86,6 +86,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
             case UnitType.SYSTEM_FREEZE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeDasharray="2 2" /><path d="M12 4V20 M4 12H20" /></svg>;
             case UnitType.MOBILITY_SABOTAGE: return <svg viewBox="0 0 24 24" {...p}><path d="M5 6H19" /><path d="M8 12H16" /><path d="M10 18H14" /><path d="M7 4L5 6L7 8" /><path d="M17 16L19 18L17 20" /></svg>;
             case UnitType.MOBILITY_SURGE: return <svg viewBox="0 0 24 24" {...p}><path d="M5 18H19" /><path d="M8 12H16" /><path d="M10 6H14" /><path d="M7 20L5 18L7 16" /><path d="M17 8L19 6L17 4" /></svg>;
+            case UnitType.BLEED: return <svg viewBox="0 0 24 24" {...p}><path d="M12 3C9.5 6.5 7 9.2 7 13A5 5 0 0 0 17 13C17 9.2 14.5 6.5 12 3Z" /><path d="M8 18C9.2 16.8 10.6 16.2 12 16.2C13.4 16.2 14.8 16.8 16 18" /></svg>;
             case UnitType.SILENCE: return <svg viewBox="0 0 24 24" {...p}><path d="M5 10V14" /><path d="M9 8V16" /><path d="M13 6V18" /><path d="M17 8V16" /><path d="M4 4L20 20" /></svg>;
             case UnitType.FORWARD_BASE: return <svg viewBox="0 0 24 24" {...p}><rect x="4" y="4" width="16" height="16" rx="1" /><path d="M8 8H16V16H8Z" strokeDasharray="2 2" /><path d="M12 2V7 M12 17V22 M2 12H7 M17 12H22" /></svg>;
             case UnitType.TACTICAL_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M10 6L4 12L10 18" /><path d="M5 12H15" /><rect x="15" y="7" width="5" height="10" rx="1" /><path d="M17.5 4V7 M17.5 17V20" strokeDasharray="2 2" /></svg>;
@@ -148,6 +149,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
         const isModule = categoryStr === 'MODULE';
         const isUpgrade = categoryStr === 'UPGRADE';
         const isItem = categoryStr === 'ITEM';
+        const isDevOnlyCard = !isAbility && !isTalent && !isCollectible && DEV_ONLY_UNITS.includes(type as UnitType);
 
         let borderColor = 'border-gray-700';
         let bgColor = 'bg-black/60';
@@ -191,6 +193,12 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                     ${isSelected ? 'shadow-[0_0_15px_rgba(0,0,0,0.5)]' : ''}
                 `}
             >
+                {isDevOnlyCard && (
+                    <div className="absolute left-1.5 top-1.5 rounded border border-amber-500/50 bg-amber-900/30 px-1 py-[1px] text-[7px] font-black uppercase tracking-[0.18em] text-amber-300">
+                        DEV
+                    </div>
+                )}
+
                 <div className="w-8 h-8 opacity-90 mt-1 flex items-center justify-center">
                     {getIcon(type, iconColor)}
                 </div>
@@ -212,6 +220,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
     const selectedAbility = selectedId && UNIT_ABILITIES.find(a => a.id === selectedId);
     const selectedTalent = selectedId && TALENT_POOL.find(t => t.id === selectedId);
     const selectedCollectible = selectedId && COLLECTIBLES.find(c => c.id === selectedId);
+    const selectedIsDevOnly = selectedConfig ? DEV_ONLY_UNITS.includes(selectedId as UnitType) : false;
     const selectedConfigDescription = selectedConfig && selectedId === UnitType.HACKER
         ? 'Tech specialist. Can disrupt hostile systems and purge allied status locks. Abilities: Mind Control, System Purge.'
         : selectedConfig && selectedId === UnitType.HEAVY_TANK
@@ -345,6 +354,12 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                                 <div className={`text-[10px] font-mono mb-4 ${selectedConfig.category === CardCategory.ACTION ? 'text-purple-400' : 'text-cyan-400'}`}>
                                     {selectedConfig.category} CLASS
                                 </div>
+
+                                {selectedIsDevOnly && (
+                                    <div className="mb-4 inline-flex w-fit items-center rounded border border-amber-500/40 bg-amber-900/20 px-2 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-amber-300">
+                                        Dev Only
+                                    </div>
+                                )}
 
                                 <p className="text-xs text-gray-400 leading-relaxed mb-6 border-l-2 border-gray-700 pl-3">
                                     {selectedConfigDescription}

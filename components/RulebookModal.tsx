@@ -116,9 +116,9 @@ const sections: RuleSection[] = [
     accent: 'from-slate-300/20 to-slate-500/10 border-slate-300/30 text-slate-100',
     bullets: [
       'Each active player starts with 500 credits.',
-      'There is no passive credit income each turn in the current ruleset.',
+      'Each active player gains 20 credits at the start of their turn.',
       'Shop orders usually arrive after 1 to 3 rounds, with rare instant deliveries.',
-      'At rounds 10, 25, and 50 the shop restocks and each active player receives 500 more credits.',
+      'At rounds 10, 25, and 50 the shop restocks and each active player receives 500 more credits; the normal +20 turn income is skipped during those rounds.',
       'After round 100, the shop shuts down and no further restocks occur.'
     ]
   },

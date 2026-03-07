@@ -88,6 +88,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
             case UnitType.SYSTEM_FREEZE: return <svg viewBox="0 0 24 24" {...p}><circle cx="12" cy="12" r="8" strokeDasharray="2 2" /><path d="M12 4V20 M4 12H20" /></svg>;
             case UnitType.MOBILITY_SABOTAGE: return <svg viewBox="0 0 24 24" {...p}><path d="M5 6H19" /><path d="M8 12H16" /><path d="M10 18H14" /><path d="M7 4L5 6L7 8" /><path d="M17 16L19 18L17 20" /></svg>;
             case UnitType.MOBILITY_SURGE: return <svg viewBox="0 0 24 24" {...p}><path d="M5 18H19" /><path d="M8 12H16" /><path d="M10 6H14" /><path d="M7 20L5 18L7 16" /><path d="M17 8L19 6L17 4" /></svg>;
+            case UnitType.BLEED: return <svg viewBox="0 0 24 24" {...p}><path d="M12 3C9.5 6.5 7 9.2 7 13A5 5 0 0 0 17 13C17 9.2 14.5 6.5 12 3Z" /><path d="M8 18C9.2 16.8 10.6 16.2 12 16.2C13.4 16.2 14.8 16.8 16 18" /></svg>;
             case UnitType.SILENCE: return <svg viewBox="0 0 24 24" {...p}><path d="M5 10V14" /><path d="M9 8V16" /><path d="M13 6V18" /><path d="M17 8V16" /><path d="M4 4L20 20" /></svg>;
             case UnitType.FORWARD_BASE: return <svg viewBox="0 0 24 24" {...p}><rect x="5" y="5" width="14" height="14" rx="1" /><path d="M12 8V16 M8 12H16" /><path d="M5 2V5H2M22 5H19V2M5 22V19H2M22 19H19V22" /></svg>;
             case UnitType.TACTICAL_RETREAT: return <svg viewBox="0 0 24 24" {...p}><path d="M9 7L4 12L9 17" /><path d="M4 12H14a6 6 0 1 0 0 12" /></svg>;
