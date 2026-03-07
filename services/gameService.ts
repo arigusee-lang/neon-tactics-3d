@@ -7117,7 +7117,7 @@ class GameService {
         newUnits[unitIndex] = { ...unit, position: nextPos, movePath: remainingPath, rotation: rotation };
         this.state.units = newUnits;
 
-        let shouldTriggerBonusTalentPick = false;
+        let shouldTriggerBonusTalentPick = false; 
 
         // Check for Collectibles
         const colIdx = this.state.collectibles.findIndex(c => c.position.x === nextPos.x && c.position.z === nextPos.z);
