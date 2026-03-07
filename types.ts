@@ -150,6 +150,8 @@ export interface Talent {
   description: string;
   icon: string; // Emoji or visual placeholder
   color: string;
+  maxPicks?: number;
+  prerequisiteTalentIds?: string[];
 }
 
 export interface CharacterPerk {
@@ -334,8 +336,9 @@ export interface GameState {
   playerCharacters: { [key in PlayerId]: string | null }; // Character ID
   unlockedUnits: { [key in PlayerId]: UnitType[] }; // Pool of units available in shop
   playerTalents: { [key in PlayerId]: Talent[] };
+  playerTalentDraftCounts: { [key in PlayerId]: number };
   characterActions: { [key in PlayerId]: CharacterAction[] };
-  talentChoices: Talent[]; // The two choices currently presented
+  talentChoices: Talent[]; // The choices currently presented
   pendingTalentQueue: PlayerId[];
   pendingTalentResumePlayerId: PlayerId | null;
 

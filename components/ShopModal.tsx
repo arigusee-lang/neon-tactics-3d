@@ -13,6 +13,10 @@ interface ShopModalProps {
     credits: number;
     nextDeliveryRound: number;
     currentRound: number;
+    isDevMode: boolean;
+    rerollCost: number;
+    canRefundItem: (item: ShopItem) => boolean;
+    getRefundAmount: (item: ShopItem) => number;
     onBuy: (item: ShopItem) => void;
     onRefund: (item: ShopItem) => void;
     onReroll: () => void;
@@ -25,6 +29,10 @@ const ShopModal: React.FC<ShopModalProps> = ({
     credits,
     nextDeliveryRound,
     currentRound,
+    isDevMode,
+    rerollCost,
+    canRefundItem,
+    getRefundAmount,
     onBuy,
     onRefund,
     onReroll,
@@ -114,7 +122,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
 
         const count = items.length;
         const isSelected = selectedKey === groupKey;
-        const canAfford = credits >= item.cost;
+        const canAfford = isDevMode || credits >= item.cost;
         const isInstant = item.deliveryTurns === 0;
 
         // 3) Visual Highlight for Card Types
@@ -210,9 +218,10 @@ const ShopModal: React.FC<ShopModalProps> = ({
     const selectedConfig = selectedType ? CARD_CONFIG[selectedType] : null;
 
     // 1) Sell Logic
-    // Find items of this group that were bought THIS round
-    const refundableItems = selectedBought.filter(item => item.purchaseRound === currentRound);
+    const refundableItems = selectedBought.filter(canRefundItem);
     const canRefund = refundableItems.length > 0;
+    const refundAmount = canRefund ? getRefundAmount(refundableItems[0]) : 0;
+    const canAffordReroll = isDevMode || credits >= rerollCost;
 
     return (
         <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm animate-in fade-in duration-200">
@@ -251,17 +260,17 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                 </h3>
                                 <button
                                     onClick={onReroll}
-                                    disabled={credits < 50 || availableStock.length === 0}
+                                    disabled={!canAffordReroll || availableStock.length === 0}
                                     className={`
                                         flex items-center gap-2 px-3 py-1 rounded border text-[9px] font-bold transition-all
-                                        ${credits >= 50 && availableStock.length > 0
+                                        ${canAffordReroll && availableStock.length > 0
                                             ? 'bg-yellow-900/20 border-yellow-600/50 text-yellow-500 hover:bg-yellow-900/40 hover:text-yellow-200'
                                             : 'bg-transparent border-gray-800 text-gray-700 cursor-not-allowed'}
                                     `}
-                                    title="Refresh available stock (Costs $50)"
+                                    title={isDevMode ? "Refresh available stock" : `Refresh available stock (Costs $${rerollCost})`}
                                 >
                                     <svg viewBox="0 0 24 24" className="w-3 h-3 fill-none stroke-current stroke-2"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
-                                    <span>REROLL STOCK ($50)</span>
+                                    <span>{isDevMode ? 'REROLL STOCK' : `REROLL STOCK ($${rerollCost})`}</span>
                                 </button>
                             </div>
 
@@ -382,10 +391,10 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                     <div className="grid grid-cols-2 gap-3">
                                         <button
                                             onClick={() => selectedStock.length > 0 && onBuy(selectedStock[0])}
-                                            disabled={selectedStock.length === 0 || credits < selectedConfig.cost}
+                                            disabled={selectedStock.length === 0 || (!isDevMode && credits < selectedConfig.cost)}
                                             className={`
                                                 flex flex-col items-center justify-center py-2 rounded border transition-all
-                                                ${selectedStock.length > 0 && credits >= selectedConfig.cost
+                                                ${selectedStock.length > 0 && (isDevMode || credits >= selectedConfig.cost)
                                                     ? 'bg-green-900/60 hover:bg-green-800/80 border-green-600 text-green-100 shadow-lg shadow-green-900/20'
                                                     : 'bg-gray-800 border-gray-700 text-gray-500 cursor-not-allowed opacity-50'}
                                             `}
@@ -406,7 +415,7 @@ const ShopModal: React.FC<ShopModalProps> = ({
                                                 `}
                                             >
                                                 <span className="text-[10px] font-bold uppercase">{canRefund ? 'Sell Back' : 'Transit'}</span>
-                                                <span className="text-xs font-mono">{canRefund ? `+${selectedConfig.cost}` : 'Locked'}</span>
+                                                <span className="text-xs font-mono">{canRefund ? `+${refundAmount}` : 'Locked'}</span>
                                             </button>
                                         )}
                                         {/* Placeholder if no bought items */}

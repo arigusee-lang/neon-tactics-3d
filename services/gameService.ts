@@ -22,8 +22,40 @@ export const TALENT_POOL: Talent[] = [
     { id: 't9', name: 'Marine Suite', description: 'Cyber Marines gain +50 HP and +1 Mobility.', icon: '🦿', color: '#3b82f6' },
     { id: 't10', name: 'Dreadnought Offense', description: 'Dreadnoughts gain +20 Attack and +1 Range.', icon: '💥', color: '#ef4444' },
     { id: 't11', name: 'Dreadnought Armor', description: 'Dreadnoughts gain +100 HP.', icon: '🛡️', color: '#71717a' },
-    { id: 't12', name: 'Drone Upgrade', description: 'Scout Drones and Ticks gain +2 Mobility and +20 HP.', icon: '🛸', color: '#f59e0b' }
+    { id: 't12', name: 'Drone Upgrade', description: 'Scout Drones and Ticks gain +2 Mobility and +20 HP.', icon: '🛸', color: '#f59e0b' },
+    { id: 't13', name: 'Tanks Upgrade', description: 'Raptor Tanks and Mammoth Tanks gain +20 Attack and +100 HP.', icon: '🧱', color: '#f97316' },
+    { id: 't14', name: 'Perk Expert', description: 'Gain $50 immediately. Starting with your next talent distribution, choose from 5 perks instead of 3.', icon: '🧠', color: '#22c55e' },
+    { id: 't15', name: 'Ritual', description: 'Damage your current Arc Portal for 1500 HP and immediately gain 3 extra perk drafts.', icon: '🩸', color: '#ef4444' },
+    { id: 't16', name: 'Marine Upgrade II', description: 'Requires Marine Upgrade. Cyber Marines gain another +15 Attack and +1 Range.', icon: '🎯', color: '#3b82f6', prerequisiteTalentIds: ['t8'] },
+    { id: 't17', name: 'Marine Suite II', description: 'Requires Marine Suite. Cyber Marines gain another +50 HP and +1 Mobility.', icon: '🦾', color: '#2563eb', prerequisiteTalentIds: ['t9'] },
+    { id: 't18', name: 'Dreadnought Offense II', description: 'Requires Dreadnought Offense. Dreadnoughts gain another +20 Attack and +1 Range.', icon: '🔥', color: '#dc2626', prerequisiteTalentIds: ['t10'] },
+    { id: 't19', name: 'Dreadnought Armor II', description: 'Requires Dreadnought Armor. Dreadnoughts gain another +100 HP.', icon: '⛓️', color: '#52525b', prerequisiteTalentIds: ['t11'] },
+    { id: 't20', name: 'Drone Upgrade II', description: 'Requires Drone Upgrade. Scout Drones and Ticks gain another +2 Mobility and +20 HP.', icon: '🚀', color: '#d97706', prerequisiteTalentIds: ['t12'] },
+    { id: 't21', name: 'Tanks Upgrade II', description: 'Requires Tanks Upgrade. Raptor Tanks and Mammoth Tanks gain another +20 Attack and +100 HP.', icon: '🏗️', color: '#ea580c', prerequisiteTalentIds: ['t13'] },
+    { id: 't22', name: 'Biotic Regen II', description: 'Requires Biotic Regen. Increase passive regeneration by another 10 HP per round.', icon: '💚', color: '#db2777', prerequisiteTalentIds: ['t5'] },
+    { id: 't23', name: 'Reactor Tuning II', description: 'Requires Reactor Tuning. Increase bonus Energy regeneration by another 5 per round.', icon: '⚡', color: '#7c3aed', prerequisiteTalentIds: ['t6'] },
+    { id: 't24', name: 'Reinforced Walls', description: 'Flux Towers, Power Hubs, and Energy Walls gain +100 HP.', icon: '🧱', color: '#84cc16' },
+    { id: 't25', name: 'Nano Fibers', description: 'Increase Medic and Repair Bot nano-repair efficiency from 50 HP to 75 HP.', icon: '🪡', color: '#14b8a6' },
+    { id: 't26', name: 'Nano Blades', description: 'Apex Blades gain +20 Attack and +20 HP.', icon: '✂️', color: '#f43f5e' },
+    { id: 't27', name: 'Negotiator', description: 'Reroll stock costs $25 instead of $50, and you can sell back pending orders for 90% of their cost even while already in transit.', icon: '🤝', color: '#38bdf8' },
+    { id: 't28', name: 'Rapid Deployment', description: 'Newly summoned mobile units no longer suffer Summoning Sickness.', icon: '⚔️', color: '#a78bfa' },
+    { id: 't29', name: 'Portal Exchange', description: 'Convert 300 HP from your Arc Portal into $300.', icon: '💱', color: '#f59e0b' },
+    { id: 't30', name: 'Economist', description: 'Gain $30 turn income instead of $20, and field pickup rewards are doubled.', icon: '📈', color: '#22c55e' }
 ];
+
+const TALENT_RULES: Record<string, Pick<Talent, 'maxPicks' | 'prerequisiteTalentIds'>> = {
+    t1: { maxPicks: 99 },
+    t2: { maxPicks: 99 },
+    t16: { prerequisiteTalentIds: ['t8'] },
+    t17: { prerequisiteTalentIds: ['t9'] },
+    t18: { prerequisiteTalentIds: ['t10'] },
+    t19: { prerequisiteTalentIds: ['t11'] },
+    t20: { prerequisiteTalentIds: ['t12'] },
+    t21: { prerequisiteTalentIds: ['t13'] },
+    t22: { prerequisiteTalentIds: ['t5'] },
+    t23: { prerequisiteTalentIds: ['t6'] },
+    t29: { maxPicks: 99 }
+};
 
 import { io, Socket } from 'socket.io-client';
 
@@ -470,8 +502,9 @@ class GameService {
             return;
         }
 
-        this.state.credits[playerId] += INCOME_PER_TURN;
-        this.log(`> TURN INCOME: +${INCOME_PER_TURN} CREDITS`, playerId);
+        const incomeAmount = this.getTurnIncomeAmount(playerId);
+        this.state.credits[playerId] += incomeAmount;
+        this.log(`> TURN INCOME: +${incomeAmount} CREDITS`, playerId);
     }
 
     private getBaseUnlockedUnitPool(): UnitType[] {
@@ -1079,6 +1112,7 @@ class GameService {
             playerTalents: this.createPerPlayerRecord((playerId) =>
                 this.state.playerTalents[playerId].map((talent) => ({ ...talent }))
             ),
+            playerTalentDraftCounts: { ...this.state.playerTalentDraftCounts },
             characterActions: this.createPerPlayerRecord((playerId) =>
                 this.state.characterActions[playerId].map((action) => ({ ...action }))
             ),
@@ -1285,6 +1319,12 @@ class GameService {
             }
             case 'SYNC_STATE':
                 // Overwrite critical state parts
+                const previousAppStatus = this.state.appStatus;
+                const syncedCurrentTurn = data.currentTurn || this.state.currentTurn;
+                const syncedAppStatus = data.appStatus || this.state.appStatus;
+                const syncedShopAvailable = typeof data.shopAvailable === 'boolean'
+                    ? data.shopAvailable
+                    : this.state.shopAvailable;
                 this.state.terrain = data.terrain;
                 this.state.decks = data.decks;
                 this.state.credits = data.credits;
@@ -1301,9 +1341,6 @@ class GameService {
                 }
                 if (typeof data.turnOvertimeDamageApplied === 'number') {
                     this.state.turnOvertimeDamageApplied = data.turnOvertimeDamageApplied;
-                }
-                if (data.appStatus) {
-                    this.state.appStatus = data.appStatus;
                 }
                 if (Array.isArray(data.activePlayerIds)) {
                     this.state.activePlayerIds = [...data.activePlayerIds];
@@ -1335,6 +1372,9 @@ class GameService {
                 if (data.playerTalents) {
                     this.state.playerTalents = data.playerTalents;
                 }
+                if (data.playerTalentDraftCounts) {
+                    this.state.playerTalentDraftCounts = data.playerTalentDraftCounts;
+                }
                 if (Array.isArray(data.talentChoices)) {
                     this.state.talentChoices = data.talentChoices;
                 }
@@ -1361,6 +1401,23 @@ class GameService {
                 if (typeof data.winner !== 'undefined') {
                     this.state.winner = data.winner;
                 }
+
+                const shouldKeepLocalShopOpen = this.state.isMultiplayer
+                    && !!this.state.myPlayerId
+                    && previousAppStatus === AppStatus.SHOP
+                    && (syncedAppStatus === AppStatus.SHOP || syncedAppStatus === AppStatus.PLAYING)
+                    && syncedCurrentTurn === this.state.myPlayerId
+                    && (syncedShopAvailable || this.state.isDevMode)
+                    && !data.winner;
+                const shouldIgnoreRemoteShopOpen = this.state.isMultiplayer
+                    && !!this.state.myPlayerId
+                    && syncedAppStatus === AppStatus.SHOP
+                    && previousAppStatus !== AppStatus.SHOP;
+                this.state.appStatus = shouldKeepLocalShopOpen
+                    ? AppStatus.SHOP
+                    : shouldIgnoreRemoteShopOpen
+                        ? AppStatus.PLAYING
+                        : syncedAppStatus;
 
                 const syncedInteractionState = data.interactionState
                     ? { ...data.interactionState }
@@ -1461,6 +1518,7 @@ class GameService {
             tilePulse: null,
             playerEffects: this.createPerPlayerRecord(() => []),
             playerTalents: this.createPerPlayerRecord(() => []),
+            playerTalentDraftCounts: this.createPerPlayerRecord(() => 3),
             characterActions: this.createPerPlayerRecord(() => []),
             talentChoices: [],
             pendingTalentQueue: [],
@@ -1666,10 +1724,21 @@ class GameService {
         return unit.effects.find((effect) => effect.name === 'KINETIC SHIELD');
     }
 
-    private getEffectiveMovement(unit: Unit): number {
+    public getEffectiveMovement(unit: Unit): number {
         const mobilityBonus = this.hasMobilityBoost(unit) ? 3 : 0;
         const mobilityPenalty = this.hasMobilitySabotage(unit) ? 2 : 0;
-        return Math.max(0, unit.stats.movement + mobilityBonus - mobilityPenalty);
+        const movement = Math.max(0, unit.stats.movement + mobilityBonus - mobilityPenalty);
+        if (unit.effects.some((effect) => effect.name === 'SUMMONING SICKNESS')) {
+            return Math.floor(movement / 2);
+        }
+        return movement;
+    }
+
+    public getEffectiveAttack(unit: Unit): number {
+        if (unit.effects.some((effect) => effect.name === 'SUMMONING SICKNESS')) {
+            return Math.floor(unit.stats.attack / 2);
+        }
+        return unit.stats.attack;
     }
 
     private createMobilitySabotageEffect(unitId: string, existingEffectId?: string): Effect {
@@ -1702,6 +1771,17 @@ class GameService {
             icon: 'bleed',
             duration: 3,
             maxDuration: 3
+        };
+    }
+
+    private createSummoningSicknessEffect(unitId: string, existingEffectId?: string): Effect {
+        return {
+            id: existingEffectId ?? `ue-${unitId}-${Date.now()}-${Math.random()}`,
+            name: 'SUMMONING SICKNESS',
+            description: 'Mobility is halved this turn after deployment.',
+            icon: 'summoning_sickness',
+            duration: 1,
+            maxDuration: 1
         };
     }
 
@@ -1911,6 +1991,115 @@ class GameService {
         };
     }
 
+    private applyRitualPortalDamage(playerId: PlayerId, damage: number): boolean {
+        const portalIdx = this.state.units.findIndex((unit) =>
+            unit.playerId === playerId &&
+            unit.type === UnitType.ARC_PORTAL &&
+            !unit.status.isDying
+        );
+
+        if (portalIdx === -1) {
+            this.log(`> RITUAL FAILED: ARC PORTAL NOT FOUND`, playerId);
+            return false;
+        }
+
+        const portal = this.state.units[portalIdx];
+        const nextHp = Math.max(0, portal.stats.hp - damage);
+
+        this.state.units[portalIdx] = {
+            ...portal,
+            stats: {
+                ...portal.stats,
+                hp: nextHp
+            },
+            status: {
+                ...portal.status,
+                isDying: nextHp === 0 ? true : portal.status.isDying
+            }
+        };
+
+        this.triggerDamagePulses([{ unitId: portal.id, amount: damage }]);
+
+        if (nextHp === 0) {
+            window.setTimeout(() => {
+                this.removeUnit(portal.id);
+            }, 1500);
+        }
+
+        return true;
+    }
+
+    private getTalentPickCount(playerId: PlayerId, talentId: string): number {
+        return this.state.playerTalents[playerId].filter((talent) => talent.id === talentId).length;
+    }
+
+    private playerHasTalent(playerId: PlayerId, talentId: string): boolean {
+        return this.getTalentPickCount(playerId, talentId) > 0;
+    }
+
+    public getNanoRepairAmount(playerId: PlayerId): number {
+        return this.playerHasTalent(playerId, 't25') ? 75 : 50;
+    }
+
+    public getShopRerollCost(playerId: PlayerId): number {
+        return this.playerHasTalent(playerId, 't27') ? 25 : 50;
+    }
+
+    public canRefundShopItem(playerId: PlayerId, item: ShopItem, currentRound: number): boolean {
+        if (this.playerHasTalent(playerId, 't27')) {
+            return true;
+        }
+        return item.purchaseRound === currentRound;
+    }
+
+    public getShopRefundAmount(playerId: PlayerId, item: ShopItem): number {
+        if (this.playerHasTalent(playerId, 't27')) {
+            return Math.floor(item.cost * 0.9);
+        }
+        return item.cost;
+    }
+
+    private getTurnIncomeAmount(playerId: PlayerId): number {
+        return this.playerHasTalent(playerId, 't30') ? 30 : INCOME_PER_TURN;
+    }
+
+    private getCollectiblePickupMultiplier(playerId: PlayerId): number {
+        return this.playerHasTalent(playerId, 't30') ? 2 : 1;
+    }
+
+    private hasArcPortalWithMinimumHp(playerId: PlayerId, minimumHp: number): boolean {
+        return this.state.units.some((unit) =>
+            unit.playerId === playerId &&
+            unit.type === UnitType.ARC_PORTAL &&
+            !unit.status.isDying &&
+            unit.stats.hp >= minimumHp
+        );
+    }
+
+    private canOfferTalentToPlayer(playerId: PlayerId, talent: Talent): boolean {
+        const talentRules = TALENT_RULES[talent.id] || {};
+        const pickCount = this.getTalentPickCount(playerId, talent.id);
+        const maxPicks = talent.maxPicks ?? talentRules.maxPicks ?? 1;
+        if (pickCount >= maxPicks) {
+            return false;
+        }
+
+        const prerequisiteTalentIds = talent.prerequisiteTalentIds ?? talentRules.prerequisiteTalentIds;
+        if (prerequisiteTalentIds && !prerequisiteTalentIds.every((talentId) => this.playerHasTalent(playerId, talentId))) {
+            return false;
+        }
+
+        if (talent.id === 't15') {
+            return this.hasArcPortalWithMinimumHp(playerId, 1501);
+        }
+
+        if (talent.id === 't29') {
+            return this.hasArcPortalWithMinimumHp(playerId, 301);
+        }
+
+        return true;
+    }
+
     private getRandomColor(playerId: PlayerId): string {
         if (playerId === PlayerId.ONE) return COLORS.P1;
         if (playerId === PlayerId.TWO) return COLORS.P2;
@@ -2117,6 +2306,7 @@ class GameService {
 
     public buyShopItem(item: ShopItem) {
         const playerId = this.state.currentTurn;
+        const isDevShop = this.state.isDevMode;
         if (this.state.appStatus !== AppStatus.SHOP || this.state.winner) return;
         if (this.state.isMultiplayer && this.state.myPlayerId !== playerId) return;
 
@@ -2127,17 +2317,19 @@ class GameService {
         }
 
         const reservedSlots = this.state.decks[playerId].length + this.state.pendingOrders[playerId].length;
-        if (reservedSlots >= MAX_INVENTORY_CAPACITY) {
+        if (!isDevShop && reservedSlots >= MAX_INVENTORY_CAPACITY) {
             this.log(`> INVENTORY FULL (${MAX_INVENTORY_CAPACITY}/${MAX_INVENTORY_CAPACITY})`, playerId);
             return;
         }
 
-        if (this.state.credits[playerId] < item.cost) {
+        if (!isDevShop && this.state.credits[playerId] < item.cost) {
             this.log("> INSUFFICIENT FUNDS");
             return;
         }
 
-        const nextCredits = this.state.credits[playerId] - item.cost;
+        const nextCredits = isDevShop
+            ? this.state.credits[playerId]
+            : this.state.credits[playerId] - item.cost;
         const nextShopStock = this.state.shopStock[playerId].filter(s => s.id !== item.id);
         let nextPendingOrders = [...this.state.pendingOrders[playerId]];
         let nextDeck = [...this.state.decks[playerId]];
@@ -2183,6 +2375,7 @@ class GameService {
 
     public refundShopItem(item: ShopItem) {
         const playerId = this.state.currentTurn;
+        const isDevShop = this.state.isDevMode;
         if (this.state.appStatus !== AppStatus.SHOP || this.state.winner) return;
         if (this.state.isMultiplayer && this.state.myPlayerId !== playerId) return;
         const currentOrders = this.state.pendingOrders[playerId];
@@ -2190,10 +2383,17 @@ class GameService {
 
         if (orderIdx > -1) {
             const refundedOrder = currentOrders[orderIdx];
+            if (!this.canRefundShopItem(playerId, refundedOrder, this.state.roundNumber)) {
+                this.log(`> ORDER LOCKED: TRANSIT CANCELLATION UNAVAILABLE`, playerId);
+                return;
+            }
             const nextPendingOrders = [...currentOrders];
             nextPendingOrders.splice(orderIdx, 1);
+            const refundAmount = this.getShopRefundAmount(playerId, refundedOrder);
 
-            const nextCredits = this.state.credits[playerId] + refundedOrder.cost;
+            const nextCredits = isDevShop
+                ? this.state.credits[playerId]
+                : this.state.credits[playerId] + refundAmount;
             const { purchaseRound, ...stockItem } = refundedOrder;
             const nextShopStock = [...this.state.shopStock[playerId], stockItem as ShopItem];
             const nextDeck = [...this.state.decks[playerId]];
@@ -2204,7 +2404,9 @@ class GameService {
                 nextShopStock,
                 nextPendingOrders,
                 nextDeck,
-                `> ORDER CANCELLED: +$${refundedOrder.cost}`
+                isDevShop
+                    ? `> ORDER CANCELLED`
+                    : `> ORDER CANCELLED: +$${refundAmount}`
             );
 
             if (this.state.isMultiplayer) {
@@ -2218,11 +2420,12 @@ class GameService {
 
     public rerollShop() {
         const playerId = this.state.currentTurn;
+        const isDevShop = this.state.isDevMode;
         if (this.state.appStatus !== AppStatus.SHOP || this.state.winner) return;
         if (this.state.isMultiplayer && this.state.myPlayerId !== playerId) return;
-        const REROLL_COST = 50;
+        const rerollCost = this.getShopRerollCost(playerId);
 
-        if (this.state.credits[playerId] < REROLL_COST) {
+        if (!isDevShop && this.state.credits[playerId] < rerollCost) {
             this.log("> INSUFFICIENT FUNDS FOR REROLL");
             return;
         }
@@ -2233,7 +2436,9 @@ class GameService {
             return;
         }
 
-        const nextCredits = this.state.credits[playerId] - REROLL_COST;
+        const nextCredits = isDevShop
+            ? this.state.credits[playerId]
+            : this.state.credits[playerId] - rerollCost;
         const nextShopStock = this._generateRandomStock(currentStockCount, playerId);
         const nextPendingOrders = [...this.state.pendingOrders[playerId]];
         const nextDeck = [...this.state.decks[playerId]];
@@ -2244,7 +2449,9 @@ class GameService {
             nextShopStock,
             nextPendingOrders,
             nextDeck,
-            `> LOGISTICS REROUTED: -${REROLL_COST} CREDITS`
+            isDevShop
+                ? `> LOGISTICS REROUTED`
+                : `> LOGISTICS REROUTED: -${rerollCost} CREDITS`
         );
 
         if (this.state.isMultiplayer) {
@@ -2768,6 +2975,7 @@ class GameService {
             turnOrder,
             matchMode,
             unlockedUnits,
+            playerTalentDraftCounts: this.createPerPlayerRecord(() => 3),
 
             credits: this.createPerPlayerRecord((playerId) =>
                 playerId === PlayerId.NEUTRAL || !activePlayerIds.includes(playerId) ? 0 : INITIAL_CREDITS
@@ -3266,10 +3474,12 @@ class GameService {
     // --- PASSIVE TALENTS LOGIC ---
     private processPassiveTalents(playerId: PlayerId) {
         const talents = this.state.playerTalents[playerId];
-        const hasBioticRegen = talents.some(t => t.id === 't5');
-        const hasReactorTuning = talents.some(t => t.id === 't6');
+        const bioticRegenTier = talents.filter(t => t.id === 't5' || t.id === 't22').length;
+        const reactorTuningTier = talents.filter(t => t.id === 't6' || t.id === 't23').length;
+        const hasBioticRegen = bioticRegenTier > 0;
         const baseEnergyRegen = 5;
-        const bonusEnergyRegen = hasReactorTuning ? 5 : 0;
+        const bonusEnergyRegen = reactorTuningTier * 5;
+        const bioticRegenAmount = bioticRegenTier * 10;
 
         if (!hasBioticRegen && baseEnergyRegen === 0 && bonusEnergyRegen === 0) return;
 
@@ -3282,7 +3492,7 @@ class GameService {
             // t5: Biotic Regen (Heal 10 HP/turn for non-buildings)
             if (hasBioticRegen && !BUILDING_TYPES.includes(u.type)) {
                 if (newStats.hp < newStats.maxHp) {
-                    newStats.hp = Math.min(newStats.maxHp, newStats.hp + 10);
+                    newStats.hp = Math.min(newStats.maxHp, newStats.hp + bioticRegenAmount);
                     updated = true;
                 }
             }
@@ -3301,7 +3511,7 @@ class GameService {
             return u;
         });
 
-        if (hasBioticRegen) this.log(`> BIOTIC REGEN APPLIED`, playerId);
+        if (hasBioticRegen) this.log(`> BIOTIC REGEN APPLIED (+${bioticRegenAmount})`, playerId);
         if (baseEnergyRegen > 0 || bonusEnergyRegen > 0) {
             const regenLabel = bonusEnergyRegen > 0 ? `${baseEnergyRegen}+${bonusEnergyRegen}` : `${baseEnergyRegen}`;
             this.log(`> ENERGY REGEN APPLIED (+${regenLabel})`, playerId);
@@ -4971,7 +5181,7 @@ class GameService {
             return;
         }
 
-        const healAmount = 50;
+        const healAmount = this.getNanoRepairAmount(source.playerId);
 
         this.animateSupportAction(targetUnitId, healAmount, 'HEAL', () => {
             const latestSourceIdx = this.state.units.findIndex(u => u.id === sourceUnitId);
@@ -5416,6 +5626,14 @@ class GameService {
         const config = CARD_CONFIG[type];
         const playerTalents = this.state.playerTalents[playerId];
         const hasTalent = (talentId: string) => playerTalents.some(t => t.id === talentId);
+        const marineUpgradeTier = Number(hasTalent('t8')) + Number(hasTalent('t16'));
+        const marineSuiteTier = Number(hasTalent('t9')) + Number(hasTalent('t17'));
+        const dreadnoughtOffenseTier = Number(hasTalent('t10')) + Number(hasTalent('t18'));
+        const dreadnoughtArmorTier = Number(hasTalent('t11')) + Number(hasTalent('t19'));
+        const droneUpgradeTier = Number(hasTalent('t12')) + Number(hasTalent('t20'));
+        const tanksUpgradeTier = Number(hasTalent('t13')) + Number(hasTalent('t21'));
+        const reinforcedWallsActive = hasTalent('t24');
+        const nanoBladesActive = hasTalent('t26');
         const stats = config?.baseStats ? { ...config.baseStats } : {
             hp: 100, maxHp: 100, energy: 0, maxEnergy: 0,
             attack: 10, range: 1, movement: 3, size: 1, blocksLos: false, maxAttacks: 1
@@ -5425,31 +5643,48 @@ class GameService {
         if (hasTalent('t4') && (stats.range || 0) > 1) stats.range = (stats.range || 1) + 1;
 
         // t8: Marine Upgrade - Only for Soldier type
-        if (hasTalent('t8') && type === UnitType.SOLDIER) {
-            stats.attack = (stats.attack || 0) + 15;
-            stats.range = (stats.range || 0) + 1;
+        if (marineUpgradeTier > 0 && type === UnitType.SOLDIER) {
+            stats.attack = (stats.attack || 0) + (15 * marineUpgradeTier);
+            stats.range = (stats.range || 0) + marineUpgradeTier;
         }
 
         // t9: Marine Suite (HP + Mobility) - Only for Soldier type
-        if (hasTalent('t9') && type === UnitType.SOLDIER) {
-            stats.hp = (stats.hp || 100) + 50;
-            stats.movement = (stats.movement || 0) + 1;
+        if (marineSuiteTier > 0 && type === UnitType.SOLDIER) {
+            stats.hp = (stats.hp || 100) + (50 * marineSuiteTier);
+            stats.movement = (stats.movement || 0) + marineSuiteTier;
         }
 
         // t10: Dreadnought Offense - Only for Heavy type
-        if (hasTalent('t10') && type === UnitType.HEAVY) {
-            stats.attack = (stats.attack || 0) + 20;
-            stats.range = (stats.range || 0) + 1;
+        if (dreadnoughtOffenseTier > 0 && type === UnitType.HEAVY) {
+            stats.attack = (stats.attack || 0) + (20 * dreadnoughtOffenseTier);
+            stats.range = (stats.range || 0) + dreadnoughtOffenseTier;
         }
 
         // t11: Dreadnought Armor - Only for Heavy type
-        if (hasTalent('t11') && type === UnitType.HEAVY) {
-            stats.hp = (stats.hp || 200) + 100;
+        if (dreadnoughtArmorTier > 0 && type === UnitType.HEAVY) {
+            stats.hp = (stats.hp || 200) + (100 * dreadnoughtArmorTier);
         }
 
         // t12: Drone Upgrade - Only for Box and Suicide Drone
-        if (hasTalent('t12') && (type === UnitType.BOX || type === UnitType.SUICIDE_DRONE)) {
-            stats.movement = (stats.movement || 0) + 2;
+        if (droneUpgradeTier > 0 && (type === UnitType.BOX || type === UnitType.SUICIDE_DRONE)) {
+            stats.movement = (stats.movement || 0) + (2 * droneUpgradeTier);
+            stats.hp = (stats.hp || 100) + (20 * droneUpgradeTier);
+        }
+
+        // t13: Tanks Upgrade - Only for Light and Heavy Tank
+        if (tanksUpgradeTier > 0 && (type === UnitType.LIGHT_TANK || type === UnitType.HEAVY_TANK)) {
+            stats.attack = (stats.attack || 0) + (20 * tanksUpgradeTier);
+            stats.hp = (stats.hp || 100) + (100 * tanksUpgradeTier);
+        }
+
+        // t24: Reinforced Walls
+        if (reinforcedWallsActive && (type === UnitType.WALL || type === UnitType.TOWER || type === UnitType.CHARGING_STATION)) {
+            stats.hp = (stats.hp || 100) + 100;
+        }
+
+        // t26: Nano Blades
+        if (nanoBladesActive && type === UnitType.CONE) {
+            stats.attack = (stats.attack || 0) + 20;
             stats.hp = (stats.hp || 100) + 20;
         }
 
@@ -5494,7 +5729,15 @@ class GameService {
     }
 
     public spawnUnit(type: UnitType, position: Position, playerId: PlayerId, idOverride?: string) {
-        const unit = this.createUnit(type, position, playerId, idOverride);
+        const baseUnit = this.createUnit(type, position, playerId, idOverride);
+        const shouldApplySummoningSickness = baseUnit.stats.movement > 0
+            && !this.playerHasTalent(playerId, 't28');
+        const unit = shouldApplySummoningSickness
+            ? {
+                ...baseUnit,
+                effects: [...baseUnit.effects, this.createSummoningSicknessEffect(baseUnit.id)]
+            }
+            : baseUnit;
         this.state.units = [...this.state.units, unit];
         this.updateFogOfWar();
 
@@ -5961,7 +6204,7 @@ class GameService {
         if (targetIdx !== -1) {
             const target = updatedUnits[targetIdx];
             const attacker = updatedUnits[attackerIdx];
-            const damage = attacker.stats.attack;
+            const damage = this.getEffectiveAttack(attacker);
             const damageResult = this.applyDamageToUnit(target, damage);
 
             if (damageResult.wasInvulnerable) {
@@ -6657,26 +6900,32 @@ class GameService {
         const colIdx = this.state.collectibles.findIndex(c => c.position.x === nextPos.x && c.position.z === nextPos.z);
         if (colIdx > -1) {
             const collectible = this.state.collectibles[colIdx];
+            const pickupMultiplier = this.getCollectiblePickupMultiplier(unit.playerId);
 
             if (collectible.type === 'MONEY_PRIZE') {
-                this.state.credits[unit.playerId] += collectible.value;
-                this.log(`> COLLECTIBLE ACQUIRED: $${collectible.value}`, unit.playerId);
+                const creditGain = collectible.value * pickupMultiplier;
+                this.state.credits[unit.playerId] += creditGain;
+                this.log(`> COLLECTIBLE ACQUIRED: $${creditGain}`, unit.playerId);
                 this.state.collectibles.splice(colIdx, 1);
             }
             else if (collectible.type === 'HEALTH_PACK') {
                 if (unit.stats.hp < unit.stats.maxHp) {
-                    const newHp = Math.min(unit.stats.maxHp, unit.stats.hp + collectible.value);
+                    const healAmount = collectible.value * pickupMultiplier;
+                    const newHp = Math.min(unit.stats.maxHp, unit.stats.hp + healAmount);
+                    const appliedHeal = newHp - unit.stats.hp;
                     newUnits[unitIndex] = { ...newUnits[unitIndex], stats: { ...unit.stats, hp: newHp } };
-                    this.log(`> MEDIKIT USED: +${collectible.value} HP`, unit.playerId);
+                    this.log(`> MEDIKIT USED: +${appliedHeal} HP`, unit.playerId);
                     this.state.collectibles.splice(colIdx, 1);
                     this.state.units = newUnits; // Update ref
                 }
             }
             else if (collectible.type === 'ENERGY_CELL') {
                 if (unit.stats.maxEnergy > 0 && unit.stats.energy < unit.stats.maxEnergy) {
-                    const newEnergy = Math.min(unit.stats.maxEnergy, unit.stats.energy + collectible.value);
+                    const energyGain = collectible.value * pickupMultiplier;
+                    const newEnergy = Math.min(unit.stats.maxEnergy, unit.stats.energy + energyGain);
+                    const appliedEnergy = newEnergy - unit.stats.energy;
                     newUnits[unitIndex] = { ...newUnits[unitIndex], stats: { ...unit.stats, energy: newEnergy } };
-                    this.log(`> ENERGY CELL CONSUMED: +${collectible.value} ENERGY`, unit.playerId);
+                    this.log(`> ENERGY CELL CONSUMED: +${appliedEnergy} ENERGY`, unit.playerId);
                     this.state.collectibles.splice(colIdx, 1);
                     this.state.units = newUnits;
                 }
@@ -6888,7 +7137,7 @@ class GameService {
         }
 
         // t8: Marine Upgrade (Immediate update for existing units)
-        if (talent.id === 't8') {
+        if (talent.id === 't8' || talent.id === 't16') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.type === UnitType.SOLDIER) {
                     return {
@@ -6902,11 +7151,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> MARINE UPGRADE: CYBER MARINES BOOSTED`, player);
+            this.log(`> ${talent.name.toUpperCase()}: CYBER MARINES BOOSTED`, player);
         }
 
         // t9: Marine Suite (Immediate update for existing units)
-        if (talent.id === 't9') {
+        if (talent.id === 't9' || talent.id === 't17') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.type === UnitType.SOLDIER) {
                     return {
@@ -6921,11 +7170,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> MARINE SUITE: CYBER MARINES HARDENED`, player);
+            this.log(`> ${talent.name.toUpperCase()}: CYBER MARINES HARDENED`, player);
         }
 
         // t10: Dreadnought Offense (Immediate update for existing units)
-        if (talent.id === 't10') {
+        if (talent.id === 't10' || talent.id === 't18') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.type === UnitType.HEAVY) {
                     return {
@@ -6939,11 +7188,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> DREADNOUGHT OFFENSE: WEAPONS HOT`, player);
+            this.log(`> ${talent.name.toUpperCase()}: WEAPONS HOT`, player);
         }
 
         // t11: Dreadnought Armor (Immediate update for existing units)
-        if (talent.id === 't11') {
+        if (talent.id === 't11' || talent.id === 't19') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.type === UnitType.HEAVY) {
                     return {
@@ -6957,11 +7206,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> DREADNOUGHT ARMOR: PLATING REINFORCED`, player);
+            this.log(`> ${talent.name.toUpperCase()}: PLATING REINFORCED`, player);
         }
 
         // t12: Drone Upgrade (Immediate update for existing units)
-        if (talent.id === 't12') {
+        if (talent.id === 't12' || talent.id === 't20') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && this.isDroneUnit(u)) {
                     return {
@@ -6976,7 +7225,110 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> DRONE UPGRADE: DRONES OPTIMIZED`, player);
+            this.log(`> ${talent.name.toUpperCase()}: DRONES OPTIMIZED`, player);
+        }
+
+        // t13: Tanks Upgrade (Immediate update for existing units)
+        if (talent.id === 't13' || talent.id === 't21') {
+            this.state.units = this.state.units.map(u => {
+                if (u.playerId === player && (u.type === UnitType.LIGHT_TANK || u.type === UnitType.HEAVY_TANK)) {
+                    return {
+                        ...u,
+                        stats: {
+                            ...u.stats,
+                            attack: u.stats.attack + 20,
+                            hp: u.stats.hp + 100,
+                            maxHp: u.stats.maxHp + 100
+                        }
+                    };
+                }
+                return u;
+            });
+            this.log(`> ${talent.name.toUpperCase()}: ARMOR COLUMN ENHANCED`, player);
+        }
+
+        // t24: Reinforced Walls (Immediate update for existing units)
+        if (talent.id === 't24') {
+            this.state.units = this.state.units.map(u => {
+                if (u.playerId === player && (u.type === UnitType.WALL || u.type === UnitType.TOWER || u.type === UnitType.CHARGING_STATION)) {
+                    return {
+                        ...u,
+                        stats: {
+                            ...u.stats,
+                            hp: u.stats.hp + 100,
+                            maxHp: u.stats.maxHp + 100
+                        }
+                    };
+                }
+                return u;
+            });
+            this.log(`> REINFORCED WALLS: DEFENSIVE GRID FORTIFIED`, player);
+        }
+
+        // t26: Nano Blades (Immediate update for existing units)
+        if (talent.id === 't26') {
+            this.state.units = this.state.units.map(u => {
+                if (u.playerId === player && u.type === UnitType.CONE) {
+                    return {
+                        ...u,
+                        stats: {
+                            ...u.stats,
+                            attack: u.stats.attack + 20,
+                            hp: u.stats.hp + 20,
+                            maxHp: u.stats.maxHp + 20
+                        }
+                    };
+                }
+                return u;
+            });
+            this.log(`> NANO BLADES: APEX BLADES SHARPENED`, player);
+        }
+
+        // t27: Negotiator
+        if (talent.id === 't27') {
+            this.log(`> NEGOTIATOR: REROLLS DISCOUNTED AND TRANSIT SELLS ENABLED`, player);
+        }
+
+        // t28: Rapid Deployment
+        if (talent.id === 't28') {
+            this.log(`> RAPID DEPLOYMENT: NEW SUMMONS IGNORE SUMMONING SICKNESS`, player);
+        }
+
+        // t29: Portal Exchange
+        if (talent.id === 't29') {
+            if (this.applyRitualPortalDamage(player, 300)) {
+                this.state.credits = {
+                    ...this.state.credits,
+                    [player]: this.state.credits[player] + 300
+                };
+                this.log(`> PORTAL EXCHANGE: ARC PORTAL -300 HP, +$300`, player);
+            }
+        }
+
+        // t30: Economist
+        if (talent.id === 't30') {
+            this.log(`> ECONOMIST: TURN INCOME INCREASED AND FIELD PICKUPS DOUBLED`, player);
+        }
+
+        // t14: Perk Expert
+        if (talent.id === 't14') {
+            this.state.credits = {
+                ...this.state.credits,
+                [player]: this.state.credits[player] + 50
+            };
+            this.state.playerTalentDraftCounts = {
+                ...this.state.playerTalentDraftCounts,
+                [player]: Math.max(this.state.playerTalentDraftCounts[player] || 3, 5)
+            };
+            this.log(`> PERK EXPERT: +$50 AND FUTURE DRAFTS EXPANDED TO 5`, player);
+        }
+
+        // t15: Ritual
+        if (talent.id === 't15') {
+            if (this.applyRitualPortalDamage(player, 1500)) {
+                this.state.pendingTalentQueue = [player, player, player, ...this.state.pendingTalentQueue];
+                this.log(`> RITUAL EXECUTED: ARC PORTAL SACRIFICED FOR 3 BONUS DRAFTS`, player);
+            }
         }
 
         this.state.talentChoices = [];
@@ -7009,10 +7361,11 @@ class GameService {
         this.notify();
     }
 
-    private generateTalentChoices(): Talent[] {
-        const pool = [...TALENT_POOL];
+    private generateTalentChoices(playerId: PlayerId): Talent[] {
+        const pool = TALENT_POOL.filter((talent) => this.canOfferTalentToPlayer(playerId, talent));
         const shuffled = pool.sort(() => 0.5 - Math.random());
-        return shuffled.slice(0, 3);
+        const draftCount = Math.max(1, this.state.playerTalentDraftCounts[playerId] || 3);
+        return shuffled.slice(0, draftCount);
     }
 
     private openTalentSelection(playerId: PlayerId, choices: Talent[]) {
@@ -7027,7 +7380,7 @@ class GameService {
     }
 
     private triggerTalentSelection(playerId: PlayerId, isRemote: boolean = false, forcedChoices?: Talent[]) {
-        const choices = forcedChoices || this.generateTalentChoices();
+        const choices = forcedChoices || this.generateTalentChoices(playerId);
         this.openTalentSelection(playerId, choices);
 
         if (this.state.isMultiplayer && this.isSyncAuthority()) {
@@ -7214,4 +7567,7 @@ class GameService {
 }
 
 export const gameService = new GameService();
+
+
+
 

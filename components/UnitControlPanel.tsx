@@ -62,6 +62,16 @@ const EffectBadgeIcon: React.FC<{ effect: Effect }> = ({ effect }) => {
                     <path d="M8 18C9.2 16.8 10.6 16.2 12 16.2C13.4 16.2 14.8 16.8 16 18" strokeLinecap="round" />
                 </svg>
             );
+        case 'SUMMONING SICKNESS':
+            return (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4 text-violet-300">
+                    <path d="M6 7H18" strokeLinecap="round" />
+                    <path d="M9 12H15" strokeLinecap="round" />
+                    <path d="M11 17H13" strokeLinecap="round" />
+                    <path d="M8 4L6 7L8 10" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M16 14L18 17L16 20" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+            );
         case 'SYSTEM FREEZE':
         case 'CRYO STASIS':
             return (
@@ -290,11 +300,11 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
     const hpPercent = (unit.stats.hp / unit.stats.maxHp) * 100;
     const hasEnergy = unit.stats.maxEnergy > 0;
     const energyPercent = hasEnergy ? (unit.stats.energy / unit.stats.maxEnergy) * 100 : 0;
-    const hasMobilityBoost = unit.effects.some((effect) => effect.name === 'MOBILITY BOOST');
-    const hasMobilitySabotage = unit.effects.some((effect) => effect.name === 'MOBILITY SABOTAGE');
-    const effectiveMovement = Math.max(0, unit.stats.movement + (hasMobilityBoost ? 3 : 0) - (hasMobilitySabotage ? 2 : 0));
+    const effectiveAttack = gameService.getEffectiveAttack(unit);
+    const effectiveMovement = gameService.getEffectiveMovement(unit);
     const actionsLocked = !canUseActions;
     const isCurrentTurnUnit = unit.playerId === currentTurnPlayerId;
+    const nanoRepairAmount = gameService.getNanoRepairAmount(unit.playerId);
     const fluxTowerPurchasedUpgrades = unit.status.fluxTowerAttackUpgradesPurchased ?? 0;
     const fluxTowerUnlockedUpgrades = Math.max(0, Math.floor(unit.level / FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP));
     const fluxTowerAvailableUpgrades = Math.max(0, fluxTowerUnlockedUpgrades - fluxTowerPurchasedUpgrades);
@@ -474,7 +484,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
 
                         {/* Stats Grid (4 Columns) */}
                         <div className="grid grid-cols-4 gap-2">
-                            <StatSquare label="ATTACK" value={unit.stats.attack} />
+                            <StatSquare label="ATTACK" value={effectiveAttack} />
                             <StatSquare label="RANGE" value={unit.stats.range} />
                             <StatSquare
                                 label="MOVES"
@@ -652,8 +662,8 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                             icon="+"
                                             cost={25}
                                             description={unit.type === UnitType.REPAIR_BOT
-                                                ? "Repair a friendly building or machine within 2 tiles for 50 HP."
-                                                : "Heal a friendly creature within 2 tiles for 50 HP."}
+                                                ? `Repair a friendly building or machine within 2 tiles for ${nanoRepairAmount} HP.`
+                                                : `Heal a friendly creature within 2 tiles for ${nanoRepairAmount} HP.`}
                                             onClick={() => gameService.activateHealAbility(unit.id)}
                                             disabled={actionsLocked || unit.stats.energy < 25}
                                             color="#10b981" // emerald-500

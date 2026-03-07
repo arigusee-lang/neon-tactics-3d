@@ -608,13 +608,17 @@ const App: React.FC = () => {
             )}
 
             {/* Shop Modal */}
-            {gameState.appStatus === AppStatus.SHOP && (
+            {gameState.appStatus === AppStatus.SHOP && (!gameState.isMultiplayer || isLocalTurn) && (
                 <ShopModal
                     availableStock={gameState.shopStock[gameState.currentTurn]}
                     boughtItems={gameState.pendingOrders[gameState.currentTurn]}
                     credits={gameState.credits[gameState.currentTurn]}
                     nextDeliveryRound={gameState.nextDeliveryRound}
                     currentRound={gameState.roundNumber}
+                    isDevMode={gameState.isDevMode}
+                    rerollCost={gameService.getShopRerollCost(gameState.currentTurn)}
+                    canRefundItem={(item) => gameService.canRefundShopItem(gameState.currentTurn, item, gameState.roundNumber)}
+                    getRefundAmount={(item) => gameService.getShopRefundAmount(gameState.currentTurn, item)}
                     onBuy={(item) => gameService.buyShopItem(item)}
                     onRefund={(item) => gameService.refundShopItem(item)}
                     onReroll={() => gameService.rerollShop()}
