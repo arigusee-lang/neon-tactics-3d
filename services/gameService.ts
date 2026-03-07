@@ -30,13 +30,9 @@ import { io, Socket } from 'socket.io-client';
 // Map Loading
 // Note: We use eager loading to get the map content synchronously at startup.
 const mapModules = import.meta.glob('../maps/*.json', { eager: true });
-const loadedMaps: Record<string, any> = {};
-
-Object.keys(mapModules).forEach(path => {
-    const fileName = path.split('/').pop()?.replace('.json', '') || 'Unknown Map';
-    loadedMaps[fileName] = (mapModules[path] as any).default || mapModules[path];
-});
-
+const loadedMaps: Record<string, MapJsonShape> = {};
+const importedMaps: Record<string, MapJsonShape> = {};
+const importedMapIds = new Set<string>();
 interface MapJsonShape {
     description?: string;
     players?: MapPlayerSupport;
@@ -50,6 +46,11 @@ interface MapJsonShape {
     origin?: { x: number; z: number };
     deletedTiles?: string[];
 }
+
+Object.keys(mapModules).forEach(path => {
+    const fileName = path.split('/').pop()?.replace('.json', '') || 'Unknown Map';
+    loadedMaps[fileName] = (mapModules[path] as any).default || mapModules[path];
+});
 
 const normalizeMapPlayers = (value: unknown): MapPlayerSupport => {
     if (value === 2 || value === 3 || value === 4 || value === 'dev') {
@@ -77,6 +78,26 @@ const normalizeMapDescription = (value: unknown): string | undefined => {
     return trimmed.length > 0 ? trimmed : undefined;
 };
 
+const cloneMapJson = (mapData: MapJsonShape): MapJsonShape => JSON.parse(JSON.stringify(mapData));
+
+const getRegisteredMaps = (): Record<string, MapJsonShape> => ({
+    ...loadedMaps,
+    ...importedMaps
+});
+
+const getRegisteredMap = (mapId: string): MapJsonShape | undefined => importedMaps[mapId] || loadedMaps[mapId];
+
+const buildMapMetadata = (mapId: string, mapData: MapJsonShape): MapMetadata => {
+    const players = normalizeMapPlayers(mapData.players);
+    return {
+        id: mapId,
+        description: normalizeMapDescription(mapData.description),
+        players,
+        mode: normalizeMatchMode(mapData.mode, players),
+        isImported: importedMapIds.has(mapId)
+    };
+};
+
 const BUILT_IN_MAPS: MapMetadata[] = [
     {
         id: 'MAP_1',
@@ -86,21 +107,26 @@ const BUILT_IN_MAPS: MapMetadata[] = [
     }
 ];
 
-const AVAILABLE_MAPS: MapMetadata[] = [
+const getAvailableMaps = (): MapMetadata[] => [
     ...BUILT_IN_MAPS,
-    ...Object.keys(loadedMaps)
+    ...Object.keys(getRegisteredMaps())
         .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))
-        .map((mapId) => {
-            const mapData = loadedMaps[mapId] as MapJsonShape;
-            const players = normalizeMapPlayers(mapData.players);
-            return {
-                id: mapId,
-                description: normalizeMapDescription(mapData.description),
-                players,
-                mode: normalizeMatchMode(mapData.mode, players)
-            };
-        })
+        .map((mapId) => buildMapMetadata(mapId, getRegisteredMaps()[mapId]))
 ];
+
+const sanitizeImportedMapIdBase = (value: string): string => {
+    const base = value
+        .replace(/\.json$/i, '')
+        .trim()
+        .replace(/[^a-z0-9]+/gi, '-')
+        .replace(/^-+|-+$/g, '');
+    return base.length > 0 ? base : 'ImportedMap';
+};
+
+const isKnownMapId = (mapId: string): boolean => (
+    BUILT_IN_MAPS.some((map) => map.id === mapId)
+    || !!getRegisteredMap(mapId)
+);
 
 interface PendingStartConfig {
     mapType: string;
@@ -164,6 +190,12 @@ class GameService {
     private unitCycleOrder: string[] = [];
     private unitCycleSetKey: string = '';
     private lastTabSelectionId: string | null = null;
+    private pendingSyncTimeoutId: number | null = null;
+    private pendingSyncDueAt = 0;
+    private lastSyncSentAt = 0;
+    private readonly syncMinIntervalMs = 250;
+    private pendingMultiplayerMoveUnitId: string | null = null;
+    private queuedAuthoritativeMoveTargets: Map<string, Position> = new Map();
     private pendingStartConfig: PendingStartConfig | null = null;
     private readonly authoritativeActions = new Set<string>([
         'SYNC_STATE',
@@ -207,6 +239,7 @@ class GameService {
         if (this.turnTimerIntervalId !== null) return;
         this.turnTimerIntervalId = window.setInterval(() => {
             this.processTurnTimerTick();
+            this.processBackgroundMovementTick();
         }, 250);
     }
 
@@ -216,6 +249,94 @@ class GameService {
 
     private updateInGameAdminState() {
         this.state.isInGameAdmin = !!this.state.hostAdminEnabled && this.isSyncAuthority();
+    }
+
+    private refreshAvailableMaps() {
+        this.state.availableMaps = getAvailableMaps();
+    }
+
+    private ensureImportedMapShape(mapData: unknown): asserts mapData is MapJsonShape {
+        if (!mapData || typeof mapData !== 'object' || Array.isArray(mapData)) {
+            throw new Error('Imported file must contain a JSON object.');
+        }
+
+        const candidate = mapData as Record<string, unknown>;
+        const hasTerrain = !!candidate.terrain && typeof candidate.terrain === 'object' && !Array.isArray(candidate.terrain);
+        const hasSize = !!candidate.mapSize || !!candidate.size;
+
+        if (!hasTerrain && !hasSize) {
+            throw new Error('Imported map JSON must include terrain data or explicit mapSize.');
+        }
+
+        if (candidate.units !== undefined && !Array.isArray(candidate.units)) {
+            throw new Error('Imported map JSON has an invalid units array.');
+        }
+
+        if (candidate.collectibles !== undefined && !Array.isArray(candidate.collectibles)) {
+            throw new Error('Imported map JSON has an invalid collectibles array.');
+        }
+
+        const players = candidate.players;
+        if (players !== undefined && players !== 2 && players !== 3 && players !== 4 && players !== 'dev') {
+            throw new Error('Imported map JSON has an unsupported players value.');
+        }
+
+        const mode = candidate.mode;
+        if (mode !== undefined && mode !== 'duel' && mode !== 'team_2v1' && mode !== 'team_2v2' && mode !== 'ffa') {
+            throw new Error('Imported map JSON has an unsupported mode value.');
+        }
+    }
+
+    private createImportedMapId(fileName: string) {
+        const baseId = `Imported-${sanitizeImportedMapIdBase(fileName)}`;
+        let candidate = baseId;
+        let suffix = 2;
+
+        while (isKnownMapId(candidate)) {
+            candidate = `${baseId}-${suffix}`;
+            suffix++;
+        }
+
+        return candidate;
+    }
+
+    private registerImportedMap(mapId: string, mapData: MapJsonShape, notify: boolean = true) {
+        importedMaps[mapId] = cloneMapJson(mapData);
+        importedMapIds.add(mapId);
+        this.refreshAvailableMaps();
+        if (notify) {
+            this.notify();
+        }
+    }
+
+    private syncLobbyMap(mapId?: string | null, mapData?: MapJsonShape | null) {
+        if (!mapId || !mapData) return;
+        this.ensureImportedMapShape(mapData);
+        this.registerImportedMap(mapId, mapData, false);
+    }
+
+    public importMapJson(rawJson: string, fileName: string = 'ImportedMap.json'): MapMetadata {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(rawJson);
+        } catch {
+            throw new Error('Imported file is not valid JSON.');
+        }
+
+        this.ensureImportedMapShape(parsed);
+
+        const importedMap = cloneMapJson(parsed);
+        const mapId = this.createImportedMapId(fileName);
+        const fallbackDescription = `Imported from ${fileName.replace(/\.json$/i, '')}.`;
+        importedMap.description = normalizeMapDescription(importedMap.description) || fallbackDescription;
+
+        this.registerImportedMap(mapId, importedMap);
+        return buildMapMetadata(mapId, importedMap);
+    }
+
+    public getImportedMapData(mapId: string): MapJsonShape | null {
+        const mapData = importedMaps[mapId];
+        return mapData ? cloneMapJson(mapData) : null;
     }
 
     private canEditUnitStats() {
@@ -481,13 +602,90 @@ class GameService {
         return turnOrder.length > 0 && turnOrder[turnOrder.length - 1] === playerId;
     }
 
+    private clearPendingSyncTimer() {
+        if (this.pendingSyncTimeoutId !== null) {
+            window.clearTimeout(this.pendingSyncTimeoutId);
+            this.pendingSyncTimeoutId = null;
+        }
+        this.pendingSyncDueAt = 0;
+    }
+
     private replicateAuthoritativeState(delayMs: number = 0) {
         if (!this.state.isMultiplayer || !this.isSyncAuthority()) return;
 
-        window.setTimeout(() => {
+        const now = Date.now();
+        const dueAt = Math.max(
+            now + Math.max(0, delayMs),
+            this.lastSyncSentAt + this.syncMinIntervalMs
+        );
+
+        if (this.pendingSyncTimeoutId !== null) {
+            // Keep the earlier already-scheduled sync to coalesce bursts.
+            if (dueAt >= this.pendingSyncDueAt) {
+                return;
+            }
+            this.clearPendingSyncTimer();
+        }
+
+        this.pendingSyncDueAt = dueAt;
+        const waitMs = Math.max(0, dueAt - now);
+
+        this.pendingSyncTimeoutId = window.setTimeout(() => {
+            this.pendingSyncTimeoutId = null;
+            this.pendingSyncDueAt = 0;
+
             if (!this.state.isMultiplayer || !this.isSyncAuthority()) return;
+
+            this.lastSyncSentAt = Date.now();
             this.dispatchAction('SYNC_STATE', this.buildSyncStatePayload());
-        }, delayMs);
+        }, waitMs);
+    }
+
+    private resetMultiplayerSessionState(reason: string) {
+        this.clearPendingSyncTimer();
+        this.pendingMultiplayerMoveUnitId = null;
+        this.queuedAuthoritativeMoveTargets.clear();
+        this.authoritySocketId = null;
+        this.state.roomId = null;
+        this.state.lobbyMapId = null;
+        this.state.lobbyPlayerCount = 0;
+        this.state.lobbyMaxPlayers = 0;
+        this.state.hostAdminEnabled = false;
+        this.state.isInGameAdmin = false;
+        this.state.isMultiplayer = false;
+        this.state.myPlayerId = null;
+        this.state.appStatus = AppStatus.MENU;
+        this.log(`> MULTIPLAYER SESSION RESET: ${reason}`);
+    }
+
+    private processQueuedAuthoritativeMove(unitId: string) {
+        const target = this.queuedAuthoritativeMoveTargets.get(unitId);
+        if (!target) return;
+
+        const unit = this.state.units.find((u) => u.id === unitId);
+        if (!unit || unit.movePath.length > 0) return;
+
+        this.queuedAuthoritativeMoveTargets.delete(unitId);
+
+        const remainingSteps = Math.max(0, this.getEffectiveMovement(unit) - unit.status.stepsTaken);
+        if (remainingSteps <= 0) return;
+
+        const occupied = this.getAllOccupiedCells(unitId);
+        const path = findPath(
+            unit.position,
+            target,
+            occupied,
+            new Set(Object.keys(this.state.terrain)),
+            this.state.terrain,
+            unit.stats.size,
+            this.state.mapBounds
+        ).slice(0, remainingSteps);
+
+        if (path.length === 0) return;
+
+        this.state.selectedUnitId = unitId;
+        this.state.previewPath = path;
+        this.confirmMove(true);
     }
 
     private createMapBounds(originX: number, originZ: number, width: number, height: number): MapBounds {
@@ -649,7 +847,8 @@ class GameService {
             console.log('Connected to server:', this.socket?.id);
         });
 
-        this.socket.on('lobby_state', (payload: { roomId: string; mapId?: string; players: string[]; playerIds?: PlayerId[]; maxPlayers: number; started: boolean; authoritySocketId?: string; hostAdminEnabled?: boolean }) => {
+        this.socket.on('lobby_state', (payload: { roomId: string; mapId?: string; mapData?: MapJsonShape | null; players: string[]; playerIds?: PlayerId[]; maxPlayers: number; started: boolean; authoritySocketId?: string; hostAdminEnabled?: boolean }) => {
+            this.syncLobbyMap(payload.mapId, payload.mapData);
             this.state.roomId = payload.roomId;
             this.state.lobbyMapId = payload.mapId || null;
             this.state.lobbyPlayerCount = Array.isArray(payload.players) ? payload.players.length : 0;
@@ -677,11 +876,13 @@ class GameService {
             this.notify();
         });
 
-        this.socket.on('lobby_created', (payload: string | { roomId: string; mapId?: string; authoritySocketId?: string; hostAdminEnabled?: boolean }) => {
+        this.socket.on('lobby_created', (payload: string | { roomId: string; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean }) => {
             const roomId = typeof payload === 'string' ? payload : payload.roomId;
             const mapId = typeof payload === 'string' ? null : (payload.mapId || null);
+            const mapData = typeof payload === 'string' ? null : (payload.mapData || null);
             const authoritySocketId = typeof payload === 'string' ? null : (payload.authoritySocketId || null);
             const hostAdminEnabled = typeof payload === 'string' ? false : !!payload.hostAdminEnabled;
+            this.syncLobbyMap(mapId, mapData);
             console.log('Lobby Created:', roomId, mapId ? `map=${mapId}` : '');
             this.state.roomId = roomId;
             this.state.isMultiplayer = true;
@@ -694,8 +895,9 @@ class GameService {
             this.notify();
         });
 
-        this.socket.on('game_start', (data: { roomId: string; players: string[]; mapId?: string; authoritySocketId?: string; hostAdminEnabled?: boolean; turnOrder?: PlayerId[] }) => {
+        this.socket.on('game_start', (data: { roomId: string; players: string[]; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean; turnOrder?: PlayerId[] }) => {
             console.log('Game Start:', data);
+            this.syncLobbyMap(data.mapId, data.mapData);
             this.state.roomId = data.roomId;
             this.state.isMultiplayer = true;
             this.state.lobbyMapId = data.mapId || null;
@@ -768,6 +970,12 @@ class GameService {
         });
 
         this.socket.on('command_rejected', (payload: { action: string, reason: string }) => {
+            if (payload.action === 'MOVE') {
+                this.pendingMultiplayerMoveUnitId = null;
+            }
+            if (payload.reason === 'ROOM_NOT_FOUND' || payload.reason === 'NOT_IN_ROOM') {
+                this.resetMultiplayerSessionState(payload.reason);
+            }
             this.log(`> COMMAND REJECTED [${payload.action}]: ${payload.reason}`);
             this.notify();
         });
@@ -779,7 +987,11 @@ class GameService {
 
     public createLobby(mapId: string = 'MAP_1', hostAdminEnabled: boolean = false) {
         if (this.socket) {
-            this.socket.emit('create_lobby', { mapId, hostAdminEnabled });
+            this.socket.emit('create_lobby', {
+                mapId,
+                hostAdminEnabled,
+                mapData: this.getImportedMapData(mapId)
+            });
         }
     }
 
@@ -888,17 +1100,102 @@ class GameService {
             case 'FLUX_TOWER_ATTACK_UPGRADE':
                 this.purchaseFluxTowerAttackUpgrade(data.unitId, true);
                 break;
-            case 'MOVE':
-                // We need to simulate the move. 
-                // data: { unitId, path } -> But confirmMove uses previewPath
-                // Simplest way: set previewPath, selectUnit, then confirmMove
-                this.state.selectedUnitId = data.unitId;
-                this.state.previewPath = data.path;
-                // Bypass checks
-                if (this.state.units.find(u => u.id === data.unitId)) {
+            case 'MOVE': {
+                const unitId = typeof data?.unitId === 'string' ? data.unitId : null;
+                if (!unitId) break;
+
+                const unit = this.state.units.find((u) => u.id === unitId);
+                if (!unit) {
+                    console.warn('[AUTH][MOVE][UNIT_NOT_FOUND]', {
+                        unitId,
+                        appStatus: this.state.appStatus,
+                        unitsCount: this.state.units.length
+                    });
+                    break;
+                }
+
+                const normalizedPath: Position[] = Array.isArray(data?.path)
+                    ? data.path
+                        .map((step: any) => ({ x: Number(step?.x), z: Number(step?.z) }))
+                        .filter((step: Position) => Number.isFinite(step.x) && Number.isFinite(step.z))
+                        .map((step: Position) => ({ x: Math.trunc(step.x), z: Math.trunc(step.z) }))
+                    : [];
+
+                const explicitTarget = (
+                    typeof data?.targetX === 'number' &&
+                    Number.isFinite(data.targetX) &&
+                    typeof data?.targetZ === 'number' &&
+                    Number.isFinite(data.targetZ)
+                )
+                    ? { x: Math.trunc(data.targetX), z: Math.trunc(data.targetZ) }
+                    : null;
+
+                const fallbackTarget = explicitTarget || (normalizedPath.length > 0 ? normalizedPath[normalizedPath.length - 1] : null);
+
+                if (unit.movePath.length > 0) {
+                    if (fallbackTarget) {
+                        this.queuedAuthoritativeMoveTargets.set(unitId, fallbackTarget);
+                    }
+                    break;
+                }
+
+                const attemptMove = (path: Position[]) => {
+                    if (path.length === 0) return false;
+
+                    const beforeSteps = this.state.units.find((u) => u.id === unitId)?.status.stepsTaken ?? 0;
+                    this.state.selectedUnitId = unitId;
+                    this.state.previewPath = path;
                     this.confirmMove(true);
+
+                    const afterUnit = this.state.units.find((u) => u.id === unitId);
+                    const accepted = !!afterUnit && (
+                        afterUnit.movePath.length > 0 ||
+                        afterUnit.status.stepsTaken > beforeSteps
+                    );
+
+                    if (!accepted) {
+                        this.state.previewPath = [];
+                    }
+
+                    return accepted;
+                };
+
+                let moved = attemptMove(normalizedPath);
+
+                // If client path was computed from stale local state, recompute from authoritative state to the intended target.
+                if (!moved && fallbackTarget && unit.movePath.length === 0) {
+                    const occupied = this.getAllOccupiedCells(unitId);
+                    const remainingSteps = Math.max(0, this.getEffectiveMovement(unit) - unit.status.stepsTaken);
+                    const authoritativePath = findPath(
+                        unit.position,
+                        fallbackTarget,
+                        occupied,
+                        new Set(Object.keys(this.state.terrain)),
+                        this.state.terrain,
+                        unit.stats.size,
+                        this.state.mapBounds
+                    ).slice(0, remainingSteps);
+
+                    moved = attemptMove(authoritativePath);
+                }
+
+                if (!moved) {
+                    const latestUnit = this.state.units.find((u) => u.id === unitId);
+                    console.warn('[AUTH][MOVE][LOCAL_REJECT]', {
+                        unitId,
+                        appStatus: this.state.appStatus,
+                        unitPosition: latestUnit ? { ...latestUnit.position } : null,
+                        stepsTaken: latestUnit?.status?.stepsTaken ?? null,
+                        movement: latestUnit ? this.getEffectiveMovement(latestUnit) : null,
+                        normalizedPathLength: normalizedPath.length,
+                        fallbackTarget
+                    });
+                    this.state.previewPath = [];
+                } else {
+                    this.queuedAuthoritativeMoveTargets.delete(unitId);
                 }
                 break;
+            }
             case 'ATTACK':
                 this.attackUnit(data.attackerId, data.targetId, true);
                 break;
@@ -1057,14 +1354,36 @@ class GameService {
                 const shouldApplyInteractionState = !this.state.isMultiplayer
                     || !this.state.myPlayerId
                     || this.state.currentTurn === this.state.myPlayerId;
+                const previouslySelectedUnitId = this.state.selectedUnitId;
 
                 // Merge units? Or overwrite? 
                 // Initial sync should overwrite.
                 this.state.units = data.units.map((u: any) => ({ ...u })); // Deepish copy
-                this.state.selectedCardId = shouldApplyInteractionState && syncedInteractionState.mode === 'NORMAL'
-                    ? this.state.decks[this.state.currentTurn][0]?.id || null
+                if (this.pendingMultiplayerMoveUnitId) {
+                    const pendingUnit = this.state.units.find((unit) => unit.id === this.pendingMultiplayerMoveUnitId);
+                    if (!pendingUnit || pendingUnit.movePath.length === 0) {
+                        this.pendingMultiplayerMoveUnitId = null;
+                    }
+                }
+                const preservedSelectedUnit = previouslySelectedUnitId
+                    ? this.state.units.find((unit) => unit.id === previouslySelectedUnitId)
                     : null;
-                this.state.selectedUnitId = null;
+                const canPreserveSelection =
+                    !!preservedSelectedUnit &&
+                    shouldApplyInteractionState &&
+                    syncedInteractionState.mode === 'NORMAL' &&
+                    (
+                        !this.state.isMultiplayer
+                        || !this.state.myPlayerId
+                        || preservedSelectedUnit.playerId === this.state.myPlayerId
+                    );
+
+                this.state.selectedUnitId = canPreserveSelection ? preservedSelectedUnit.id : null;
+                this.state.selectedCardId = canPreserveSelection
+                    ? null
+                    : (shouldApplyInteractionState && syncedInteractionState.mode === 'NORMAL'
+                        ? this.state.decks[this.state.currentTurn][0]?.id || null
+                        : null);
                 this.state.previewPath = [];
                 this.state.interactionState = shouldApplyInteractionState
                     ? syncedInteractionState
@@ -1160,8 +1479,9 @@ class GameService {
             lobbyMaxPlayers: 0,
             hostAdminEnabled: false,
             isInGameAdmin: false,
+            isAdminFogDisabled: false,
             myPlayerId: null,
-            availableMaps: AVAILABLE_MAPS
+            availableMaps: getAvailableMaps()
         };
     }
 
@@ -1519,6 +1839,14 @@ class GameService {
     public toggleUnitNameLabels() {
         this.state.showUnitNameLabels = !this.state.showUnitNameLabels;
         this.log(`> VISUAL PROTOCOL: UNIT NAME LABELS ${this.state.showUnitNameLabels ? 'VISIBLE' : 'HIDDEN'}`);
+        this.notify();
+    }
+
+    public toggleAdminFogOfWar() {
+        if (!this.state.isInGameAdmin) return;
+
+        this.state.isAdminFogDisabled = !this.state.isAdminFogDisabled;
+        this.log(`> ADMIN OVERRIDE: FOG OF WAR ${this.state.isAdminFogDisabled ? 'DISABLED' : 'ENABLED'}`);
         this.notify();
     }
 
@@ -1997,7 +2325,7 @@ class GameService {
             };
         }
 
-        return AVAILABLE_MAPS.find((map) => map.id === mapId) || {
+        return getAvailableMaps().find((map) => map.id === mapId) || {
             id: mapId,
             players: 2,
             mode: 'duel'
@@ -2192,8 +2520,8 @@ class GameService {
 
             if (this.isWithinMap(towerX, towerZ, mapBounds))
                 initialUnits.push(this.createUnit(UnitType.TOWER, { x: towerX, z: towerZ }, PlayerId.NEUTRAL));
-        } else if (loadedMaps[mapType]) {
-            const mapData = loadedMaps[mapType] as MapJsonShape;
+        } else if (getRegisteredMap(mapType)) {
+            const mapData = getRegisteredMap(mapType) as MapJsonShape;
 
             if (mapData.terrain) {
                 Object.keys(mapData.terrain).forEach(key => {
@@ -2249,7 +2577,7 @@ class GameService {
     }
 
     public getMapPreviewData(mapId: string, customSize?: { x: number; y: number }, emptyMapConfig?: EmptyMapConfig): MapPreviewData | null {
-        if (mapId !== 'EMPTY' && mapId !== 'MAP_1' && !loadedMaps[mapId]) {
+        if (mapId !== 'EMPTY' && mapId !== 'MAP_1' && !getRegisteredMap(mapId)) {
             return null;
         }
 
@@ -2266,7 +2594,10 @@ class GameService {
     }
 
     public startGame(mapType: string = 'EMPTY', isDevMode: boolean = false, customSize?: { x: number, y: number }, emptyMapConfig?: EmptyMapConfig) {
+        this.clearPendingSyncTimer();
         this.pendingStartConfig = null;
+        this.pendingMultiplayerMoveUnitId = null;
+        this.queuedAuthoritativeMoveTargets.clear();
         const deckNeutral = isDevMode ? this.generateDevDeck(PlayerId.NEUTRAL) : [];
         const activePlayerIds = this.getActivePlayersForMap(mapType, isDevMode, emptyMapConfig);
         const turnOrder = [...activePlayerIds];
@@ -2286,11 +2617,11 @@ class GameService {
             : this.state.unlockedUnits;
 
         this.discovered.clear();
-        if (loadedMaps[mapType]) {
+        if (getRegisteredMap(mapType)) {
             this.log(`> LOADING MAP: ${mapType}...`);
         }
         const { terrain, initialUnits, initialCollectibles, mapBounds, deletedTiles } = this.buildMapScenario(mapType, customSize, isDevMode, emptyMapConfig);
-        if (loadedMaps[mapType]) {
+        if (getRegisteredMap(mapType)) {
             this.log(`> TERRAIN LOADED: ${Object.keys(terrain).length} TILES`);
         }
         this.seedInitialDiscovery(terrain, mapBounds, isDevMode);
@@ -2335,6 +2666,7 @@ class GameService {
             recentlyDeliveredCardIds: this.createPerPlayerRecord(() => []),
 
             isDevMode: isDevMode,
+            isAdminFogDisabled: false,
             debugClickTrace: [],
             debugLastDecision: null,
             debugLastHoverTile: null
@@ -2467,7 +2799,40 @@ class GameService {
     }
 
     private updateFogOfWar() {
+        this.discovered.clear();
+
+        if (this.state.isDevMode) {
+            Object.keys(this.state.terrain).forEach((key) => this.discovered.add(key));
+            this.state.revealedTiles = Array.from(this.discovered);
+            return;
+        }
+
+        const revealPlayer = this.state.isMultiplayer
+            ? (this.state.myPlayerId || this.state.currentTurn)
+            : this.state.currentTurn;
+
+        Object.keys(this.state.terrain).forEach((key) => {
+            if (this.state.terrain[key]?.landingZone !== revealPlayer) return;
+
+            const [originX, originZ] = key.split(',').map(Number);
+            for (let dx = -2; dx <= 2; dx++) {
+                for (let dz = -2; dz <= 2; dz++) {
+                    const x = originX + dx;
+                    const z = originZ + dz;
+                    if (!this.isWithinMap(x, z)) continue;
+
+                    const targetKey = `${x},${z}`;
+                    if (!this.state.terrain[targetKey]) continue;
+                    this.discovered.add(targetKey);
+                }
+            }
+        });
+
         this.state.units.forEach(unit => {
+            if (!this.arePlayersAllied(revealPlayer, unit.playerId)) {
+                return;
+            }
+
             const { x, z } = unit.position;
             const size = unit.stats.size;
             const radius = 2;
@@ -2901,7 +3266,7 @@ class GameService {
         this.notify();
     }
 
-    public selectNearestControlledUnit() {
+    public selectNearestControlledUnit(reverse: boolean = false) {
         if (this.state.appStatus !== AppStatus.PLAYING) return;
         if (!this.state.selectedUnitId) return;
 
@@ -2967,7 +3332,9 @@ class GameService {
         const currentIndex = this.unitCycleOrder.indexOf(referenceUnit.id);
         if (currentIndex === -1) return;
 
-        const nextId = this.unitCycleOrder[(currentIndex + 1) % this.unitCycleOrder.length];
+        const direction = reverse ? -1 : 1;
+        const nextIndex = (currentIndex + direction + this.unitCycleOrder.length) % this.unitCycleOrder.length;
+        const nextId = this.unitCycleOrder[nextIndex];
         this.lastTabSelectionId = nextId;
         this.selectUnit(nextId);
     }
@@ -5374,7 +5741,7 @@ class GameService {
     // --- ATTACK LOGIC ---
 
     public attackUnit(attackerId: string, targetId: string, isRemote: boolean = false) {
-        if (this.state.appStatus !== AppStatus.PLAYING) return;
+        if (!isRemote && this.state.appStatus !== AppStatus.PLAYING) return;
         if (!isRemote && this.checkPlayerRestricted(this.state.currentTurn)) return;
 
         const attackerIdx = this.state.units.findIndex(u => u.id === attackerId);
@@ -5830,6 +6197,20 @@ class GameService {
         this.replicateAuthoritativeState();
     }
 
+    private processBackgroundMovementTick() {
+        if (typeof document === 'undefined' || !document.hidden) return;
+        if (!this.state.isMultiplayer || !this.isSyncAuthority()) return;
+        if (this.state.appStatus !== AppStatus.PLAYING) return;
+
+        const movingUnitIds = this.state.units
+            .filter((unit) => unit.movePath.length > 0)
+            .map((unit) => unit.id);
+
+        if (movingUnitIds.length === 0) return;
+
+        movingUnitIds.forEach((unitId) => this.completeStep(unitId));
+    }
+
     private applyBleedStepDamage(unitId: string): boolean {
         const unitIndex = this.state.units.findIndex((unit) => unit.id === unitId);
         if (unitIndex === -1) return false;
@@ -5889,6 +6270,30 @@ class GameService {
         }
         const unit = units.find(u => u.id === selectedUnitId);
         if (!unit || unit.playerId !== currentTurn || this.getEffectiveMovement(unit) === 0) {
+            this.lastPreviewSignature = null;
+            this.lastPreviewPathKey = '';
+            this.lastPreviewBlocked = false;
+            return;
+        }
+        if (
+            this.state.isMultiplayer &&
+            !this.isSyncAuthority() &&
+            this.pendingMultiplayerMoveUnitId === selectedUnitId &&
+            unit.movePath.length === 0
+        ) {
+            this.pendingMultiplayerMoveUnitId = null;
+        }
+        if (
+            this.state.isMultiplayer &&
+            !this.isSyncAuthority() &&
+            this.pendingMultiplayerMoveUnitId === selectedUnitId
+        ) {
+            this.lastPreviewSignature = null;
+            this.lastPreviewPathKey = '';
+            this.lastPreviewBlocked = false;
+            return;
+        }
+        if (unit.movePath.length > 0) {
             this.lastPreviewSignature = null;
             this.lastPreviewPathKey = '';
             this.lastPreviewBlocked = false;
@@ -5974,7 +6379,7 @@ class GameService {
     }
 
     public confirmMove(isRemote: boolean = false) {
-        if (this.state.appStatus !== AppStatus.PLAYING) {
+        if (!isRemote && this.state.appStatus !== AppStatus.PLAYING) {
             this.pushDebugTrace('confirmMove.reject', 'REJECT', `appStatus=${this.state.appStatus}`, { notify: true });
             return;
         }
@@ -6000,6 +6405,18 @@ class GameService {
         }
 
         const unit = units[unitIndex];
+        if (
+            this.state.isMultiplayer &&
+            !this.isSyncAuthority() &&
+            this.pendingMultiplayerMoveUnitId === selectedUnitId &&
+            unit.movePath.length === 0
+        ) {
+            this.pendingMultiplayerMoveUnitId = null;
+        }
+        if (unit.movePath.length > 0) {
+            this.pushDebugTrace('confirmMove.reject', 'REJECT', 'unit is still moving', { unitId: selectedUnitId, notify: true });
+            return;
+        }
         const effectiveMovement = this.getEffectiveMovement(unit);
         if (unit.status.stepsTaken >= effectiveMovement) {
             this.pushDebugTrace('confirmMove.reject', 'REJECT', `movement exhausted ${unit.status.stepsTaken}/${effectiveMovement}`, { unitId: selectedUnitId, notify: true });
@@ -6014,10 +6431,20 @@ class GameService {
 
         // In multiplayer, send command and wait for authoritative broadcast before mutating state.
         if (!isRemote && this.state.isMultiplayer) {
+            if (!this.isSyncAuthority() && this.pendingMultiplayerMoveUnitId === selectedUnitId) {
+                this.pushDebugTrace('confirmMove.reject', 'REJECT', 'move already pending sync', { unitId: selectedUnitId, notify: true });
+                return;
+            }
+
             this.dispatchAction('MOVE', {
                 unitId: selectedUnitId,
-                path: previewPath
+                path: previewPath,
+                targetX: previewPath[previewPath.length - 1].x,
+                targetZ: previewPath[previewPath.length - 1].z
             });
+            if (!this.isSyncAuthority()) {
+                this.pendingMultiplayerMoveUnitId = selectedUnitId;
+            }
             this.state.previewPath = [];
             this.notify();
             return;
@@ -6132,6 +6559,10 @@ class GameService {
             this.notify();
             this.replicateAuthoritativeState();
             return;
+        }
+
+        if (remainingPath.length === 0 && this.state.isMultiplayer && this.isSyncAuthority()) {
+            this.processQueuedAuthoritativeMove(unit.id);
         }
 
         this.notify();
@@ -6322,6 +6753,7 @@ class GameService {
         this.state.selectedUnitId = null;
         this.state.previewPath = [];
         this.state.interactionState = { mode: 'NORMAL' };
+        this.updateFogOfWar();
         this.log(`> TURN ENDED. PLAYER ${resumePlayer} ACTIVE.`);
         if (this.isPlayerSilenced(resumePlayer)) {
             this.log(`> SILENCE ACTIVE: ${resumePlayer} CANNOT DEPLOY OR CAST THIS TURN`, resumePlayer);
@@ -6456,6 +6888,7 @@ class GameService {
                     interactionState: { mode: 'NORMAL' }
                 };
                 this.awardTurnStartIncome(nextTurn, nextRound);
+                this.updateFogOfWar();
 
                 if (this.checkPlayerRestricted(nextTurn)) {
                     this.log(`> WARNING: PLAYER ${nextTurn} SYSTEMS COMPROMISED`);
@@ -6520,6 +6953,7 @@ class GameService {
             selectedUnitId: null,
             interactionState: { mode: 'NORMAL' }
         };
+        this.updateFogOfWar();
 
         this.log(`> [DEV] TURN OVERRIDE: ${playerId} ACTIVE`);
         if (this.isPlayerSilenced(playerId)) {

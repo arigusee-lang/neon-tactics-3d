@@ -40,6 +40,7 @@ const GameScene: React.FC<GameSceneProps> = ({
   mapBounds
 }) => {
   const isPlaying = appStatus === AppStatus.PLAYING;
+  const revealedSet = useMemo(() => new Set(revealedTiles), [revealedTiles]);
   const isDark = lightMode === 'DARK';
   const quality = useMemo(() => {
     const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -87,6 +88,26 @@ const GameScene: React.FC<GameSceneProps> = ({
     }
   }, []);
 
+  const unitsWithVisibility = useMemo(() => {
+    return units.map((unit) => {
+      if (!isPlaying) {
+        return { unit, isVisibleToPlayer: true };
+      }
+
+      let isVisibleToPlayer = false;
+      for (let dx = 0; dx < unit.stats.size && !isVisibleToPlayer; dx++) {
+        for (let dz = 0; dz < unit.stats.size; dz++) {
+          if (revealedSet.has(`${unit.position.x + dx},${unit.position.z + dz}`)) {
+            isVisibleToPlayer = true;
+            break;
+          }
+        }
+      }
+
+      return { unit, isVisibleToPlayer };
+    });
+  }, [isPlaying, revealedSet, units]);
+
   return (
     <div className="w-full h-full">
       <Canvas
@@ -124,7 +145,7 @@ const GameScene: React.FC<GameSceneProps> = ({
             collectibles={collectibles}
             mapBounds={mapBounds}
           />
-          {units.map((unit) => (
+          {unitsWithVisibility.map(({ unit, isVisibleToPlayer }) => (
             <Unit
               key={unit.id}
               data={unit}
@@ -132,6 +153,7 @@ const GameScene: React.FC<GameSceneProps> = ({
               appStatus={appStatus}
               showNameLabel={showUnitNameLabels}
               showLevelLabel={showUnitLevelLabels}
+              isVisibleToPlayer={isVisibleToPlayer}
             />
           ))}
 

@@ -104,6 +104,7 @@ export interface MapMetadata {
   description?: string;
   players: MapPlayerSupport;
   mode: MatchMode;
+  isImported?: boolean;
 }
 
 export interface MapPreviewData extends MapMetadata {
@@ -353,6 +354,7 @@ export interface GameState {
   lobbyMaxPlayers: number;
   hostAdminEnabled: boolean;
   isInGameAdmin: boolean;
+  isAdminFogDisabled: boolean;
   myPlayerId: PlayerId | null; // The player ID that THIS client controls
 
   // Developer Mode Flag

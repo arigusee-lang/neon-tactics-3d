@@ -1,5 +1,5 @@
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import GameScene from './components/GameScene';
 import Deck from './components/Deck';
 import UnitControlPanel from './components/UnitControlPanel';
@@ -411,7 +411,7 @@ const App: React.FC = () => {
 
             if (e.code === 'Tab') {
                 e.preventDefault();
-                gameService.selectNearestControlledUnit();
+                gameService.selectNearestControlledUnit(e.shiftKey);
                 return;
             }
 
@@ -502,6 +502,9 @@ const App: React.FC = () => {
         && !gameState.winner
         && gameState.activePlayerIds.includes(gameState.currentTurn)
         && (gameState.appStatus === AppStatus.PLAYING || gameState.appStatus === AppStatus.SHOP || gameState.appStatus === AppStatus.PAUSED);
+    const displayRevealedTiles = gameState.isDevMode || (gameState.isInGameAdmin && gameState.isAdminFogDisabled)
+        ? Object.keys(gameState.terrain)
+        : gameState.revealedTiles;
     const turnElapsedMs = Math.max(0, timerNow - gameState.turnStartedAt);
     const turnRemainingSeconds = Math.max(0, Math.ceil(((TURN_TIMER_SECONDS * 1000) - turnElapsedMs) / 1000));
     const turnOvertimeSeconds = Math.max(0, Math.floor((turnElapsedMs - (TURN_TIMER_SECONDS * 1000)) / 1000));
@@ -556,7 +559,7 @@ const App: React.FC = () => {
                 <GameScene
                     units={gameState.units}
                     currentTurn={gameState.currentTurn}
-                    revealedTiles={gameState.revealedTiles}
+                    revealedTiles={displayRevealedTiles}
                     selectedCardId={gameState.selectedCardId}
                     selectedUnitId={gameState.selectedUnitId}
                     previewPath={gameState.previewPath}
@@ -894,6 +897,21 @@ const App: React.FC = () => {
                                             {gameState.showUnitLevelLabels ? 'Shown' : 'Hidden'}
                                         </button>
                                     </div>
+                                    {gameState.isInGameAdmin && (
+                                        <div className="flex items-center justify-between mt-3">
+                                            <span className="text-[11px] text-gray-300 uppercase tracking-tighter">Fog Of War</span>
+                                            <button
+                                                onClick={() => gameService.toggleAdminFogOfWar()}
+                                                className={`rounded border px-2 py-1 text-[9px] font-bold uppercase tracking-[0.18em] transition-colors ${
+                                                    gameState.isAdminFogDisabled
+                                                        ? 'border-amber-400/50 bg-amber-500/10 text-amber-100 hover:bg-amber-400/15'
+                                                        : 'border-gray-700 bg-black/40 text-gray-400 hover:border-gray-500'
+                                                }`}
+                                            >
+                                                {gameState.isAdminFogDisabled ? 'Disabled' : 'Enabled'}
+                                            </button>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         </div>
@@ -901,7 +919,7 @@ const App: React.FC = () => {
                         {/* Minimap Panel */}
                         <Minimap
                             units={gameState.units}
-                            revealedTiles={gameState.revealedTiles}
+                            revealedTiles={displayRevealedTiles}
                             terrain={gameState.terrain}
                             mapBounds={gameState.mapBounds}
                         />

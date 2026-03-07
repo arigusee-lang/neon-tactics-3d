@@ -33,6 +33,7 @@ interface UnitProps {
     appStatus: AppStatus;
     showNameLabel: boolean;
     showLevelLabel: boolean;
+    isVisibleToPlayer: boolean;
 }
 
 // --- COMBAT EFFECTS COMPONENTS ---
@@ -476,7 +477,7 @@ const DynamicMindControlLink: React.FC<{ start: Vector3, targetId: string }> = (
 
 // --- MAIN UNIT COMPONENT ---
 
-const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel, showLevelLabel }) => {
+const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel, showLevelLabel, isVisibleToPlayer }) => {
     const groupRef = useRef<Group>(null);
     const internalRef = useRef<Group>(null);
     const bodyRef = useRef<Group>(null);
@@ -846,6 +847,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
     return (
         <group
             ref={groupRef}
+            visible={isVisibleToPlayer}
             onClick={handleClick}
             onPointerOver={handlePointerOver}
             onPointerOut={() => setHovered(false)}
@@ -854,11 +856,11 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
                 {renderGeometry()}
             </group>
 
-            {data.status.mindControlTargetId && (
+            {isVisibleToPlayer && data.status.mindControlTargetId && (
                 <DynamicMindControlLink start={visualPos.current.clone().add(new Vector3(0, 1.0, 0))} targetId={data.status.mindControlTargetId} />
             )}
 
-            {data.status.attackTargetId && attackTargetPos && (
+            {isVisibleToPlayer && data.status.attackTargetId && attackTargetPos && (
                 data.type === EUnitType.CONE ? (
                     <MeleeImpact position={attackTargetPos} delay={0.2} color={playerColor} />
                 ) : data.type === EUnitType.SPIKE ? (
@@ -882,6 +884,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
                         end={attackTargetPos.clone()}
                         color={playerColor}
                         type={data.type}
+                        showImpact={data.type !== EUnitType.SOLDIER}
                     />
                 )
             )}

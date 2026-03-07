@@ -2,6 +2,56 @@ import express from 'express';
 import { createServer } from 'http';
 import { Server } from 'socket.io';
 import fs from 'fs';
+import path from 'path';
+import util from 'util';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+const logFilePath = path.join(__dirname, 'server.log');
+const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+const originalConsole = {
+  log: console.log.bind(console),
+  info: console.info.bind(console),
+  warn: console.warn.bind(console),
+  error: console.error.bind(console),
+  debug: console.debug.bind(console)
+};
+
+function writeLog(level, args) {
+  const timestamp = new Date().toISOString();
+  const message = util.format(...args);
+  const line = `[${timestamp}] [${level}] ${message}\n`;
+  logStream.write(line, (err) => {
+    if (err) {
+      originalConsole.error(`Failed to write server log: ${err.message}`);
+    }
+  });
+}
+
+['log', 'info', 'warn', 'error', 'debug'].forEach((method) => {
+  const level = method.toUpperCase();
+  const originalMethod = originalConsole[method];
+  console[method] = (...args) => {
+    originalMethod(...args);
+    writeLog(level, args);
+  };
+});
+
+process.on('uncaughtException', (error) => {
+  const details = error?.stack || String(error);
+  writeLog('UNCAUGHT_EXCEPTION', [details]);
+});
+
+process.on('unhandledRejection', (reason) => {
+  const details = reason?.stack || util.format(reason);
+  writeLog('UNHANDLED_REJECTION', [details]);
+});
+
+process.on('exit', () => {
+  logStream.end();
+});
 
 const app = express();
 const httpServer = createServer(app);
@@ -11,12 +61,6 @@ const io = new Server(httpServer, {
     methods: ["GET", "POST"]
   }
 });
-
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 app.use(express.static(path.join(__dirname, 'dist')));
 
@@ -66,11 +110,17 @@ function loadMapPlayerCounts() {
   return counts;
 }
 
-const MAP_PLAYER_COUNTS = loadMapPlayerCounts();
-
 function getLobbyCapacity(mapId) {
-  const count = MAP_PLAYER_COUNTS[mapId];
+  const count = loadMapPlayerCounts()[mapId];
   return count === 3 || count === 4 ? count : 2;
+}
+
+function getLobbyCapacityFromMapPayload(mapId, mapData) {
+  const players = mapData?.players;
+  if (players === 3 || players === 4) {
+    return players;
+  }
+  return getLobbyCapacity(mapId);
 }
 
 // Lobby management
@@ -197,6 +247,7 @@ function emitLobbyState(roomId, lobby) {
   io.to(roomId).emit('lobby_state', {
     roomId,
     mapId: lobby.mapId || 'MAP_1',
+    mapData: lobby.mapData || null,
     players: [...lobby.players],
     playerIds: getLobbyPlayerIds(lobby),
     maxPlayers: lobby.maxPlayers || 2,
@@ -243,8 +294,9 @@ io.on('connection', (socket) => {
   // 1. Create Lobby
   socket.on('create_lobby', (payload = {}) => {
     const mapId = typeof payload?.mapId === 'string' ? payload.mapId : 'MAP_1';
+    const mapData = payload?.mapData && typeof payload.mapData === 'object' ? payload.mapData : null;
     const hostAdminEnabled = !!payload?.hostAdminEnabled;
-    const maxPlayers = getLobbyCapacity(mapId);
+    const maxPlayers = getLobbyCapacityFromMapPayload(mapId, mapData);
     const turnOrder = PLAYER_IDS.slice(0, maxPlayers);
     const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
     lobbies[roomId] = {
@@ -254,6 +306,7 @@ io.on('connection', (socket) => {
       gameState: null,
       selectedCharacters: createEmptyCharacterSelections(),
       mapId,
+      mapData,
       currentTurn: turnOrder[0] || PLAYER_ONE,
       turnOrder,
       maxPlayers,
@@ -261,7 +314,7 @@ io.on('connection', (socket) => {
     };
     socket.join(roomId);
     emitLobbyState(roomId, lobbies[roomId]);
-    socket.emit('lobby_created', { roomId, mapId, authoritySocketId: socket.id, hostAdminEnabled });
+    socket.emit('lobby_created', { roomId, mapId, mapData, authoritySocketId: socket.id, hostAdminEnabled });
     console.log(`Lobby created: ${roomId} by ${socket.id} | map=${mapId} | hostAdmin=${hostAdminEnabled}`);
   });
 
@@ -282,6 +335,7 @@ io.on('connection', (socket) => {
           roomId,
           players: lobby.players,
           mapId: lobby.mapId || 'MAP_1',
+          mapData: lobby.mapData || null,
           authoritySocketId: lobby.authoritySocketId,
           hostAdminEnabled: !!lobby.hostAdminEnabled,
           turnOrder: lobby.turnOrder
@@ -349,40 +403,49 @@ io.on('connection', (socket) => {
   socket.on('authoritative_command_request', (payload = {}) => {
     const { roomId, action } = payload;
     let data = payload.data;
+    const reject = (reason) => {
+      console.warn(`[AUTH][REJECT] room=${roomId || 'n/a'} socket=${socket.id} action=${action || 'UNKNOWN'} reason=${reason}`);
+      socket.emit('command_rejected', { action: action || 'UNKNOWN', reason });
+    };
+
+    if (action !== 'SYNC_STATE') {
+      console.log(`[AUTH][IN] room=${roomId || 'n/a'} socket=${socket.id} action=${action || 'UNKNOWN'}`);
+    }
+
     if (!roomId || typeof action !== 'string') {
-      socket.emit('command_rejected', { action: action || 'UNKNOWN', reason: 'INVALID_PAYLOAD' });
+      reject('INVALID_PAYLOAD');
       return;
     }
 
     if (!AUTHORITATIVE_ACTIONS.has(action)) {
-      socket.emit('command_rejected', { action, reason: 'UNSUPPORTED_ACTION' });
+      reject('UNSUPPORTED_ACTION');
       return;
     }
 
     const lobby = lobbies[roomId];
     if (!lobby) {
-      socket.emit('command_rejected', { action, reason: 'ROOM_NOT_FOUND' });
+      reject('ROOM_NOT_FOUND');
       return;
     }
 
     if (!lobby.players.includes(socket.id)) {
-      socket.emit('command_rejected', { action, reason: 'NOT_IN_ROOM' });
+      reject('NOT_IN_ROOM');
       return;
     }
 
     if (!lobby.started) {
-      socket.emit('command_rejected', { action, reason: 'GAME_NOT_STARTED' });
+      reject('GAME_NOT_STARTED');
       return;
     }
 
     if (action === 'SYNC_STATE') {
       if (socket.id !== lobby.authoritySocketId) {
-        socket.emit('command_rejected', { action, reason: 'NOT_STATE_AUTHORITY' });
+        reject('NOT_STATE_AUTHORITY');
         return;
       }
 
       if (!data || typeof data !== 'object') {
-        socket.emit('command_rejected', { action, reason: 'INVALID_STATE_PAYLOAD' });
+        reject('INVALID_STATE_PAYLOAD');
         return;
       }
 
@@ -407,26 +470,26 @@ io.on('connection', (socket) => {
 
     const actorPlayerId = getPlayerIdForSocket(lobby, socket.id);
     if (!actorPlayerId) {
-      socket.emit('command_rejected', { action, reason: 'PLAYER_ID_UNRESOLVED' });
+      reject('PLAYER_ID_UNRESOLVED');
       return;
     }
 
     if (action === 'ADMIN_SET_UNIT_STATS') {
       if (!lobby.hostAdminEnabled || socket.id !== lobby.authoritySocketId) {
-        socket.emit('command_rejected', { action, reason: 'ADMIN_ONLY' });
+        reject('ADMIN_ONLY');
         return;
       }
     }
 
     if (TURN_GATED_ACTIONS.has(action) && actorPlayerId !== lobby.currentTurn) {
-      socket.emit('command_rejected', { action, reason: 'NOT_YOUR_TURN' });
+      reject('NOT_YOUR_TURN');
       return;
     }
 
     if (ACTIONS_WITH_EXPLICIT_PLAYER.has(action)) {
       const payloadPlayer = data?.playerId;
       if (payloadPlayer && payloadPlayer !== actorPlayerId) {
-        socket.emit('command_rejected', { action, reason: 'PLAYER_MISMATCH' });
+        reject('PLAYER_MISMATCH');
         return;
       }
       data = { ...(data || {}), playerId: actorPlayerId };
@@ -435,6 +498,12 @@ io.on('connection', (socket) => {
     const turnBefore = lobby.currentTurn;
     if (action === 'SKIP_TURN') {
       lobby.currentTurn = getNextTurn(lobby.currentTurn, lobby.turnOrder);
+    }
+
+    if (action === 'MOVE') {
+      const pathLen = Array.isArray(data?.path) ? data.path.length : 0;
+      const target = pathLen > 0 ? data.path[pathLen - 1] : null;
+      console.log(`[AUTH][MOVE] room=${roomId} actor=${actorPlayerId} turn=${lobby.currentTurn} pathLen=${pathLen} target=${target ? `${target.x},${target.z}` : 'n/a'}`);
     }
 
     io.to(lobby.authoritySocketId).emit('authoritative_command', {

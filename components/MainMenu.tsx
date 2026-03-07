@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import MapPreview3D from './MapPreview3D';
 import { AppStatus, EmptyMapConfig, MapMetadata, MatchMode } from '../types';
 import { gameService } from '../services/gameService';
@@ -46,6 +46,8 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const [hostAdminRequested, setHostAdminRequested] = useState(false);
   const [emptyPlayerCount, setEmptyPlayerCount] = useState<2 | 3 | 4>(2);
   const [emptyMode, setEmptyMode] = useState<MatchMode>('duel');
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   const isTopLevelMenuStatus = status === AppStatus.MENU || status === AppStatus.MAP_SELECTION;
   const canRestartCurrentMap = !isMultiplayer && !isDevMode;
@@ -53,7 +55,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const isPauseView = status === AppStatus.PAUSED;
 
   const soloMaps = useMemo(() => {
-    return availableMaps.filter((map) => map.players === 2 || map.players === 'dev');
+    return availableMaps.filter((map) => map.players !== 'dev');
   }, [availableMaps]);
 
   const devMapOptions = useMemo(() => {
@@ -64,9 +66,9 @@ const MainMenu: React.FC<MainMenuProps> = ({
         players: 'dev' as const,
         mode: 'duel' as const
       },
-      ...soloMaps
+      ...availableMaps
     ];
-  }, [soloMaps]);
+  }, [availableMaps]);
 
   const emptyMapConfig = useMemo<EmptyMapConfig>(() => ({
     players: emptyPlayerCount,
@@ -76,7 +78,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
   const emptyMinDepth = emptyPlayerCount > 2 ? 7 : 6;
 
   const multiplayerMaps = useMemo(() => {
-    return availableMaps.filter((map) => map.id === 'CrossMap');
+    return availableMaps.filter((map) => map.players !== 'dev');
   }, [availableMaps]);
 
   const selectedSoloMapMeta = useMemo(() => {
@@ -123,8 +125,10 @@ const MainMenu: React.FC<MainMenuProps> = ({
       setRoomCodeInput('');
       setIsGeneratingRoomCode(false);
       setHostAdminRequested(false);
+      setImportMessage(null);
     } else if (status === AppStatus.MAP_SELECTION) {
       setMenuView('SOLO_MAPS');
+      setImportMessage(null);
     }
   }, [status]);
 
@@ -219,6 +223,48 @@ const MainMenu: React.FC<MainMenuProps> = ({
     gameService.createLobby(selectedMultiplayerMap, hostAdminRequested);
   };
 
+  const openImportDialog = () => {
+    importInputRef.current?.click();
+  };
+
+  const handleImportedMapSelected = (map: MapMetadata) => {
+    if (menuView === 'MULTIPLAYER') {
+      if (map.players === 'dev') {
+        setImportMessage(`Imported ${map.id}. This map is available in Dev Mode only.`);
+        return;
+      }
+      setSelectedMultiplayerMap(map.id);
+      setImportMessage(`Imported ${map.id}. Ready for multiplayer hosting.`);
+      return;
+    }
+
+    if (menuView === 'DEV_MAPS') {
+      setSelectedDevMap(map.id);
+      setImportMessage(`Imported ${map.id}. Ready for dev launch.`);
+      return;
+    }
+
+    setSelectedSoloMap(map.id);
+    setImportMessage(`Imported ${map.id}. Ready for launch.`);
+  };
+
+  const importMapJson = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const rawJson = await file.text();
+      const importedMap = gameService.importMapJson(rawJson, file.name);
+      handleImportedMapSelected(importedMap);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to import map JSON.';
+      setImportMessage(message);
+      alert(message);
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   const getLobbyStatusLabel = () => {
     if (isGeneratingRoomCode && !roomId) return 'Generating room uplink...';
     if (!hasPendingLobby) return 'No active lobby';
@@ -252,6 +298,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             chip: 'text-green-200/70'
           };
     const availabilityLabel = map.players === 'dev' ? 'SOLO / DEV' : `${map.players}P`;
+    const sourceLabel = map.isImported ? `${availabilityLabel} | IMPORTED` : availabilityLabel;
 
     return (
       <button
@@ -267,7 +314,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
             </div>
           </div>
           <div className={`shrink-0 text-[10px] font-bold uppercase tracking-[0.22em] ${palette.chip}`}>
-            {availabilityLabel}
+            {sourceLabel}
           </div>
         </div>
       </button>
@@ -287,6 +334,13 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
   return (
     <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/10 pointer-events-auto p-3 md:p-4">
+      <input
+        ref={importInputRef}
+        type="file"
+        accept=".json,application/json"
+        onChange={importMapJson}
+        className="hidden"
+      />
       <div className={`relative w-full overflow-hidden rounded-xl border border-green-500/50 bg-black/70 shadow-[0_0_50px_rgba(0,255,0,0.2)] backdrop-blur-sm ${isMapBrowserView ? 'max-w-6xl max-h-[calc(100vh-1.5rem)] md:max-h-[calc(100vh-2rem)]' : isPauseView ? 'max-w-sm' : 'max-w-md'} ${isMapBrowserView ? 'p-5 md:p-6' : isPauseView ? 'p-6' : 'p-8'}`}>
         <div
           className="absolute inset-0 opacity-20 pointer-events-none"
@@ -375,9 +429,31 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
                 <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
                   <div className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-black/35 p-4 lg:max-h-[calc(100vh-16rem)]">
-                    <div className="mb-3 text-[10px] font-mono uppercase tracking-[0.35em] text-gray-400">
-                      Map List
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-[10px] font-mono uppercase tracking-[0.35em] text-gray-400">
+                        Map List
+                      </div>
+                      <button
+                        onClick={openImportDialog}
+                        className={`border px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-[0.2em] transition-colors ${
+                          menuView === 'DEV_MAPS'
+                            ? 'border-yellow-500/40 bg-yellow-950/20 text-yellow-200 hover:border-yellow-400/70'
+                            : 'border-green-500/40 bg-green-950/20 text-green-200 hover:border-green-400/70'
+                        }`}
+                      >
+                        Import JSON
+                      </button>
                     </div>
+
+                    {importMessage && (
+                      <div className={`mb-3 rounded-lg border px-3 py-2 text-[10px] font-mono leading-relaxed ${
+                        menuView === 'DEV_MAPS'
+                          ? 'border-yellow-500/20 bg-yellow-950/10 text-yellow-200/85'
+                          : 'border-green-500/20 bg-green-950/10 text-green-200/85'
+                      }`}>
+                        {importMessage}
+                      </div>
+                    )}
 
                     <div className="flex-1 space-y-3 overflow-y-auto game-scrollbar pr-1">
                       {(menuView === 'DEV_MAPS' ? devMapOptions : soloMaps).map((map) =>
@@ -527,9 +603,23 @@ const MainMenu: React.FC<MainMenuProps> = ({
 
                 <div className="grid gap-4 lg:grid-cols-[320px_minmax(0,1fr)]">
                   <div className="flex min-h-0 flex-col rounded-2xl border border-white/10 bg-black/35 p-4 lg:max-h-[calc(100vh-16rem)]">
-                    <div className="mb-3 text-[10px] font-mono uppercase tracking-[0.35em] text-gray-400">
-                      Hostable Maps
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div className="text-[10px] font-mono uppercase tracking-[0.35em] text-gray-400">
+                        Hostable Maps
+                      </div>
+                      <button
+                        onClick={openImportDialog}
+                        className="border border-purple-500/40 bg-purple-950/20 px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-[0.2em] text-purple-200 transition-colors hover:border-purple-400/70"
+                      >
+                        Import JSON
+                      </button>
                     </div>
+
+                    {importMessage && (
+                      <div className="mb-3 rounded-lg border border-purple-500/20 bg-purple-950/10 px-3 py-2 text-[10px] font-mono leading-relaxed text-purple-200/85">
+                        {importMessage}
+                      </div>
+                    )}
 
                     <div className="flex-1 space-y-3 overflow-y-auto game-scrollbar pr-1">
                       {multiplayerMaps.map((map) =>
@@ -617,7 +707,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     <div className="mb-3 flex items-center justify-between gap-3">
                       <div>
                         <div className="text-[10px] font-mono uppercase tracking-[0.35em] text-purple-300/80">
-                          Locked Multiplayer Pool
+                          Multiplayer Preview
                         </div>
                         <div className="mt-2 text-2xl font-black uppercase tracking-[0.18em] text-white">
                           {activeLobbyMapMeta?.id || selectedMultiplayerMapMeta?.id || 'NO MAP'}
@@ -629,7 +719,7 @@ const MainMenu: React.FC<MainMenuProps> = ({
                     </div>
 
                     <div className="mb-4 text-sm leading-relaxed text-gray-300">
-                      {activeLobbyMapMeta?.description || 'Multiplayer is currently restricted to the CrossMap rotation.'}
+                      {activeLobbyMapMeta?.description || 'Import a JSON map or choose a bundled multiplayer map.'}
                     </div>
 
                     <div className="mb-4 rounded-xl border border-purple-500/30 bg-purple-950/15 p-4">
