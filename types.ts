@@ -140,6 +140,8 @@ export interface Effect {
   duration: number; // Current rounds remaining
   maxDuration: number; // Starting duration
   sourceId?: string;
+  strength?: number;
+  maxStrength?: number;
 }
 
 export interface Talent {

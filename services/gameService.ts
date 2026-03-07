@@ -17,12 +17,12 @@ export const TALENT_POOL: Talent[] = [
     { id: 't4', name: 'Advanced Optics', description: 'All non-melee units gain +1 Attack Range.', icon: '🔭', color: '#3b82f6' },
     { id: 't5', name: 'Biotic Regen', description: 'All non-building units gain passive 10 HP regeneration per round.', icon: '🧬', color: '#ec4899' },
     { id: 't6', name: 'Reactor Tuning', description: 'All units with Energy gain an additional 5 Energy regeneration per round.', icon: '🔋', color: '#8b5cf6' },
-    { id: 't7', name: 'Kinetic Shields', description: 'All mobile units are deployed with a 50 HP Energy Shield.', icon: '🛡️', color: '#e2e8f0' },
-    { id: 't8', name: 'Marine Upgrade', description: 'Newly deployed Cyber Marines gain +15 Attack and +1 Range.', icon: '🔫', color: '#60a5fa' },
-    { id: 't9', name: 'Marine Suite', description: 'Newly deployed Cyber Marines gain +50 HP and +1 Mobility.', icon: '🦿', color: '#3b82f6' },
-    { id: 't10', name: 'Dreadnought Offense', description: 'Newly deployed Dreadnoughts gain +20 Attack and +1 Range.', icon: '💥', color: '#ef4444' },
-    { id: 't11', name: 'Dreadnought Armor', description: 'Newly deployed Dreadnoughts gain +100 HP.', icon: '🛡️', color: '#71717a' },
-    { id: 't12', name: 'Drone Range', description: 'Scout Drones and Ticks gain +2 Mobility.', icon: '🛸', color: '#f59e0b' }
+    { id: 't7', name: 'Kinetic Shields', description: 'All friendly units gain a Kinetic Shield that absorbs 50 damage before collapsing.', icon: '🛡️', color: '#e2e8f0' },
+    { id: 't8', name: 'Marine Upgrade', description: 'Cyber Marines gain +15 Attack and +1 Range.', icon: '🔫', color: '#60a5fa' },
+    { id: 't9', name: 'Marine Suite', description: 'Cyber Marines gain +50 HP and +1 Mobility.', icon: '🦿', color: '#3b82f6' },
+    { id: 't10', name: 'Dreadnought Offense', description: 'Dreadnoughts gain +20 Attack and +1 Range.', icon: '💥', color: '#ef4444' },
+    { id: 't11', name: 'Dreadnought Armor', description: 'Dreadnoughts gain +100 HP.', icon: '🛡️', color: '#71717a' },
+    { id: 't12', name: 'Drone Upgrade', description: 'Scout Drones and Ticks gain +2 Mobility and +20 HP.', icon: '🛸', color: '#f59e0b' }
 ];
 
 import { io, Socket } from 'socket.io-client';
@@ -376,20 +376,23 @@ class GameService {
         if (portalIdx === -1) return;
 
         const portal = this.state.units[portalIdx];
-        const nextHp = Math.max(0, portal.stats.hp - damage);
+        const damageResult = this.applyDamageToUnit(portal, damage);
+        const nextHp = damageResult.unit.stats.hp;
 
         this.state.units[portalIdx] = {
-            ...portal,
-            stats: {
-                ...portal.stats,
-                hp: nextHp
-            }
+            ...damageResult.unit
         };
 
-        this.triggerDamagePulses([{ unitId: portal.id, amount: damage }]);
+        if (damageResult.hpDamage > 0) {
+            this.triggerDamagePulses([{ unitId: portal.id, amount: damageResult.hpDamage }]);
+        }
 
         if (this.state.turnOvertimeDamageApplied === 0) {
             this.log(`> TURN TIMER EXPIRED: ${playerId} MAIN TAKING OVERTIME DAMAGE`, playerId);
+        }
+
+        if (damageResult.shieldAbsorbed > 0) {
+            this.log(`> KINETIC SHIELD ABSORBS ${damageResult.shieldAbsorbed}${damageResult.shieldBroken ? ' AND COLLAPSES' : ''}`, playerId);
         }
 
         if (nextHp === 0) {
@@ -1655,6 +1658,14 @@ class GameService {
         return unit.effects.some((effect) => effect.name === 'BLEED');
     }
 
+    private isDroneUnit(unit: Unit): boolean {
+        return unit.type === UnitType.BOX || unit.type === UnitType.SUICIDE_DRONE;
+    }
+
+    private getKineticShieldEffect(unit: Unit): Effect | undefined {
+        return unit.effects.find((effect) => effect.name === 'KINETIC SHIELD');
+    }
+
     private getEffectiveMovement(unit: Unit): number {
         const mobilityBonus = this.hasMobilityBoost(unit) ? 3 : 0;
         const mobilityPenalty = this.hasMobilitySabotage(unit) ? 2 : 0;
@@ -1790,6 +1801,19 @@ class GameService {
         };
     }
 
+    private createKineticShieldEffect(unitId: string, existingEffectId?: string, strength: number = 50): Effect {
+        return {
+            id: existingEffectId ?? `eff-${unitId}-kinetic-${Date.now()}`,
+            name: 'KINETIC SHIELD',
+            description: 'Absorbs 50 damage before collapsing.',
+            icon: 'kinetic_shield',
+            duration: 1,
+            maxDuration: 1,
+            strength,
+            maxStrength: 50
+        };
+    }
+
     private applyImmortalityShield(unit: Unit): Unit {
         return {
             ...unit,
@@ -1797,6 +1821,93 @@ class GameService {
                 ...unit.effects.filter((effect) => effect.name !== 'IMMORTALITY_SHIELD'),
                 this.createImmortalityShieldEffect(unit.id)
             ]
+        };
+    }
+
+    private applyKineticShield(unit: Unit, strength: number = 50): Unit {
+        const existingEffect = this.getKineticShieldEffect(unit);
+        const refreshedEffect = this.createKineticShieldEffect(unit.id, existingEffect?.id, strength);
+
+        return {
+            ...unit,
+            effects: existingEffect
+                ? unit.effects.map((effect) => effect.name === 'KINETIC SHIELD' ? refreshedEffect : effect)
+                : [...unit.effects, refreshedEffect]
+        };
+    }
+
+    private applyDamageToUnit(unit: Unit, incomingDamage: number): {
+        unit: Unit;
+        hpDamage: number;
+        shieldAbsorbed: number;
+        shieldRemaining: number;
+        shieldBroken: boolean;
+        wasInvulnerable: boolean;
+    } {
+        if (incomingDamage <= 0) {
+            return {
+                unit,
+                hpDamage: 0,
+                shieldAbsorbed: 0,
+                shieldRemaining: 0,
+                shieldBroken: false,
+                wasInvulnerable: false
+            };
+        }
+
+        if (this.isInvulnerable(unit)) {
+            return {
+                unit,
+                hpDamage: 0,
+                shieldAbsorbed: 0,
+                shieldRemaining: 0,
+                shieldBroken: false,
+                wasInvulnerable: true
+            };
+        }
+
+        let nextUnit = unit;
+        let remainingDamage = incomingDamage;
+        let shieldAbsorbed = 0;
+        let shieldRemaining = 0;
+        let shieldBroken = false;
+
+        const kineticShield = this.getKineticShieldEffect(nextUnit);
+        if (kineticShield) {
+            const currentShield = Math.max(0, kineticShield.strength ?? kineticShield.maxStrength ?? 50);
+            shieldAbsorbed = Math.min(currentShield, remainingDamage);
+            remainingDamage -= shieldAbsorbed;
+            shieldRemaining = Math.max(0, currentShield - shieldAbsorbed);
+            shieldBroken = shieldAbsorbed > 0 && shieldRemaining === 0;
+
+            nextUnit = {
+                ...nextUnit,
+                effects: shieldRemaining > 0
+                    ? nextUnit.effects.map((effect) => effect.name === 'KINETIC SHIELD'
+                        ? this.createKineticShieldEffect(nextUnit.id, effect.id, shieldRemaining)
+                        : effect)
+                    : nextUnit.effects.filter((effect) => effect.name !== 'KINETIC SHIELD')
+            };
+        }
+
+        const hpDamage = Math.min(nextUnit.stats.hp, remainingDamage);
+        if (hpDamage > 0) {
+            nextUnit = {
+                ...nextUnit,
+                stats: {
+                    ...nextUnit.stats,
+                    hp: Math.max(0, nextUnit.stats.hp - remainingDamage)
+                }
+            };
+        }
+
+        return {
+            unit: nextUnit,
+            hpDamage,
+            shieldAbsorbed,
+            shieldRemaining,
+            shieldBroken,
+            wasInvulnerable: false
         };
     }
 
@@ -2967,6 +3078,9 @@ class GameService {
         const units = this.state.units.map(u => {
             if (u.playerId === playerId) {
                 const activeEffects = u.effects.filter(e => {
+                    if (e.name === 'KINETIC SHIELD') {
+                        return true;
+                    }
                     e.duration -= 1;
                     if (e.duration <= 0) {
                         this.log(`> EFFECT EXPIRED: ${e.name} on ${u.type}`);
@@ -5300,41 +5414,43 @@ class GameService {
 
     public createUnit(type: UnitType, position: Position, playerId: PlayerId, idOverride?: string): Unit {
         const config = CARD_CONFIG[type];
+        const playerTalents = this.state.playerTalents[playerId];
+        const hasTalent = (talentId: string) => playerTalents.some(t => t.id === talentId);
         const stats = config?.baseStats ? { ...config.baseStats } : {
             hp: 100, maxHp: 100, energy: 0, maxEnergy: 0,
             attack: 10, range: 1, movement: 3, size: 1, blocksLos: false, maxAttacks: 1
         };
 
-        if (this.state.playerTalents[playerId].some(t => t.id === 't3')) stats.movement = (stats.movement || 0) + 1;
-        if (this.state.playerTalents[playerId].some(t => t.id === 't4') && (stats.range || 0) > 1) stats.range = (stats.range || 1) + 1;
-        if (this.state.playerTalents[playerId].some(t => t.id === 't7')) stats.hp = (stats.hp || 100) + 50;
+        if (hasTalent('t3')) stats.movement = (stats.movement || 0) + 1;
+        if (hasTalent('t4') && (stats.range || 0) > 1) stats.range = (stats.range || 1) + 1;
 
         // t8: Marine Upgrade - Only for Soldier type
-        if (this.state.playerTalents[playerId].some(t => t.id === 't8') && type === UnitType.SOLDIER) {
+        if (hasTalent('t8') && type === UnitType.SOLDIER) {
             stats.attack = (stats.attack || 0) + 15;
             stats.range = (stats.range || 0) + 1;
         }
 
         // t9: Marine Suite (HP + Mobility) - Only for Soldier type
-        if (this.state.playerTalents[playerId].some(t => t.id === 't9') && type === UnitType.SOLDIER) {
+        if (hasTalent('t9') && type === UnitType.SOLDIER) {
             stats.hp = (stats.hp || 100) + 50;
             stats.movement = (stats.movement || 0) + 1;
         }
 
         // t10: Dreadnought Offense - Only for Heavy type
-        if (this.state.playerTalents[playerId].some(t => t.id === 't10') && type === UnitType.HEAVY) {
+        if (hasTalent('t10') && type === UnitType.HEAVY) {
             stats.attack = (stats.attack || 0) + 20;
             stats.range = (stats.range || 0) + 1;
         }
 
         // t11: Dreadnought Armor - Only for Heavy type
-        if (this.state.playerTalents[playerId].some(t => t.id === 't11') && type === UnitType.HEAVY) {
+        if (hasTalent('t11') && type === UnitType.HEAVY) {
             stats.hp = (stats.hp || 200) + 100;
         }
 
-        // t12: Drone Range - Only for Box and Suicide Drone
-        if (this.state.playerTalents[playerId].some(t => t.id === 't12') && (type === UnitType.BOX || type === UnitType.SUICIDE_DRONE)) {
+        // t12: Drone Upgrade - Only for Box and Suicide Drone
+        if (hasTalent('t12') && (type === UnitType.BOX || type === UnitType.SUICIDE_DRONE)) {
             stats.movement = (stats.movement || 0) + 2;
+            stats.hp = (stats.hp || 100) + 20;
         }
 
         const finalStats: UnitStats = {
@@ -5349,9 +5465,13 @@ class GameService {
             blocksLos: stats.blocksLos || false,
             maxAttacks: stats.maxAttacks || 1
         };
+        const unitId = idOverride || `unit-${Date.now()}-${Math.random()}`;
+        const effects = hasTalent('t7')
+            ? [this.createKineticShieldEffect(unitId)]
+            : [];
 
         return {
-            id: idOverride || `unit-${Date.now()}-${Math.random()}`,
+            id: unitId,
             playerId,
             position: { ...position },
             type,
@@ -5360,7 +5480,7 @@ class GameService {
             rotation: this.getInitialRotation(playerId),
             stats: finalStats,
             status: { stepsTaken: 0, attacksUsed: 0, fluxTowerAttackUpgradesPurchased: 0 },
-            effects: [],
+            effects,
             movePath: []
         };
     }
@@ -5841,27 +5961,31 @@ class GameService {
         if (targetIdx !== -1) {
             const target = updatedUnits[targetIdx];
             const attacker = updatedUnits[attackerIdx];
+            const damage = attacker.stats.attack;
+            const damageResult = this.applyDamageToUnit(target, damage);
 
-            // CHECK INVULNERABILITY
-            const isInvulnerable = target.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
-
-            if (isInvulnerable) {
+            if (damageResult.wasInvulnerable) {
                 this.log(`> ATTACK DEFLECTED: IMMORTALITY SHIELD`, attacker.playerId);
             } else {
-                const damage = attacker.stats.attack;
-                const newHp = Math.max(0, target.stats.hp - damage);
-
-	                updatedUnits[targetIdx] = {
-	                    ...target,
-	                    stats: { ...target.stats, hp: newHp }
-	                };
-                    directDamagePulse = { unitId: target.id, amount: damage };
-
+                updatedUnits[targetIdx] = damageResult.unit;
+                if (damageResult.hpDamage > 0) {
+                    directDamagePulse = { unitId: target.id, amount: damageResult.hpDamage };
+                }
                 const remainingAttacks = attacker.stats.maxAttacks - updatedUnits[attackerIdx].status.attacksUsed;
-                this.log(`> ${attacker.type} FIRES ON ${target.type}: -${damage} HP${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+                const absorptionSuffix = damageResult.shieldAbsorbed > 0
+                    ? ` (${damageResult.shieldAbsorbed} ABSORBED${damageResult.shieldBroken ? ', SHIELD DOWN' : ''})`
+                    : '';
 
-                // BREAK MIND CONTROL IF HACKER IS HIT
-                if (target.status.mindControlTargetId) {
+                if (damageResult.hpDamage > 0) {
+                    this.log(`> ${attacker.type} FIRES ON ${target.type}: -${damageResult.hpDamage} HP${absorptionSuffix}${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+                } else if (damageResult.shieldAbsorbed > 0) {
+                    this.log(`> ${attacker.type} FIRES ON ${target.type}: KINETIC SHIELD ABSORBS ${damageResult.shieldAbsorbed}${damageResult.shieldBroken ? ' AND COLLAPSES' : ''}${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+                } else {
+                    this.log(`> ${attacker.type} FIRES ON ${target.type}: NO DAMAGE${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+                }
+
+                // BREAK MIND CONTROL IF HACKER IS DAMAGED
+                if (damageResult.hpDamage > 0 && target.status.mindControlTargetId) {
                     const victimId = target.status.mindControlTargetId;
                     const victimIdx = updatedUnits.findIndex(u => u.id === victimId);
                     if (victimIdx !== -1 && updatedUnits[victimIdx].status.originalPlayerId) {
@@ -5878,7 +6002,7 @@ class GameService {
                     };
                 }
 
-                if (newHp === 0) {
+                if (updatedUnits[targetIdx].stats.hp === 0) {
                     this.log(`> TARGET ELIMINATED: ${target.type}`, attacker.playerId);
                     updatedUnits[targetIdx].status.isDying = true;
                     updatedUnits[attackerIdx].status.autoAttackTargetId = null;
@@ -5913,18 +6037,29 @@ class GameService {
 	            if (u.id === sourceUnitId) return u;
 	            if (excludeUnitId && u.id === excludeUnitId) return u;
 
-            const isInvulnerable = u.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
-            if (isInvulnerable) return u;
-
             const dx = u.position.x - center.x;
             const dz = u.position.z - center.z;
             const dist = Math.sqrt(dx * dx + dz * dz);
 
 	            if (dist <= radius) {
-	                const newHp = Math.max(0, u.stats.hp - damage);
-	                this.log(`> BLAST HIT ${u.type}: -${damage} HP`);
-                    damagePulses.push({ unitId: u.id, amount: damage });
-	                return { ...u, stats: { ...u.stats, hp: newHp } };
+                    const damageResult = this.applyDamageToUnit(u, damage);
+                    if (damageResult.wasInvulnerable) {
+                        this.log(`> BLAST DEFLECTED: IMMORTALITY SHIELD`, u.playerId);
+                        return u;
+                    }
+
+                    const absorptionSuffix = damageResult.shieldAbsorbed > 0
+                        ? ` (${damageResult.shieldAbsorbed} ABSORBED${damageResult.shieldBroken ? ', SHIELD DOWN' : ''})`
+                        : '';
+
+                    if (damageResult.hpDamage > 0) {
+                        this.log(`> BLAST HIT ${u.type}: -${damageResult.hpDamage} HP${absorptionSuffix}`);
+                        damagePulses.push({ unitId: u.id, amount: damageResult.hpDamage });
+                    } else if (damageResult.shieldAbsorbed > 0) {
+                        this.log(`> BLAST HIT ${u.type}: KINETIC SHIELD ABSORBS ${damageResult.shieldAbsorbed}${damageResult.shieldBroken ? ' AND COLLAPSES' : ''}`);
+                    }
+
+	                return damageResult.unit;
 	            }
 	            return u;
 	        });
@@ -6229,16 +6364,13 @@ class GameService {
         }
 
         const damage = 3;
-        const nextHp = Math.max(0, unit.stats.hp - damage);
+        const damageResult = this.applyDamageToUnit(unit, damage);
+        const nextHp = damageResult.unit.stats.hp;
         const updatedUnit: Unit = {
-            ...unit,
+            ...damageResult.unit,
             movePath: nextHp === 0 ? [] : unit.movePath,
-            stats: {
-                ...unit.stats,
-                hp: nextHp
-            },
             status: {
-                ...unit.status,
+                ...damageResult.unit.status,
                 isDying: nextHp === 0 ? true : unit.status.isDying
             }
         };
@@ -6246,8 +6378,12 @@ class GameService {
         const newUnits = [...this.state.units];
         newUnits[unitIndex] = updatedUnit;
         this.state.units = newUnits;
-        this.triggerDamagePulses([{ unitId, amount: damage }]);
-        this.log(`> BLEED TRIGGERS ON ${unit.type}: -${damage} HP`, unit.playerId);
+        if (damageResult.hpDamage > 0) {
+            this.triggerDamagePulses([{ unitId, amount: damageResult.hpDamage }]);
+            this.log(`> BLEED TRIGGERS ON ${unit.type}: -${damageResult.hpDamage} HP${damageResult.shieldAbsorbed > 0 ? ` (${damageResult.shieldAbsorbed} ABSORBED${damageResult.shieldBroken ? ', SHIELD DOWN' : ''})` : ''}`, unit.playerId);
+        } else if (damageResult.shieldAbsorbed > 0) {
+            this.log(`> BLEED TRIGGERS ON ${unit.type}: KINETIC SHIELD ABSORBS ${damageResult.shieldAbsorbed}${damageResult.shieldBroken ? ' AND COLLAPSES' : ''}`, unit.playerId);
+        }
 
         if (nextHp === 0) {
             this.log(`> TARGET ELIMINATED: ${unit.type}`, unit.playerId);
@@ -6741,6 +6877,108 @@ class GameService {
             this.log(`> ADVANCED OPTICS: UPGRADED RANGE`, player);
         }
 
+        // t7: Kinetic Shields (Immediate application to existing units)
+        if (talent.id === 't7') {
+            this.state.units = this.state.units.map(u => (
+                u.playerId === player
+                    ? this.applyKineticShield(u)
+                    : u
+            ));
+            this.log(`> KINETIC SHIELDS: ALL FRIENDLY UNITS PROTECTED`, player);
+        }
+
+        // t8: Marine Upgrade (Immediate update for existing units)
+        if (talent.id === 't8') {
+            this.state.units = this.state.units.map(u => {
+                if (u.playerId === player && u.type === UnitType.SOLDIER) {
+                    return {
+                        ...u,
+                        stats: {
+                            ...u.stats,
+                            attack: u.stats.attack + 15,
+                            range: u.stats.range + 1
+                        }
+                    };
+                }
+                return u;
+            });
+            this.log(`> MARINE UPGRADE: CYBER MARINES BOOSTED`, player);
+        }
+
+        // t9: Marine Suite (Immediate update for existing units)
+        if (talent.id === 't9') {
+            this.state.units = this.state.units.map(u => {
+                if (u.playerId === player && u.type === UnitType.SOLDIER) {
+                    return {
+                        ...u,
+                        stats: {
+                            ...u.stats,
+                            hp: u.stats.hp + 50,
+                            maxHp: u.stats.maxHp + 50,
+                            movement: u.stats.movement + 1
+                        }
+                    };
+                }
+                return u;
+            });
+            this.log(`> MARINE SUITE: CYBER MARINES HARDENED`, player);
+        }
+
+        // t10: Dreadnought Offense (Immediate update for existing units)
+        if (talent.id === 't10') {
+            this.state.units = this.state.units.map(u => {
+                if (u.playerId === player && u.type === UnitType.HEAVY) {
+                    return {
+                        ...u,
+                        stats: {
+                            ...u.stats,
+                            attack: u.stats.attack + 20,
+                            range: u.stats.range + 1
+                        }
+                    };
+                }
+                return u;
+            });
+            this.log(`> DREADNOUGHT OFFENSE: WEAPONS HOT`, player);
+        }
+
+        // t11: Dreadnought Armor (Immediate update for existing units)
+        if (talent.id === 't11') {
+            this.state.units = this.state.units.map(u => {
+                if (u.playerId === player && u.type === UnitType.HEAVY) {
+                    return {
+                        ...u,
+                        stats: {
+                            ...u.stats,
+                            hp: u.stats.hp + 100,
+                            maxHp: u.stats.maxHp + 100
+                        }
+                    };
+                }
+                return u;
+            });
+            this.log(`> DREADNOUGHT ARMOR: PLATING REINFORCED`, player);
+        }
+
+        // t12: Drone Upgrade (Immediate update for existing units)
+        if (talent.id === 't12') {
+            this.state.units = this.state.units.map(u => {
+                if (u.playerId === player && this.isDroneUnit(u)) {
+                    return {
+                        ...u,
+                        stats: {
+                            ...u.stats,
+                            hp: u.stats.hp + 20,
+                            maxHp: u.stats.maxHp + 20,
+                            movement: u.stats.movement + 2
+                        }
+                    };
+                }
+                return u;
+            });
+            this.log(`> DRONE UPGRADE: DRONES OPTIMIZED`, player);
+        }
+
         this.state.talentChoices = [];
 
         if (this.state.pendingTalentQueue.length > 0) {
@@ -6976,5 +7214,4 @@ class GameService {
 }
 
 export const gameService = new GameService();
-
 

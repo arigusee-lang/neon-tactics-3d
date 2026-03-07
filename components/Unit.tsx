@@ -515,7 +515,10 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
     const hasMobilityBoost = data.effects.some(e => e.name === 'MOBILITY BOOST');
     const hasMobilitySabotage = data.effects.some(e => e.name === 'MOBILITY SABOTAGE');
     const hasBleed = data.effects.some(e => e.name === 'BLEED');
-    const hasShield = data.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
+    const hasImmortalityShield = data.effects.some(e => e.name === 'IMMORTALITY_SHIELD');
+    const kineticShield = data.effects.find(e => e.name === 'KINETIC SHIELD');
+    const kineticShieldStrength = kineticShield?.strength ?? kineticShield?.maxStrength ?? 0;
+    const hasKineticShield = kineticShieldStrength > 0;
     const hasEnergy = data.stats.maxEnergy > 0;
     const isIndestructible = data.type === EUnitType.PORTAL;
 
@@ -890,7 +893,13 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
             )}
 
             {isFrozen && <mesh position={[0, frozenY, 0]}><boxGeometry args={[size, size, size]} /><meshBasicMaterial color="#00ffff" transparent opacity={0.3} wireframe /></mesh>}
-            {hasShield && <mesh position={[0, frozenY, 0]}><sphereGeometry args={[size * 0.7, 16, 16]} /><meshBasicMaterial color="#fbbf24" transparent opacity={0.3} wireframe /></mesh>}
+            {hasImmortalityShield && <mesh position={[0, frozenY, 0]}><sphereGeometry args={[size * 0.7, 16, 16]} /><meshBasicMaterial color="#fbbf24" transparent opacity={0.3} wireframe /></mesh>}
+            {hasKineticShield && (
+                <mesh position={[0, frozenY, 0]} scale={[1, 1.06, 1]}>
+                    <sphereGeometry args={[size * 0.78, 20, 20]} />
+                    <meshStandardMaterial color="#7dd3fc" emissive="#38bdf8" emissiveIntensity={0.5} transparent opacity={0.22} />
+                </mesh>
+            )}
             {supportPulseAmount && (
                 <>
                     <pointLight
@@ -966,7 +975,8 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
                         {hasMobilityBoost && <div className="text-[8px] text-emerald-300 font-bold animate-pulse mt-0.5">MOBILITY +3</div>}
                         {hasMobilitySabotage && <div className="text-[8px] text-rose-300 font-bold animate-pulse mt-0.5">MOBILITY -2</div>}
                         {hasBleed && <div className="text-[8px] text-red-300 font-bold animate-pulse mt-0.5">BLEEDING</div>}
-                        {hasShield && <div className="text-[8px] text-yellow-300 font-bold animate-pulse mt-0.5 px-1 border border-yellow-500 rounded bg-yellow-900/50">SHIELD ACTIVE</div>}
+                        {hasImmortalityShield && <div className="text-[8px] text-yellow-300 font-bold animate-pulse mt-0.5 px-1 border border-yellow-500 rounded bg-yellow-900/50">SHIELD ACTIVE</div>}
+                        {hasKineticShield && <div className="text-[8px] text-sky-200 font-bold animate-pulse mt-0.5 px-1 border border-sky-400/80 rounded bg-sky-900/40">KINETIC {kineticShieldStrength}</div>}
                         {isIndestructible && <div className="text-[8px] text-yellow-300 font-black tracking-widest mt-0.5 drop-shadow-[0_0_5px_yellow]">STABLE</div>}
 
                         {hovered && (

@@ -80,6 +80,14 @@ const EffectBadgeIcon: React.FC<{ effect: Effect }> = ({ effect }) => {
                     <path d="M9 10.5H15" strokeLinecap="round" />
                 </svg>
             );
+        case 'KINETIC SHIELD':
+            return (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="w-4 h-4 text-sky-300">
+                    <path d="M12 3L18 5.5V10.5C18 15 15.3 18.5 12 20.5C8.7 18.5 6 15 6 10.5V5.5L12 3Z" strokeLinejoin="round" />
+                    <path d="M8 12C9.4 10.3 10.8 9.5 12 9.5C13.2 9.5 14.6 10.3 16 12" strokeLinecap="round" />
+                    <path d="M8.5 14.5H15.5" strokeLinecap="round" />
+                </svg>
+            );
         default:
             return (
                 <span className="select-none text-[9px] font-mono font-bold leading-none tracking-tight text-white">
@@ -491,10 +499,17 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                             <div className="w-48">
                                                 <div className="text-[10px] font-bold text-white uppercase mb-1">{effect.name}</div>
                                                 <div className="text-[9px] text-gray-400 leading-tight mb-2 border-b border-gray-800 pb-2">{effect.description}</div>
-                                                <div className="text-[9px] font-mono text-green-400 flex justify-between">
-                                                    <span>DURATION</span>
-                                                    <span className="text-white font-bold">{effect.duration}/{effect.maxDuration} RNDS</span>
-                                                </div>
+                                                {effect.name === 'KINETIC SHIELD' ? (
+                                                    <div className="text-[9px] font-mono text-sky-400 flex justify-between">
+                                                        <span>ABSORB</span>
+                                                        <span className="text-white font-bold">{effect.strength ?? effect.maxStrength ?? 50}/{effect.maxStrength ?? 50}</span>
+                                                    </div>
+                                                ) : (
+                                                    <div className="text-[9px] font-mono text-green-400 flex justify-between">
+                                                        <span>DURATION</span>
+                                                        <span className="text-white font-bold">{effect.duration}/{effect.maxDuration} RNDS</span>
+                                                    </div>
+                                                )}
                                             </div>
                                         ), 'top')}
                                         onMouseLeave={handleHideTooltip}
