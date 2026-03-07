@@ -188,6 +188,7 @@ export interface UnitStatus {
   healPulseAmount?: number | null;
   energyPulseAmount?: number | null;
   damagePulseAmount?: number | null;
+  missPulseText?: string | null;
   attackTargetId?: string | null;     // Transient: For current animation frame
   autoAttackTargetId?: string | null; // Persistent: For "Nemesis" logic
   neutralHasAttacked?: boolean;
@@ -281,6 +282,8 @@ export interface TerrainData {
   elevation: number; // 0 is ground, 1 is one step up, etc.
   rotation: number; // 0, 1, 2, 3 (Multiples of 90 degrees)
   landingZone?: PlayerId; // If set, only this player can deploy here
+  temporaryLandingZoneExpiresAtTurn?: number;
+  temporaryLandingZoneOriginalOwner?: PlayerId;
 }
 
 export interface ShopItem {
@@ -317,6 +320,7 @@ export interface GameState {
   matchMode: MatchMode;
   winner: PlayerId[] | null;
   roundNumber: number;
+  turnCount: number;
   turnStartedAt: number;
   turnOvertimeDamageApplied: number;
   decks: { [key in PlayerId]: Card[] };

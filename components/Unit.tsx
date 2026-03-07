@@ -485,7 +485,8 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
     const [hovered, setHovered] = useState(false);
     const [isMoving, setIsMoving] = useState(false);
     const [supportPulseAmount, setSupportPulseAmount] = useState<number | null>(null);
-    const [supportPulseKind, setSupportPulseKind] = useState<'HEAL' | 'ENERGY' | 'DAMAGE' | null>(null);
+    const [supportPulseKind, setSupportPulseKind] = useState<'HEAL' | 'ENERGY' | 'DAMAGE' | 'MISS' | null>(null);
+    const [supportPulseLabel, setSupportPulseLabel] = useState<string | null>(null);
 
     const [attackTargetPos, setAttackTargetPos] = useState<Vector3 | null>(null);
     const [mindControlTargetPos, setMindControlTargetPos] = useState<Vector3 | null>(null);
@@ -632,23 +633,33 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
         const healAmount = data.status.healPulseAmount || 0;
         const energyAmount = data.status.energyPulseAmount || 0;
         const damageAmount = data.status.damagePulseAmount || 0;
-        const nextKind = damageAmount > 0 ? 'DAMAGE' : healAmount > 0 ? 'HEAL' : energyAmount > 0 ? 'ENERGY' : null;
+        const missText = data.status.missPulseText?.trim() || null;
+        const nextKind = damageAmount > 0 ? 'DAMAGE' : healAmount > 0 ? 'HEAL' : energyAmount > 0 ? 'ENERGY' : missText ? 'MISS' : null;
         const nextAmount = damageAmount > 0 ? damageAmount : healAmount > 0 ? healAmount : energyAmount > 0 ? energyAmount : null;
+        const nextLabel = nextKind === 'DAMAGE'
+            ? `-${nextAmount}`
+            : nextKind === 'HEAL'
+                ? `+${nextAmount} HP`
+                : nextKind === 'ENERGY'
+                    ? `+${nextAmount} EN`
+                    : missText;
 
-        if (!nextKind || !nextAmount) return;
+        if (!nextKind || !nextLabel) return;
 
         supportPulseStartRef.current = performance.now();
         setSupportPulseKind(nextKind);
         setSupportPulseAmount(nextAmount);
+        setSupportPulseLabel(nextLabel);
 
         const timeoutId = window.setTimeout(() => {
             setSupportPulseAmount(null);
             setSupportPulseKind(null);
+            setSupportPulseLabel(null);
             supportPulseStartRef.current = null;
         }, 1200);
 
         return () => window.clearTimeout(timeoutId);
-    }, [data.status.damagePulseAmount, data.status.healPulseAmount, data.status.energyPulseAmount]);
+    }, [data.status.damagePulseAmount, data.status.healPulseAmount, data.status.energyPulseAmount, data.status.missPulseText]);
 
 
     useEffect(() => {
@@ -663,7 +674,7 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
         if (!groupRef.current) return;
         const time = state.clock.elapsedTime;
 
-        if (supportPulseAmount && supportPulseStartRef.current) {
+        if (supportPulseKind && supportPulseStartRef.current) {
             const progress = Math.min((performance.now() - supportPulseStartRef.current) / 1150, 1);
             if (supportPulseLightRef.current) {
                 supportPulseLightRef.current.intensity = (1 - progress) * 2.8;
@@ -805,17 +816,16 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
         ? '#a855f7'
         : supportPulseKind === 'DAMAGE'
             ? '#fb7185'
-            : '#34d399';
+            : supportPulseKind === 'MISS'
+                ? '#e2e8f0'
+                : '#34d399';
     const supportPulseClassName = supportPulseKind === 'ENERGY'
         ? 'rounded border border-purple-300/70 bg-purple-500/15 px-2 py-0.5 text-[11px] font-black text-purple-300 shadow-[0_0_16px_rgba(168,85,247,0.35)] backdrop-blur-sm'
         : supportPulseKind === 'DAMAGE'
             ? 'rounded border border-rose-300/70 bg-rose-500/15 px-2 py-0.5 text-[11px] font-black text-rose-300 shadow-[0_0_16px_rgba(251,113,133,0.35)] backdrop-blur-sm'
-            : 'rounded border border-emerald-300/70 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-black text-emerald-300 shadow-[0_0_16px_rgba(52,211,153,0.35)] backdrop-blur-sm';
-    const supportPulseLabel = supportPulseKind === 'ENERGY'
-        ? `+${supportPulseAmount} EN`
-        : supportPulseKind === 'DAMAGE'
-            ? `-${supportPulseAmount}`
-            : `+${supportPulseAmount} HP`;
+            : supportPulseKind === 'MISS'
+                ? 'rounded border border-slate-100/80 bg-slate-900/45 px-2 py-0.5 text-[11px] font-black uppercase tracking-[0.12em] text-slate-100 shadow-[0_0_16px_rgba(226,232,240,0.22)] backdrop-blur-sm'
+                : 'rounded border border-emerald-300/70 bg-emerald-500/15 px-2 py-0.5 text-[11px] font-black text-emerald-300 shadow-[0_0_16px_rgba(52,211,153,0.35)] backdrop-blur-sm';
     const unitNameLabel = CARD_CONFIG[data.type]?.name ?? data.type.replaceAll('_', ' ');
 
     const projectileStartOffset = data.type === EUnitType.TOWER
@@ -895,12 +905,12 @@ const Unit: React.FC<UnitProps> = ({ data, isSelected, appStatus, showNameLabel,
             {isFrozen && <mesh position={[0, frozenY, 0]}><boxGeometry args={[size, size, size]} /><meshBasicMaterial color="#00ffff" transparent opacity={0.3} wireframe /></mesh>}
             {hasImmortalityShield && <mesh position={[0, frozenY, 0]}><sphereGeometry args={[size * 0.7, 16, 16]} /><meshBasicMaterial color="#fbbf24" transparent opacity={0.3} wireframe /></mesh>}
             {hasKineticShield && (
-                <mesh position={[0, frozenY, 0]} scale={[1, 1.06, 1]}>
+                <mesh position={[0, frozenY, 0]} scale={[1, 1.06, 1]} raycast={() => null}>
                     <sphereGeometry args={[size * 0.78, 20, 20]} />
                     <meshStandardMaterial color="#7dd3fc" emissive="#38bdf8" emissiveIntensity={0.5} transparent opacity={0.22} />
                 </mesh>
             )}
-            {supportPulseAmount && (
+            {supportPulseLabel && (
                 <>
                     <pointLight
                         ref={supportPulseLightRef}

@@ -96,6 +96,7 @@ const sections: RuleSection[] = [
       'Unit cards deploy only onto free tiles inside your own active landing zones.',
       'The MAIN is a special structure placed by the map and is not a normal shop unit.',
       'When a MAIN is destroyed, all landing-zone tiles owned by that player collapse.',
+      'Wormhole temporary landing zones created by teleport effects last 5 turns before collapsing.',
       'Once your landing zones are gone, you cannot deploy new units unless another rule creates fresh deployment space.'
     ]
   },

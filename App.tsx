@@ -97,7 +97,7 @@ const PlayerTooltip: React.FC<{
     if (!character && talents.length === 0 && actions.length === 0) return null;
 
     return (
-        <div className={`absolute top-full mt-2 ${alignRight ? 'right-0' : 'left-0'} w-64 bg-black/95 border border-green-500/50 rounded p-3 z-50 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-[0_0_20px_rgba(0,255,0,0.2)] backdrop-blur-md`}>
+        <div className={`absolute top-full mt-2 ${alignRight ? 'right-0' : 'left-0'} w-64 bg-black/95 border border-green-500/50 rounded p-3 z-[60] opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none shadow-[0_0_20px_rgba(0,255,0,0.2)] backdrop-blur-md`}>
 
             {/* Character Info */}
             {character && (
@@ -654,7 +654,7 @@ const App: React.FC = () => {
                 <>
                     <div className="absolute top-4 left-1/2 transform -translate-x-1/2 pointer-events-none w-full max-w-2xl flex flex-col items-center gap-2 z-20">
                         {/* HUD Top Bar */}
-                        <div className="flex items-center gap-4 w-full justify-center">
+                        <div className="relative z-30 flex items-center gap-4 w-full justify-center">
                             <div className="bg-transparent border border-green-900 px-6 py-2 rounded-full shadow-[0_0_15px_rgba(0,255,0,0.2)] flex items-center gap-6 backdrop-blur-sm pointer-events-auto">
 	                                <div className="flex flex-col items-center justify-center px-4 border-r border-slate-700/50">
 	                                    <div className="text-[8px] text-green-500/70 font-bold uppercase tracking-wider leading-none mb-0.5">LEVEL</div>
@@ -679,7 +679,7 @@ const App: React.FC = () => {
                                         const effects = gameState.playerEffects[playerId];
 
                                         return (
-                                            <div key={playerId} className="flex min-w-[76px] flex-col items-center gap-1">
+                                            <div key={playerId} className="relative z-0 flex min-w-[76px] flex-col items-center gap-1 hover:z-40">
                                                 <div
                                                     onClick={gameState.isDevMode ? () => gameService.debugSetTurn(playerId) : undefined}
                                                     className={`relative group text-sm font-bold tracking-widest transition-colors ${gameState.isDevMode ? 'cursor-pointer hover:text-slate-400' : 'cursor-help'} ${isActive ? '' : 'text-slate-600'}`}
@@ -708,7 +708,7 @@ const App: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="relative z-10 flex items-center gap-2">
                             {/* CREDIT DISPLAY (Clickable to Open Shop) */}
                             <button
                                 onClick={() => gameService.openShop()}
@@ -739,7 +739,7 @@ const App: React.FC = () => {
                         </div>
 
                         {gameState.interactionState.mode !== 'NORMAL' && (
-                            <div className="pointer-events-auto bg-yellow-900/80 border border-yellow-500 text-yellow-200 text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded animate-pulse shadow-[0_0_10px_rgba(255,255,0,0.3)]">
+                            <div className="relative z-10 pointer-events-auto bg-yellow-900/80 border border-yellow-500 text-yellow-200 text-[10px] font-bold uppercase tracking-widest px-4 py-1.5 rounded animate-pulse shadow-[0_0_10px_rgba(255,255,0,0.3)]">
                                 {gameState.interactionState.mode === 'WALL_PLACEMENT'
                                     ? `BUILDING WALL... (${gameState.interactionState.remaining} LEFT)`
                                     : gameState.interactionState.mode === 'ABILITY_SUMMON'
@@ -761,7 +761,7 @@ const App: React.FC = () => {
                         )}
 
                         {gameState.systemMessage && (
-                            <div className="text-[10px] text-green-400 bg-transparent px-3 py-1 rounded border border-green-900/50 uppercase tracking-widest animate-pulse backdrop-blur-md">
+                            <div className="relative z-10 text-[10px] text-green-400 bg-transparent px-3 py-1 rounded border border-green-900/50 uppercase tracking-widest animate-pulse backdrop-blur-md">
                                 {gameState.systemMessage}
                             </div>
                         )}

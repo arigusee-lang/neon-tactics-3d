@@ -17,7 +17,7 @@ export const TALENT_POOL: Talent[] = [
     { id: 't4', name: 'Advanced Optics', description: 'All non-melee units gain +1 Attack Range.', icon: '🔭', color: '#3b82f6' },
     { id: 't5', name: 'Biotic Regen', description: 'All non-building units gain passive 10 HP regeneration per round.', icon: '🧬', color: '#ec4899' },
     { id: 't6', name: 'Reactor Tuning', description: 'All units with Energy gain an additional 5 Energy regeneration per round.', icon: '🔋', color: '#8b5cf6' },
-    { id: 't7', name: 'Kinetic Shields', description: 'All friendly units gain a Kinetic Shield that absorbs 50 damage before collapsing.', icon: '🛡️', color: '#e2e8f0' },
+    { id: 't7', name: 'Kinetic Shields', description: 'All friendly non-building units gain a Kinetic Shield that absorbs 50 damage before collapsing.', icon: '🛡️', color: '#e2e8f0' },
     { id: 't8', name: 'Marine Upgrade', description: 'Cyber Marines gain +15 Attack and +1 Range.', icon: '🔫', color: '#60a5fa' },
     { id: 't9', name: 'Marine Suite', description: 'Cyber Marines gain +50 HP and +1 Mobility.', icon: '🦿', color: '#3b82f6' },
     { id: 't10', name: 'Dreadnought Offense', description: 'Dreadnoughts gain +20 Attack and +1 Range.', icon: '💥', color: '#ef4444' },
@@ -40,7 +40,8 @@ export const TALENT_POOL: Talent[] = [
     { id: 't27', name: 'Negotiator', description: 'Reroll stock costs $25 instead of $50, and you can sell back pending orders for 90% of their cost even while already in transit.', icon: '🤝', color: '#38bdf8' },
     { id: 't28', name: 'Rapid Deployment', description: 'Newly summoned mobile units no longer suffer Summoning Sickness.', icon: '⚔️', color: '#a78bfa' },
     { id: 't29', name: 'Portal Exchange', description: 'Convert 300 HP from your Arc Portal into $300.', icon: '💱', color: '#f59e0b' },
-    { id: 't30', name: 'Economist', description: 'Gain $30 turn income instead of $20, and field pickup rewards are doubled.', icon: '📈', color: '#22c55e' }
+    { id: 't30', name: 'Economist', description: 'Gain $30 turn income instead of $20, and field pickup rewards are doubled.', icon: '📈', color: '#22c55e' },
+    { id: 't31', name: 'Wormhole', description: 'Marine teleports leave temporary landing zones on source and destination tiles for 5 turns. Tactical Retreat and Mass Retreat also leave temporary landing zones on evacuated source tiles.', icon: '🌀', color: '#06b6d4' }
 ];
 
 const TALENT_RULES: Record<string, Pick<Talent, 'maxPicks' | 'prerequisiteTalentIds'>> = {
@@ -56,6 +57,8 @@ const TALENT_RULES: Record<string, Pick<Talent, 'maxPicks' | 'prerequisiteTalent
     t23: { prerequisiteTalentIds: ['t6'] },
     t29: { maxPicks: 99 }
 };
+
+const WORMHOLE_LANDING_ZONE_DURATION_TURNS = 5;
 
 import { io, Socket } from 'socket.io-client';
 
@@ -1094,6 +1097,7 @@ class GameService {
             currentTurn: this.state.currentTurn,
             turnStartedAt: this.state.turnStartedAt,
             turnOvertimeDamageApplied: this.state.turnOvertimeDamageApplied,
+            turnCount: this.state.turnCount,
             activePlayerIds: [...this.state.activePlayerIds],
             turnOrder: [...this.state.turnOrder],
             matchMode: this.state.matchMode,
@@ -1310,10 +1314,9 @@ class GameService {
                 this.triggerTalentSelection(data.playerId, true, data.choices);
                 break;
             case 'TALENT_CHOOSE': {
-                const chosenTalent = this.state.talentChoices.find(t => t.id === data.talentId)
-                    || TALENT_POOL.find(t => t.id === data.talentId);
+                const chosenTalent = this.state.talentChoices.find(t => t.id === data.talentId);
                 if (chosenTalent) {
-                    this.chooseTalent(chosenTalent, true);
+                    this.chooseTalent(chosenTalent, true, data.playerId);
                 }
                 break;
             }
@@ -1341,6 +1344,9 @@ class GameService {
                 }
                 if (typeof data.turnOvertimeDamageApplied === 'number') {
                     this.state.turnOvertimeDamageApplied = data.turnOvertimeDamageApplied;
+                }
+                if (typeof data.turnCount === 'number') {
+                    this.state.turnCount = data.turnCount;
                 }
                 if (Array.isArray(data.activePlayerIds)) {
                     this.state.activePlayerIds = [...data.activePlayerIds];
@@ -1500,6 +1506,7 @@ class GameService {
             matchMode: 'duel',
             winner: null,
             roundNumber: 1,
+            turnCount: 1,
             turnStartedAt: Date.now(),
             turnOvertimeDamageApplied: 0,
             units: [],
@@ -1580,7 +1587,19 @@ class GameService {
             mapSize: { x: this.state.mapBounds.width, y: this.state.mapBounds.height },
             mapOrigin: { x: this.state.mapBounds.originX, z: this.state.mapBounds.originZ },
             deletedTiles: Array.from(deletedSet),
-            terrain: this.state.terrain,
+            terrain: Object.fromEntries(
+                Object.entries(this.state.terrain).map(([key, tile]) => [
+                    key,
+                    {
+                        type: tile.type,
+                        elevation: tile.elevation,
+                        rotation: tile.rotation,
+                        landingZone: typeof tile.temporaryLandingZoneExpiresAtTurn === 'number'
+                            ? tile.temporaryLandingZoneOriginalOwner
+                            : tile.landingZone
+                    }
+                ])
+            ),
             units: this.state.units.map(u => ({
                 id: u.id,
                 playerId: u.playerId,
@@ -1905,6 +1924,13 @@ class GameService {
     }
 
     private applyKineticShield(unit: Unit, strength: number = 50): Unit {
+        if (BUILDING_TYPES.includes(unit.type)) {
+            return {
+                ...unit,
+                effects: unit.effects.filter((effect) => effect.name !== 'KINETIC SHIELD')
+            };
+        }
+
         const existingEffect = this.getKineticShieldEffect(unit);
         const refreshedEffect = this.createKineticShieldEffect(unit.id, existingEffect?.id, strength);
 
@@ -2035,6 +2061,106 @@ class GameService {
 
     private playerHasTalent(playerId: PlayerId, talentId: string): boolean {
         return this.getTalentPickCount(playerId, talentId) > 0;
+    }
+
+    private playerHasWormholeTalent(playerId: PlayerId): boolean {
+        return this.playerHasTalent(playerId, 't31');
+    }
+
+    private setPermanentLandingZone(key: string, owner?: PlayerId) {
+        const tile = this.state.terrain[key];
+        if (!tile) return;
+
+        this.state.terrain[key] = {
+            ...tile,
+            landingZone: owner,
+            temporaryLandingZoneExpiresAtTurn: undefined,
+            temporaryLandingZoneOriginalOwner: undefined
+        };
+    }
+
+    private clearLandingZoneOwnership(key: string, ownerToRemove?: PlayerId) {
+        const tile = this.state.terrain[key];
+        if (!tile) return;
+
+        const activeOwner = tile.landingZone;
+        const hasTemporaryZone = typeof tile.temporaryLandingZoneExpiresAtTurn === 'number';
+
+        if (!hasTemporaryZone) {
+            if (!ownerToRemove || activeOwner === ownerToRemove) {
+                this.state.terrain[key] = {
+                    ...tile,
+                    landingZone: undefined,
+                    temporaryLandingZoneExpiresAtTurn: undefined,
+                    temporaryLandingZoneOriginalOwner: undefined
+                };
+            }
+            return;
+        }
+
+        if (ownerToRemove && activeOwner !== ownerToRemove) {
+            if (tile.temporaryLandingZoneOriginalOwner === ownerToRemove) {
+                this.state.terrain[key] = {
+                    ...tile,
+                    temporaryLandingZoneOriginalOwner: undefined
+                };
+            }
+            return;
+        }
+
+        const restoredOwner = tile.temporaryLandingZoneOriginalOwner === ownerToRemove
+            ? undefined
+            : tile.temporaryLandingZoneOriginalOwner;
+
+        this.state.terrain[key] = {
+            ...tile,
+            landingZone: restoredOwner,
+            temporaryLandingZoneExpiresAtTurn: undefined,
+            temporaryLandingZoneOriginalOwner: undefined
+        };
+    }
+
+    private createTemporaryLandingZone(playerId: PlayerId, position: Position, size: number) {
+        const expiresAtTurn = this.state.turnCount + WORMHOLE_LANDING_ZONE_DURATION_TURNS;
+
+        for (let dx = 0; dx < size; dx++) {
+            for (let dz = 0; dz < size; dz++) {
+                const key = `${position.x + dx},${position.z + dz}`;
+                const tile = this.state.terrain[key];
+                if (!tile) continue;
+
+                const originalOwner = typeof tile.temporaryLandingZoneExpiresAtTurn === 'number'
+                    ? tile.temporaryLandingZoneOriginalOwner
+                    : tile.landingZone;
+
+                this.state.terrain[key] = {
+                    ...tile,
+                    landingZone: playerId,
+                    temporaryLandingZoneExpiresAtTurn: expiresAtTurn,
+                    temporaryLandingZoneOriginalOwner: originalOwner
+                };
+            }
+        }
+    }
+
+    private cleanupExpiredTemporaryLandingZones() {
+        Object.keys(this.state.terrain).forEach((key) => {
+            const tile = this.state.terrain[key];
+            if (!tile || typeof tile.temporaryLandingZoneExpiresAtTurn !== 'number') {
+                return;
+            }
+
+            if (this.state.turnCount < tile.temporaryLandingZoneExpiresAtTurn) {
+                return;
+            }
+
+            this.state.terrain[key] = {
+                ...tile,
+                landingZone: tile.temporaryLandingZoneOriginalOwner,
+                temporaryLandingZoneExpiresAtTurn: undefined,
+                temporaryLandingZoneOriginalOwner: undefined
+            };
+        });
     }
 
     public getNanoRepairAmount(playerId: PlayerId): number {
@@ -2969,6 +3095,7 @@ class GameService {
             interactionState: { mode: 'NORMAL' },
             systemMessage: isDevMode ? "DEV MODE ACTIVE: INFINITE RESOURCES" : "MATCH STARTED. PLAYER 1 ACTIVE.",
             currentTurn: PlayerId.ONE,
+            turnCount: 1,
             turnStartedAt: Date.now(),
             turnOvertimeDamageApplied: 0,
             activePlayerIds,
@@ -3408,6 +3535,44 @@ class GameService {
         }, 1200);
     }
 
+    private triggerMissPulse(targetUnitId: string, text: string = 'MISS') {
+        const targetIdx = this.state.units.findIndex(u => u.id === targetUnitId);
+        if (targetIdx === -1) return;
+
+        this.state.units[targetIdx] = {
+            ...this.state.units[targetIdx],
+            status: {
+                ...this.state.units[targetIdx].status,
+                missPulseText: text
+            }
+        };
+
+        window.setTimeout(() => {
+            const cleanupIdx = this.state.units.findIndex(u => u.id === targetUnitId);
+            if (cleanupIdx === -1) return;
+
+            this.state.units[cleanupIdx] = {
+                ...this.state.units[cleanupIdx],
+                status: {
+                    ...this.state.units[cleanupIdx].status,
+                    missPulseText: null
+                }
+            };
+            this.notify();
+            if (this.state.isMultiplayer && this.isSyncAuthority()) {
+                this.replicateAuthoritativeState();
+            }
+        }, 1200);
+    }
+
+    private shouldAttackMiss(attacker: Unit, target: Unit): boolean {
+        return target.level >= attacker.level + 10 && Math.random() < 0.25;
+    }
+
+    private canMindControlTarget(hacker: Unit, target: Unit): boolean {
+        return target.level < hacker.level + 10;
+    }
+
     private triggerTilePulse(key: string, kind: 'SABOTAGE' | 'ION_CANNON') {
         this.state.tilePulse = { key, kind };
         this.notify();
@@ -3802,6 +3967,8 @@ class GameService {
                 tile.elevation = 0;
                 tile.rotation = 0;
                 tile.landingZone = undefined;
+                tile.temporaryLandingZoneExpiresAtTurn = undefined;
+                tile.temporaryLandingZoneOriginalOwner = undefined;
             });
 
             if (brushSize === 1 && targetKeys.length === 1) {
@@ -3830,6 +3997,8 @@ class GameService {
             targetKeys.forEach(key => {
                 const tile = ensureTerrainTile(key);
                 tile.landingZone = clearZone ? undefined : playerId;
+                tile.temporaryLandingZoneExpiresAtTurn = undefined;
+                tile.temporaryLandingZoneOriginalOwner = undefined;
             });
 
             if (clearZone) {
@@ -4555,7 +4724,8 @@ class GameService {
 
                 this.executeTeleportRelocation(targetUnit.id, retreatPos, {
                     playerId,
-                    logMessage: `> TACTICAL RETREAT: ${targetUnit.type} RELOCATED TO ${retreatPos.x},${retreatPos.z}`
+                    logMessage: `> TACTICAL RETREAT: ${targetUnit.type} RELOCATED TO ${retreatPos.x},${retreatPos.z}`,
+                    wormholeLandingZoneMode: this.playerHasWormholeTalent(playerId) ? 'SOURCE_ONLY' : 'NONE'
                 });
 
                 this.checkWinCondition();
@@ -4579,10 +4749,7 @@ class GameService {
                     return;
                 }
 
-                this.state.terrain[tileKey] = {
-                    ...targetTile,
-                    landingZone: undefined
-                };
+                this.clearLandingZoneOwnership(tileKey, targetTile.landingZone);
 
                 if (!this.state.isDevMode) {
                     const newDeck = [...deck];
@@ -4928,7 +5095,7 @@ class GameService {
 
         // Apply
         validTiles.forEach(key => {
-            this.state.terrain[key].landingZone = playerId;
+            this.setPermanentLandingZone(key, playerId);
         });
 
         this.consumeActionCard(playerId, UnitType.FORWARD_BASE, this.state.selectedCardId);
@@ -4996,7 +5163,8 @@ class GameService {
             window.setTimeout(() => {
                 this.executeTeleportRelocation(unit.id, retreatPos, {
                     playerId,
-                    logMessage: message
+                    logMessage: message,
+                    wormholeLandingZoneMode: this.playerHasWormholeTalent(playerId) ? 'SOURCE_ONLY' : 'NONE'
                 });
             }, delayMs);
             delayMs += 260;
@@ -5356,6 +5524,11 @@ class GameService {
         const hacker = this.state.units[sourceIdx];
         const target = this.state.units[targetIdx];
 
+        if (!this.canMindControlTarget(hacker, target)) {
+            this.log(`> TARGET LEVEL TOO HIGH FOR UPLINK`, hacker.playerId);
+            return;
+        }
+
         if (!isRemote && this.state.isMultiplayer) {
             this.dispatchAction('MIND_CONTROL_TARGET', { sourceUnitId, targetUnitId });
             return;
@@ -5500,7 +5673,8 @@ class GameService {
         this.executeTeleportRelocation(sourceUnitId, { x, z }, {
             playerId: unit.playerId,
             logMessage: `> UNIT TELEPORTED TO ${x},${z}`,
-            energyCost: 25
+            energyCost: 25,
+            wormholeLandingZoneMode: this.playerHasWormholeTalent(unit.playerId) ? 'SOURCE_AND_DESTINATION' : 'NONE'
         });
 
         if (!isRemote) {
@@ -5701,7 +5875,7 @@ class GameService {
             maxAttacks: stats.maxAttacks || 1
         };
         const unitId = idOverride || `unit-${Date.now()}-${Math.random()}`;
-        const effects = hasTalent('t7')
+        const effects = hasTalent('t7') && !BUILDING_TYPES.includes(type)
             ? [this.createKineticShieldEffect(unitId)]
             : [];
 
@@ -6187,6 +6361,8 @@ class GameService {
 	        const attackerIdx = this.state.units.findIndex(u => u.id === attackerId);
 	        const targetIdx = this.state.units.findIndex(u => u.id === targetId);
             let directDamagePulse: { unitId: string; amount: number } | null = null;
+            let directMissPulseTargetId: string | null = null;
+            let attackMissed = false;
 
         if (attackerIdx === -1) return;
 
@@ -6204,56 +6380,63 @@ class GameService {
         if (targetIdx !== -1) {
             const target = updatedUnits[targetIdx];
             const attacker = updatedUnits[attackerIdx];
-            const damage = this.getEffectiveAttack(attacker);
-            const damageResult = this.applyDamageToUnit(target, damage);
+            const remainingAttacks = attacker.stats.maxAttacks - updatedUnits[attackerIdx].status.attacksUsed;
 
-            if (damageResult.wasInvulnerable) {
-                this.log(`> ATTACK DEFLECTED: IMMORTALITY SHIELD`, attacker.playerId);
+            if (this.shouldAttackMiss(attacker, target)) {
+                attackMissed = true;
+                directMissPulseTargetId = target.id;
+                this.log(`> ${attacker.type} FIRES ON ${target.type}: MISS${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
             } else {
-                updatedUnits[targetIdx] = damageResult.unit;
-                if (damageResult.hpDamage > 0) {
-                    directDamagePulse = { unitId: target.id, amount: damageResult.hpDamage };
-                }
-                const remainingAttacks = attacker.stats.maxAttacks - updatedUnits[attackerIdx].status.attacksUsed;
-                const absorptionSuffix = damageResult.shieldAbsorbed > 0
-                    ? ` (${damageResult.shieldAbsorbed} ABSORBED${damageResult.shieldBroken ? ', SHIELD DOWN' : ''})`
-                    : '';
+                const damage = this.getEffectiveAttack(attacker);
+                const damageResult = this.applyDamageToUnit(target, damage);
 
-                if (damageResult.hpDamage > 0) {
-                    this.log(`> ${attacker.type} FIRES ON ${target.type}: -${damageResult.hpDamage} HP${absorptionSuffix}${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
-                } else if (damageResult.shieldAbsorbed > 0) {
-                    this.log(`> ${attacker.type} FIRES ON ${target.type}: KINETIC SHIELD ABSORBS ${damageResult.shieldAbsorbed}${damageResult.shieldBroken ? ' AND COLLAPSES' : ''}${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+                if (damageResult.wasInvulnerable) {
+                    this.log(`> ATTACK DEFLECTED: IMMORTALITY SHIELD`, attacker.playerId);
                 } else {
-                    this.log(`> ${attacker.type} FIRES ON ${target.type}: NO DAMAGE${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
-                }
-
-                // BREAK MIND CONTROL IF HACKER IS DAMAGED
-                if (damageResult.hpDamage > 0 && target.status.mindControlTargetId) {
-                    const victimId = target.status.mindControlTargetId;
-                    const victimIdx = updatedUnits.findIndex(u => u.id === victimId);
-                    if (victimIdx !== -1 && updatedUnits[victimIdx].status.originalPlayerId) {
-                        updatedUnits[victimIdx] = {
-                            ...updatedUnits[victimIdx],
-                            playerId: updatedUnits[victimIdx].status.originalPlayerId!,
-                            status: { ...updatedUnits[victimIdx].status, originalPlayerId: null }
-                        };
-                        this.log(`> HACKER DISRUPTED: CONNECTION SEVERED`);
+                    updatedUnits[targetIdx] = damageResult.unit;
+                    if (damageResult.hpDamage > 0) {
+                        directDamagePulse = { unitId: target.id, amount: damageResult.hpDamage };
                     }
-                    updatedUnits[targetIdx] = {
-                        ...updatedUnits[targetIdx],
-                        status: { ...updatedUnits[targetIdx].status, mindControlTargetId: null }
-                    };
-                }
+                    const absorptionSuffix = damageResult.shieldAbsorbed > 0
+                        ? ` (${damageResult.shieldAbsorbed} ABSORBED${damageResult.shieldBroken ? ', SHIELD DOWN' : ''})`
+                        : '';
 
-                if (updatedUnits[targetIdx].stats.hp === 0) {
-                    this.log(`> TARGET ELIMINATED: ${target.type}`, attacker.playerId);
-                    updatedUnits[targetIdx].status.isDying = true;
-                    updatedUnits[attackerIdx].status.autoAttackTargetId = null;
-                    setTimeout(() => { this.removeUnit(targetId); }, 1500);
+                    if (damageResult.hpDamage > 0) {
+                        this.log(`> ${attacker.type} FIRES ON ${target.type}: -${damageResult.hpDamage} HP${absorptionSuffix}${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+                    } else if (damageResult.shieldAbsorbed > 0) {
+                        this.log(`> ${attacker.type} FIRES ON ${target.type}: KINETIC SHIELD ABSORBS ${damageResult.shieldAbsorbed}${damageResult.shieldBroken ? ' AND COLLAPSES' : ''}${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+                    } else {
+                        this.log(`> ${attacker.type} FIRES ON ${target.type}: NO DAMAGE${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
+                    }
+
+                    // BREAK MIND CONTROL IF HACKER IS DAMAGED
+                    if (damageResult.hpDamage > 0 && target.status.mindControlTargetId) {
+                        const victimId = target.status.mindControlTargetId;
+                        const victimIdx = updatedUnits.findIndex(u => u.id === victimId);
+                        if (victimIdx !== -1 && updatedUnits[victimIdx].status.originalPlayerId) {
+                            updatedUnits[victimIdx] = {
+                                ...updatedUnits[victimIdx],
+                                playerId: updatedUnits[victimIdx].status.originalPlayerId!,
+                                status: { ...updatedUnits[victimIdx].status, originalPlayerId: null }
+                            };
+                            this.log(`> HACKER DISRUPTED: CONNECTION SEVERED`);
+                        }
+                        updatedUnits[targetIdx] = {
+                            ...updatedUnits[targetIdx],
+                            status: { ...updatedUnits[targetIdx].status, mindControlTargetId: null }
+                        };
+                    }
+
+                    if (updatedUnits[targetIdx].stats.hp === 0) {
+                        this.log(`> TARGET ELIMINATED: ${target.type}`, attacker.playerId);
+                        updatedUnits[targetIdx].status.isDying = true;
+                        updatedUnits[attackerIdx].status.autoAttackTargetId = null;
+                        setTimeout(() => { this.removeUnit(targetId); }, 1500);
+                    }
                 }
             }
 
-            if (attacker.type === UnitType.TITAN) {
+            if (!attackMissed && attacker.type === UnitType.TITAN) {
                 this.log(`> SPLASH DAMAGE DETECTED`, attacker.playerId);
                 // Commit single-target attack changes before resolving splash, then
                 // continue with the post-splash unit snapshot.
@@ -6269,6 +6452,9 @@ class GameService {
 	        this.state.units = updatedUnits;
             if (directDamagePulse) {
                 this.triggerDamagePulses([directDamagePulse]);
+            }
+            if (directMissPulseTargetId) {
+                this.triggerMissPulse(directMissPulseTargetId);
             }
 	        this.notify();
 	        this.replicateAuthoritativeState();
@@ -6458,19 +6644,24 @@ class GameService {
             playerId: PlayerId;
             logMessage: string;
             energyCost?: number;
+            wormholeLandingZoneMode?: 'NONE' | 'SOURCE_ONLY' | 'SOURCE_AND_DESTINATION';
         }
     ) {
         const startUnitIdx = this.state.units.findIndex(u => u.id === unitId);
         if (startUnitIdx === -1) return;
-
-        this.state.units[startUnitIdx] = {
-            ...this.state.units[startUnitIdx],
+        const sourceUnit = this.state.units[startUnitIdx];
+        const sourcePosition = { ...sourceUnit.position };
+        const sourceSize = sourceUnit.stats.size;
+        const startUnits = [...this.state.units];
+        startUnits[startUnitIdx] = {
+            ...sourceUnit,
             movePath: [],
             status: {
-                ...this.state.units[startUnitIdx].status,
+                ...sourceUnit.status,
                 isTeleporting: true
             }
         };
+        this.state.units = startUnits;
         this.notify();
         this.replicateAuthoritativeState();
 
@@ -6479,7 +6670,8 @@ class GameService {
             if (moveIdx === -1) return;
 
             const movingUnit = this.state.units[moveIdx];
-            this.state.units[moveIdx] = {
+            const movedUnits = [...this.state.units];
+            movedUnits[moveIdx] = {
                 ...movingUnit,
                 position: { ...destination },
                 movePath: [],
@@ -6492,6 +6684,14 @@ class GameService {
                     isTeleporting: true
                 }
             };
+            this.state.units = movedUnits;
+
+            if (options.wormholeLandingZoneMode === 'SOURCE_ONLY' || options.wormholeLandingZoneMode === 'SOURCE_AND_DESTINATION') {
+                this.createTemporaryLandingZone(options.playerId, sourcePosition, sourceSize);
+            }
+            if (options.wormholeLandingZoneMode === 'SOURCE_AND_DESTINATION') {
+                this.createTemporaryLandingZone(options.playerId, destination, movingUnit.stats.size);
+            }
 
             this.log(options.logMessage, options.playerId);
             this.notify();
@@ -6502,13 +6702,15 @@ class GameService {
             const endIdx = this.state.units.findIndex(u => u.id === unitId);
             if (endIdx === -1) return;
 
-            this.state.units[endIdx] = {
-                ...this.state.units[endIdx],
+            const endUnits = [...this.state.units];
+            endUnits[endIdx] = {
+                ...endUnits[endIdx],
                 status: {
-                    ...this.state.units[endIdx].status,
+                    ...endUnits[endIdx].status,
                     isTeleporting: false
                 }
             };
+            this.state.units = endUnits;
             this.notify();
             this.replicateAuthoritativeState();
         }, 420);
@@ -6525,11 +6727,10 @@ class GameService {
             const owner = unitToRemove.playerId;
             Object.keys(this.state.terrain).forEach((key) => {
                 const tile = this.state.terrain[key];
-                if (tile?.landingZone === owner) {
-                    this.state.terrain[key] = {
-                        ...tile,
-                        landingZone: undefined
-                    };
+                if (!tile) return;
+
+                if (tile.landingZone === owner || tile.temporaryLandingZoneOriginalOwner === owner) {
+                    this.clearLandingZoneOwnership(key, owner);
                 }
             });
 
@@ -7064,23 +7265,34 @@ class GameService {
         this.endTurn(this.state.units);
     }
 
-    public chooseTalent(talent: Talent, isRemote: boolean = false) {
+    public chooseTalent(talent: Talent, isRemote: boolean = false, playerIdOverride?: PlayerId) {
         if (this.state.appStatus !== AppStatus.TALENT_SELECTION) return;
-        const player = this.state.currentTurn;
+        const player = playerIdOverride || this.state.currentTurn;
         if (!isRemote && this.state.isMultiplayer && this.state.myPlayerId !== player) return;
+
+        if (player !== this.state.currentTurn) {
+            this.log(`> TALENT PICK REJECTED: STALE PLAYER CONTEXT`, player);
+            return;
+        }
+
+        const offeredTalent = this.state.talentChoices.find((choice) => choice.id === talent.id);
+        if (!offeredTalent) {
+            this.log(`> TALENT PICK REJECTED: OFFER EXPIRED`, player);
+            return;
+        }
 
         if (!isRemote && this.state.isMultiplayer) {
             this.dispatchAction('TALENT_CHOOSE', { playerId: player, talentId: talent.id });
             return;
         }
 
-        this.state.playerTalents[player] = [...this.state.playerTalents[player], talent];
-        this.log(`> TALENT ACQUIRED: ${talent.name.toUpperCase()}`, player);
+        this.state.playerTalents[player] = [...this.state.playerTalents[player], offeredTalent];
+        this.log(`> TALENT ACQUIRED: ${offeredTalent.name.toUpperCase()}`, player);
 
         // --- IMMEDIATE EFFECTS ---
 
         // t1: Global Nanites
-        if (talent.id === 't1') {
+        if (offeredTalent.id === 't1') {
             let healCount = 0;
             const newUnits = this.state.units.map(u => {
                 if (u.playerId === player && u.stats.hp < u.stats.maxHp) {
@@ -7095,7 +7307,7 @@ class GameService {
         }
 
         // t2: Black Budget
-        if (talent.id === 't2') {
+        if (offeredTalent.id === 't2') {
             const amount = 150;
             this.state.credits = {
                 ...this.state.credits,
@@ -7105,7 +7317,7 @@ class GameService {
         }
 
         // t3: Servo Overclock (Immediate update for existing units)
-        if (talent.id === 't3') {
+        if (offeredTalent.id === 't3') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.stats.movement > 0) {
                     return { ...u, stats: { ...u.stats, movement: u.stats.movement + 1 } };
@@ -7116,7 +7328,7 @@ class GameService {
         }
 
         // t4: Advanced Optics (Immediate update for existing units)
-        if (talent.id === 't4') {
+        if (offeredTalent.id === 't4') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.stats.range > 1) {
                     return { ...u, stats: { ...u.stats, range: u.stats.range + 1 } };
@@ -7127,17 +7339,17 @@ class GameService {
         }
 
         // t7: Kinetic Shields (Immediate application to existing units)
-        if (talent.id === 't7') {
+        if (offeredTalent.id === 't7') {
             this.state.units = this.state.units.map(u => (
-                u.playerId === player
+                u.playerId === player && !BUILDING_TYPES.includes(u.type)
                     ? this.applyKineticShield(u)
                     : u
             ));
-            this.log(`> KINETIC SHIELDS: ALL FRIENDLY UNITS PROTECTED`, player);
+            this.log(`> KINETIC SHIELDS: ALL FRIENDLY NON-BUILDING UNITS PROTECTED`, player);
         }
 
         // t8: Marine Upgrade (Immediate update for existing units)
-        if (talent.id === 't8' || talent.id === 't16') {
+        if (offeredTalent.id === 't8' || offeredTalent.id === 't16') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.type === UnitType.SOLDIER) {
                     return {
@@ -7151,11 +7363,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> ${talent.name.toUpperCase()}: CYBER MARINES BOOSTED`, player);
+            this.log(`> ${offeredTalent.name.toUpperCase()}: CYBER MARINES BOOSTED`, player);
         }
 
         // t9: Marine Suite (Immediate update for existing units)
-        if (talent.id === 't9' || talent.id === 't17') {
+        if (offeredTalent.id === 't9' || offeredTalent.id === 't17') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.type === UnitType.SOLDIER) {
                     return {
@@ -7170,11 +7382,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> ${talent.name.toUpperCase()}: CYBER MARINES HARDENED`, player);
+            this.log(`> ${offeredTalent.name.toUpperCase()}: CYBER MARINES HARDENED`, player);
         }
 
         // t10: Dreadnought Offense (Immediate update for existing units)
-        if (talent.id === 't10' || talent.id === 't18') {
+        if (offeredTalent.id === 't10' || offeredTalent.id === 't18') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.type === UnitType.HEAVY) {
                     return {
@@ -7188,11 +7400,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> ${talent.name.toUpperCase()}: WEAPONS HOT`, player);
+            this.log(`> ${offeredTalent.name.toUpperCase()}: WEAPONS HOT`, player);
         }
 
         // t11: Dreadnought Armor (Immediate update for existing units)
-        if (talent.id === 't11' || talent.id === 't19') {
+        if (offeredTalent.id === 't11' || offeredTalent.id === 't19') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.type === UnitType.HEAVY) {
                     return {
@@ -7206,11 +7418,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> ${talent.name.toUpperCase()}: PLATING REINFORCED`, player);
+            this.log(`> ${offeredTalent.name.toUpperCase()}: PLATING REINFORCED`, player);
         }
 
         // t12: Drone Upgrade (Immediate update for existing units)
-        if (talent.id === 't12' || talent.id === 't20') {
+        if (offeredTalent.id === 't12' || offeredTalent.id === 't20') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && this.isDroneUnit(u)) {
                     return {
@@ -7225,11 +7437,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> ${talent.name.toUpperCase()}: DRONES OPTIMIZED`, player);
+            this.log(`> ${offeredTalent.name.toUpperCase()}: DRONES OPTIMIZED`, player);
         }
 
         // t13: Tanks Upgrade (Immediate update for existing units)
-        if (talent.id === 't13' || talent.id === 't21') {
+        if (offeredTalent.id === 't13' || offeredTalent.id === 't21') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && (u.type === UnitType.LIGHT_TANK || u.type === UnitType.HEAVY_TANK)) {
                     return {
@@ -7244,11 +7456,11 @@ class GameService {
                 }
                 return u;
             });
-            this.log(`> ${talent.name.toUpperCase()}: ARMOR COLUMN ENHANCED`, player);
+            this.log(`> ${offeredTalent.name.toUpperCase()}: ARMOR COLUMN ENHANCED`, player);
         }
 
         // t24: Reinforced Walls (Immediate update for existing units)
-        if (talent.id === 't24') {
+        if (offeredTalent.id === 't24') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && (u.type === UnitType.WALL || u.type === UnitType.TOWER || u.type === UnitType.CHARGING_STATION)) {
                     return {
@@ -7266,7 +7478,7 @@ class GameService {
         }
 
         // t26: Nano Blades (Immediate update for existing units)
-        if (talent.id === 't26') {
+        if (offeredTalent.id === 't26') {
             this.state.units = this.state.units.map(u => {
                 if (u.playerId === player && u.type === UnitType.CONE) {
                     return {
@@ -7285,17 +7497,17 @@ class GameService {
         }
 
         // t27: Negotiator
-        if (talent.id === 't27') {
+        if (offeredTalent.id === 't27') {
             this.log(`> NEGOTIATOR: REROLLS DISCOUNTED AND TRANSIT SELLS ENABLED`, player);
         }
 
         // t28: Rapid Deployment
-        if (talent.id === 't28') {
+        if (offeredTalent.id === 't28') {
             this.log(`> RAPID DEPLOYMENT: NEW SUMMONS IGNORE SUMMONING SICKNESS`, player);
         }
 
         // t29: Portal Exchange
-        if (talent.id === 't29') {
+        if (offeredTalent.id === 't29') {
             if (this.applyRitualPortalDamage(player, 300)) {
                 this.state.credits = {
                     ...this.state.credits,
@@ -7306,12 +7518,17 @@ class GameService {
         }
 
         // t30: Economist
-        if (talent.id === 't30') {
+        if (offeredTalent.id === 't30') {
             this.log(`> ECONOMIST: TURN INCOME INCREASED AND FIELD PICKUPS DOUBLED`, player);
         }
 
+        // t31: Wormhole
+        if (offeredTalent.id === 't31') {
+            this.log(`> WORMHOLE: TELEPORTS NOW OPEN TEMPORARY LANDING ZONES`, player);
+        }
+
         // t14: Perk Expert
-        if (talent.id === 't14') {
+        if (offeredTalent.id === 't14') {
             this.state.credits = {
                 ...this.state.credits,
                 [player]: this.state.credits[player] + 50
@@ -7324,7 +7541,7 @@ class GameService {
         }
 
         // t15: Ritual
-        if (talent.id === 't15') {
+        if (offeredTalent.id === 't15') {
             if (this.applyRitualPortalDamage(player, 1500)) {
                 this.state.pendingTalentQueue = [player, player, player, ...this.state.pendingTalentQueue];
                 this.log(`> RITUAL EXECUTED: ARC PORTAL SACRIFICED FOR 3 BONUS DRAFTS`, player);
@@ -7459,6 +7676,7 @@ class GameService {
                 const nextTurn = this.getNextTurnInOrder(this.state.currentTurn, turnOrder);
                 const didAdvanceRound = this.isLastTurnInOrder(this.state.currentTurn, turnOrder);
                 let nextRound = this.state.roundNumber;
+                const nextTurnCount = this.state.turnCount + 1;
 
                 if (didAdvanceRound) {
                     nextRound++;
@@ -7481,10 +7699,12 @@ class GameService {
                     turnStartedAt: Date.now(),
                     turnOvertimeDamageApplied: 0,
                     roundNumber: nextRound,
+                    turnCount: nextTurnCount,
                     selectedCardId: this.getTurnStartSelectedCardId(nextTurn),
                     selectedUnitId: null,
                     interactionState: { mode: 'NORMAL' }
                 };
+                this.cleanupExpiredTemporaryLandingZones();
                 this.awardTurnStartIncome(nextTurn, nextRound);
                 this.updateFogOfWar();
 

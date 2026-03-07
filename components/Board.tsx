@@ -615,9 +615,12 @@ const Board: React.FC<BoardProps> = ({
             isPlacementMode = true;
             placementFootprint.add(key);
 
+            const sourceUnit = units.find(u => u.id === interactionState.sourceUnitId);
             const targetUnit = getUnitAt(x, z);
             const isValid = !!(targetUnit
+                && sourceUnit
                 && arePlayersHostile(interactionState.playerId, targetUnit.playerId)
+                && targetUnit.level < sourceUnit.level + 10
                 && targetUnit.type !== UnitType.TITAN
                 && targetUnit.type !== UnitType.PORTAL
                 && targetUnit.type !== UnitType.SPIKE);
@@ -710,6 +713,8 @@ const Board: React.FC<BoardProps> = ({
             const card = gameService.getCard(selectedCardId);
             if (card) {
                 isPlacementMode = true;
+                const requiresZone = card.category !== CardCategory.ACTION;
+                const isDevMode = gameService['state'].isDevMode;
                 // Determine footprint
                 const size = card.category === CardCategory.ACTION ? 1 : (CARD_CONFIG[card.type]!.baseStats!.size || 1);
 
@@ -722,7 +727,13 @@ const Board: React.FC<BoardProps> = ({
                 // Check if ANY part of footprint is invalid
                 let valid = true;
                 for (const pKey of placementFootprint) {
-                    if (occupiedSet.has(pKey) || !revealedSet.has(pKey)) {
+                    const tile = terrainData[pKey];
+                    if (
+                        occupiedSet.has(pKey)
+                        || !revealedSet.has(pKey)
+                        || !tile
+                        || (requiresZone && !isDevMode && tile.landingZone !== currentTurnPlayerId)
+                    ) {
                         valid = false;
                         break;
                     }
