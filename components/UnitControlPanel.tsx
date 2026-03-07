@@ -739,7 +739,7 @@ const UnitControlPanel: React.FC<UnitControlPanelProps> = ({
                                         label="SYSTEM PURGE"
                                         icon="P"
                                         cost={25}
-                                        description="Remove all negative effects from a friendly creature or machine within 2 tiles."
+                                        description="Remove all negative effects from a friendly creature or machine within 5 tiles."
                                         onClick={() => gameService.activateDispelAbility(unit.id)}
                                         disabled={actionsLocked || unit.stats.energy < 25 || !!unit.status.mindControlTargetId}
                                         color="#38bdf8"

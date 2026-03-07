@@ -188,6 +188,7 @@ interface RemoteUnitLocator {
 interface ShopSyncPayload {
     playerId: PlayerId;
     credits: number;
+    shopBudgetRemaining: number;
     shopStock: ShopItem[];
     pendingOrders: ShopItem[];
     deck: Card[];
@@ -209,6 +210,8 @@ const PROJECTILE_ATTACK_SPEEDS: Partial<Record<UnitType, number>> = {
 };
 
 const DEFAULT_PROJECTILE_ATTACK_SPEED = 32;
+const SHOP_STOCK_BUDGET = 1000;
+const INITIAL_DECK_BUDGET = 500;
 const getFluxTowerUnlockedUpgradeCount = (level: number) =>
     Math.max(0, Math.floor(level / FLUX_TOWER_ATTACK_UPGRADE_LEVEL_STEP));
 
@@ -251,6 +254,7 @@ class GameService {
         'DISPEL_TARGET',
         'MIND_CONTROL_TARGET',
         'MIND_CONTROL_BREAK',
+        'LOGISTICS_DELAY_EXECUTE',
         'SUMMON_ACTIVATE',
         'SUMMON_PLACE',
         'WALL_CHAIN_PLACE',
@@ -1092,6 +1096,7 @@ class GameService {
             units: this.state.units.map((unit) => ({ ...unit })),
             collectibles: this.state.collectibles.map((collectible) => ({ ...collectible })),
             credits: { ...this.state.credits },
+            shopBudgetRemaining: { ...this.state.shopBudgetRemaining },
             mapBounds: this.state.mapBounds,
             deletedTiles: [...this.state.deletedTiles],
             currentTurn: this.state.currentTurn,
@@ -1281,6 +1286,9 @@ class GameService {
             case 'MIND_CONTROL_BREAK':
                 this.breakMindControl(data.hackerId);
                 break;
+            case 'LOGISTICS_DELAY_EXECUTE':
+                this.applyLogisticsDelay(data.playerId, true);
+                break;
             case 'SUMMON_ACTIVATE':
                 this.activateSummonAbility(data.unitId, true);
                 break;
@@ -1331,6 +1339,9 @@ class GameService {
                 this.state.terrain = data.terrain;
                 this.state.decks = data.decks;
                 this.state.credits = data.credits;
+                if (data.shopBudgetRemaining) {
+                    this.state.shopBudgetRemaining = data.shopBudgetRemaining;
+                }
                 this.state.collectibles = data.collectibles || [];
                 if (data.mapBounds) {
                     this.state.mapBounds = data.mapBounds;
@@ -1539,6 +1550,7 @@ class GameService {
 
             // Shop Init
             credits: this.createPerPlayerRecord((playerId) => playerId === PlayerId.NEUTRAL ? 0 : INITIAL_CREDITS),
+            shopBudgetRemaining: this.createPerPlayerRecord((playerId) => playerId === PlayerId.NEUTRAL ? 0 : SHOP_STOCK_BUDGET),
             shopStock: this.createPerPlayerRecord(() => []),
             pendingOrders: this.createPerPlayerRecord(() => []),
             nextDeliveryRound: 10,
@@ -1758,6 +1770,17 @@ class GameService {
             return Math.floor(unit.stats.attack / 2);
         }
         return unit.stats.attack;
+    }
+
+    private getAttackDamage(attacker: Unit, target: Unit): number {
+        const baseDamage = this.getEffectiveAttack(attacker);
+        const distance = this.getUnitFootprintDistance(attacker, target);
+
+        if (attacker.type === UnitType.SNIPER && distance >= 7 && distance <= 8) {
+            return baseDamage * 2;
+        }
+
+        return baseDamage;
     }
 
     private createMobilitySabotageEffect(unitId: string, existingEffectId?: string): Effect {
@@ -2397,6 +2420,7 @@ class GameService {
     private buildShopSyncPayload(
         playerId: PlayerId,
         credits: number,
+        shopBudgetRemaining: number,
         shopStock: ShopItem[],
         pendingOrders: ShopItem[],
         deck: Card[],
@@ -2405,6 +2429,7 @@ class GameService {
         return {
             playerId,
             credits,
+            shopBudgetRemaining,
             shopStock: shopStock.map((shopItem) => ({ ...shopItem })),
             pendingOrders: pendingOrders.map((order) => ({ ...order })),
             deck: deck.map((card) => this.cloneCardForSync(card)),
@@ -2419,6 +2444,7 @@ class GameService {
         this.state = {
             ...this.state,
             credits: { ...this.state.credits, [playerId]: payload.credits },
+            shopBudgetRemaining: { ...this.state.shopBudgetRemaining, [playerId]: payload.shopBudgetRemaining },
             shopStock: { ...this.state.shopStock, [playerId]: payload.shopStock.map((shopItem) => ({ ...shopItem })) },
             pendingOrders: { ...this.state.pendingOrders, [playerId]: payload.pendingOrders.map((order) => ({ ...order })) },
             decks: { ...this.state.decks, [playerId]: payload.deck.map((card) => this.cloneCardForSync(card)) }
@@ -2456,6 +2482,7 @@ class GameService {
         const nextCredits = isDevShop
             ? this.state.credits[playerId]
             : this.state.credits[playerId] - item.cost;
+        const nextShopBudgetRemaining = Math.max(0, this.state.shopBudgetRemaining[playerId] - item.cost);
         const nextShopStock = this.state.shopStock[playerId].filter(s => s.id !== item.id);
         let nextPendingOrders = [...this.state.pendingOrders[playerId]];
         let nextDeck = [...this.state.decks[playerId]];
@@ -2485,6 +2512,7 @@ class GameService {
         const payload = this.buildShopSyncPayload(
             playerId,
             nextCredits,
+            nextShopBudgetRemaining,
             nextShopStock,
             nextPendingOrders,
             nextDeck,
@@ -2520,6 +2548,7 @@ class GameService {
             const nextCredits = isDevShop
                 ? this.state.credits[playerId]
                 : this.state.credits[playerId] + refundAmount;
+            const nextShopBudgetRemaining = Math.min(SHOP_STOCK_BUDGET, this.state.shopBudgetRemaining[playerId] + refundedOrder.cost);
             const { purchaseRound, ...stockItem } = refundedOrder;
             const nextShopStock = [...this.state.shopStock[playerId], stockItem as ShopItem];
             const nextDeck = [...this.state.decks[playerId]];
@@ -2527,6 +2556,7 @@ class GameService {
             const payload = this.buildShopSyncPayload(
                 playerId,
                 nextCredits,
+                nextShopBudgetRemaining,
                 nextShopStock,
                 nextPendingOrders,
                 nextDeck,
@@ -2556,22 +2586,23 @@ class GameService {
             return;
         }
 
-        const currentStockCount = this.state.shopStock[playerId].length;
-        if (currentStockCount === 0) {
-            this.log("> STOCK EMPTY. REROLL ABORTED.");
+        const remainingBudget = this.state.shopBudgetRemaining[playerId];
+        if (remainingBudget <= 0) {
+            this.log("> SHOP BUDGET EXHAUSTED. REROLL ABORTED.");
             return;
         }
 
         const nextCredits = isDevShop
             ? this.state.credits[playerId]
             : this.state.credits[playerId] - rerollCost;
-        const nextShopStock = this._generateRandomStock(currentStockCount, playerId);
+        const nextShopStock = this._generateRandomStock(playerId, remainingBudget);
         const nextPendingOrders = [...this.state.pendingOrders[playerId]];
         const nextDeck = [...this.state.decks[playerId]];
 
         const payload = this.buildShopSyncPayload(
             playerId,
             nextCredits,
+            remainingBudget,
             nextShopStock,
             nextPendingOrders,
             nextDeck,
@@ -2588,58 +2619,56 @@ class GameService {
         this.applyShopSyncPayload(payload);
     }
 
-    private generateShopStock(deliveryRound: number) {
-        const totalUnits = deliveryRound;
+    private generateShopStock(_deliveryRound: number) {
+        this.state.shopBudgetRemaining = this.createPerPlayerRecord((playerId) =>
+            playerId === PlayerId.NEUTRAL || !this.state.activePlayerIds.includes(playerId) ? 0 : SHOP_STOCK_BUDGET
+        );
         this.state.shopStock = this.createPerPlayerRecord((playerId) => {
             if (playerId === PlayerId.NEUTRAL || !this.state.activePlayerIds.includes(playerId)) {
                 return [];
             }
-            return this._generateRandomStock(totalUnits, playerId);
+            return this._generateRandomStock(playerId, this.state.shopBudgetRemaining[playerId]);
         });
     }
 
-    private _generateRandomStock(count: number, playerId: PlayerId): ShopItem[] {
-        const maxPerType = Math.max(1, Math.floor(count / 5));
+    private _generateRandomStock(playerId: PlayerId, budgetCeiling: number): ShopItem[] {
         const stock: ShopItem[] = [];
 
         const allowedTypes = this.state.unlockedUnits[playerId].filter(type =>
             this.state.isDevMode || !DEV_ONLY_UNITS.includes(type)
         );
-        const typeCounts: Record<string, number> = {};
 
-        if (allowedTypes.length === 0) return [];
+        if (allowedTypes.length === 0 || budgetCeiling <= 0) return [];
 
+        let totalCost = 0;
         let attempts = 0;
-        while (stock.length < count && attempts < 500) {
+        while (totalCost < budgetCeiling && attempts < 500) {
             attempts++;
             const type = allowedTypes[Math.floor(Math.random() * allowedTypes.length)];
-            const currentCount = typeCounts[type] || 0;
 
-            if (currentCount < maxPerType) {
-                const cost = CARD_CONFIG[type]?.cost || 100;
+            const cost = CARD_CONFIG[type]?.cost || 100;
 
-                // Delivery Logic
-                const rand = Math.random();
-                let deliveryTurns = 3; // Default
-                let isInstant = false;
+            // Delivery Logic
+            const rand = Math.random();
+            let deliveryTurns = 3; // Default
+            let isInstant = false;
 
-                if (rand < 0.01) {
-                    deliveryTurns = 0;
-                    isInstant = true;
-                } else {
-                    // 1, 2, or 3 (Equal probability)
-                    deliveryTurns = Math.floor(Math.random() * 3) + 1;
-                }
-
-                stock.push({
-                    id: `shop-item-${Date.now()}-${Math.random()}-${stock.length}`,
-                    type,
-                    cost,
-                    deliveryTurns,
-                    isInstant
-                });
-                typeCounts[type] = currentCount + 1;
+            if (rand < 0.01) {
+                deliveryTurns = 0;
+                isInstant = true;
+            } else {
+                // 1, 2, or 3 (Equal probability)
+                deliveryTurns = Math.floor(Math.random() * 3) + 1;
             }
+
+            stock.push({
+                id: `shop-item-${Date.now()}-${Math.random()}-${stock.length}`,
+                type,
+                cost,
+                deliveryTurns,
+                isInstant
+            });
+            totalCost += cost;
         }
         return stock;
     }
@@ -3107,6 +3136,9 @@ class GameService {
             credits: this.createPerPlayerRecord((playerId) =>
                 playerId === PlayerId.NEUTRAL || !activePlayerIds.includes(playerId) ? 0 : INITIAL_CREDITS
             ),
+            shopBudgetRemaining: this.createPerPlayerRecord((playerId) =>
+                playerId === PlayerId.NEUTRAL || !activePlayerIds.includes(playerId) ? 0 : SHOP_STOCK_BUDGET
+            ),
             pendingOrders: this.createPerPlayerRecord(() => []),
             shopStock: this.createPerPlayerRecord(() => []),
             nextDeliveryRound: 10,
@@ -3303,40 +3335,20 @@ class GameService {
     private generateDeck(playerId: PlayerId): Card[] {
         const cards: Card[] = [];
 
-        const fixedLoadout = [
-            UnitType.SOLDIER,
-            UnitType.SOLDIER,
-            UnitType.BOX,
-            UnitType.HEAVY,
-            UnitType.SUICIDE_DRONE,
-            UnitType.TOWER
-        ];
-
-        fixedLoadout.forEach((type, i) => {
-            const config = CARD_CONFIG[type]!;
-            const stats = config.baseStats as any;
-            cards.push({
-                id: `${playerId}-card-${Date.now()}-fixed-${i}`,
-                category: config.category!,
-                type: type,
-                name: config.name!,
-                description: config.description,
-                baseStats: stats,
-                cost: config.cost!
-            });
-        });
-
         const allowed = this.state.unlockedUnits[playerId].filter(type => !DEV_ONLY_UNITS.includes(type));
         if (allowed.length === 0) {
             return cards;
         }
 
-        for (let i = 0; i < 2; i++) {
+        let totalCost = 0;
+        let attempts = 0;
+        while (totalCost < INITIAL_DECK_BUDGET && attempts < 500) {
+            attempts++;
             const type = allowed[Math.floor(Math.random() * allowed.length)];
             const config = CARD_CONFIG[type]!;
             const stats = config.baseStats as any;
             cards.push({
-                id: `${playerId}-card-${Date.now()}-rnd-${i}`,
+                id: `${playerId}-card-${Date.now()}-rnd-${cards.length}`,
                 category: config.category!,
                 type,
                 name: config.name!,
@@ -3344,6 +3356,7 @@ class GameService {
                 baseStats: stats,
                 cost: config.cost!
             });
+            totalCost += config.cost || 0;
         }
 
         return cards;
@@ -5182,7 +5195,12 @@ class GameService {
         this.finalizeInteraction();
     }
 
-    private applyLogisticsDelay(playerId: PlayerId) {
+    private applyLogisticsDelay(playerId: PlayerId, isRemote: boolean = false) {
+        if (!isRemote && this.state.isMultiplayer) {
+            this.dispatchAction('LOGISTICS_DELAY_EXECUTE', { playerId });
+            return;
+        }
+
         let delayedCount = 0;
 
         this.getHostilePlayers(playerId).forEach((targetPlayerId) => {
@@ -5199,6 +5217,7 @@ class GameService {
         this.log(`> LOGISTICS DELAY: ${delayedCount} IN-TRANSIT ORDERS PUSHED BACK BY 3 TURNS`, playerId);
         this.checkWinCondition();
         this.notify();
+        this.replicateAuthoritativeState();
     }
 
     private applyMobilitySabotage(playerId: PlayerId) {
@@ -5471,7 +5490,7 @@ class GameService {
 
         const source = this.state.units[sourceIdx];
         const target = this.state.units[targetIdx];
-        const supportRange = 2;
+        const supportRange = 5;
 
         if (!isRemote && this.state.isMultiplayer) {
             this.dispatchAction('DISPEL_TARGET', { sourceUnitId, targetUnitId });
@@ -6352,6 +6371,9 @@ class GameService {
         if (!this.arePlayersHostile(attacker.playerId, target.playerId)) {
             return { isValid: false, reason: 'INVALID TARGET RELATION' };
         }
+        if (attacker.type === UnitType.SNIPER && distance === 1) {
+            return { isValid: false, reason: 'TARGET TOO CLOSE (MIN RANGE 2)' };
+        }
         if (distance > attacker.stats.range) { return { isValid: false, reason: `OUT OF RANGE (${distance}/${attacker.stats.range})` }; }
         if (!this.hasLineOfSight(attacker, target)) { return { isValid: false, reason: `LINE OF SIGHT BLOCKED` }; }
         return { isValid: true };
@@ -6387,7 +6409,7 @@ class GameService {
                 directMissPulseTargetId = target.id;
                 this.log(`> ${attacker.type} FIRES ON ${target.type}: MISS${remainingAttacks > 0 ? ` (+${remainingAttacks} READY)` : ''}`, attacker.playerId);
             } else {
-                const damage = this.getEffectiveAttack(attacker);
+                const damage = this.getAttackDamage(attacker, target);
                 const damageResult = this.applyDamageToUnit(target, damage);
 
                 if (damageResult.wasInvulnerable) {

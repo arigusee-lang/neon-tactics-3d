@@ -348,6 +348,7 @@ export interface GameState {
 
   // Economy & Shop
   credits: { [key in PlayerId]: number };
+  shopBudgetRemaining: { [key in PlayerId]: number };
   shopStock: { [key in PlayerId]: ShopItem[] }; // Items available to buy per player
   pendingOrders: { [key in PlayerId]: ShopItem[] }; // Items bought but waiting for delivery
   nextDeliveryRound: number; // 10, 25, 50, 100

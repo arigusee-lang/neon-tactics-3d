@@ -15,12 +15,13 @@ const UNIT_ABILITIES = [
     { id: 'ABIL_PHASE', name: 'Phase Shift', type: 'ACTIVE', cost: 25, description: 'Instantly teleport to any revealed coordinate on the map.', color: '#22d3ee', icon: 'T' },
     { id: 'ABIL_CRYO', name: 'Cryo Shot', type: 'ACTIVE', cost: 50, description: 'Freezes target unit for 2 turns, preventing movement and action.', color: '#67e8f9', icon: '❄️' },
     { id: 'ABIL_REPAIR', name: 'Nano-Repair', type: 'ACTIVE', cost: 25, description: 'Restores 50 HP to a friendly biological or mechanical unit.', color: '#10b981', icon: '+' },
-    { id: 'ABIL_DISPEL', name: 'System Purge', type: 'ACTIVE', cost: 25, description: 'Removes all negative effects from a friendly creature or machine within 2 tiles.', color: '#38bdf8', icon: 'P' },
+    { id: 'ABIL_DISPEL', name: 'System Purge', type: 'ACTIVE', cost: 25, description: 'Removes all negative effects from a friendly creature or machine within 5 tiles.', color: '#38bdf8', icon: 'P' },
     { id: 'ABIL_SUMMON', name: 'Swarm Link', type: 'ACTIVE', cost: 50, description: 'Deploys 2 temporary Scout Drones to adjacent tiles.', color: '#3b82f6', icon: 'S' },
     { id: 'ABIL_SUICIDE', name: 'Overload', type: 'ACTIVE', cost: 0, description: 'Overloads reactor core to deal massive area damage (50 DMG). Destroys unit.', color: '#ef4444', icon: '!' },
     { id: 'ABIL_DETONATE', name: 'Detonate', type: 'ACTIVE', cost: 0, description: 'Triggers explosive payload dealing 80 area damage. Consumes unit.', color: '#f97316', icon: 'X' },
     { id: 'ABIL_SPLASH', name: 'Splash Rounds', type: 'PASSIVE', cost: 0, description: 'Projectiles explode on impact, dealing 25 damage to adjacent tiles.', color: '#facc15', icon: '💥' },
     { id: 'ABIL_DOUBLE', name: 'Double Strike', type: 'PASSIVE', cost: 0, description: 'Neural overclock allows unit to perform two attack actions per turn.', color: '#f472b6', icon: '⚔️' },
+    { id: 'ABIL_DEADEYE', name: 'Deadeye', type: 'PASSIVE', cost: 0, description: 'Deals double damage at 7-8 range, but cannot attack targets at range 1.', color: '#f97316', icon: '100' },
     { id: 'ABIL_INDUCT', name: 'Inductive Field', type: 'PASSIVE', cost: 0, description: 'Wireless energy transfer restores 25 Energy to adjacent allies per turn.', color: '#22d3ee', icon: '???' },
 ];
 
@@ -30,6 +31,58 @@ const COLLECTIBLES = [
     { id: 'ENERGY_CELL', name: 'Plasma Cell', description: 'Restores 50 Energy to the unit that picks it up.', color: '#a855f7', icon: '???' },
     { id: 'PERK_CACHE', name: 'Perk Cache', description: 'Immediately opens a bonus talent draft for the collecting player.', color: '#38bdf8', icon: '*' }
 ];
+
+type UnitAbilityDetail = {
+    name: string;
+    type: 'ACTIVE' | 'PASSIVE';
+    costLabel: string;
+    description: string;
+    color: string;
+    icon: string;
+};
+
+const UNIT_ABILITY_DETAILS: Partial<Record<UnitType, UnitAbilityDetail[]>> = {
+    [UnitType.SOLDIER]: [
+        { name: 'Phase Shift', type: 'ACTIVE', costLabel: '25 EN', description: 'Teleport to any revealed coordinate.', color: '#22d3ee', icon: 'T' },
+        { name: 'Cryo Shot', type: 'ACTIVE', costLabel: '50 EN', description: 'Freeze a target unit for 2 turns.', color: '#67e8f9', icon: 'F' }
+    ],
+    [UnitType.HEAVY]: [
+        { name: 'Suicide Protocol', type: 'ACTIVE', costLabel: 'FREE', description: 'Self-destruct and deal 50 damage to adjacent units.', color: '#ef4444', icon: '!' }
+    ],
+    [UnitType.MEDIC]: [
+        { name: 'Nano-Repair', type: 'ACTIVE', costLabel: '25 EN', description: 'Heal a friendly creature within 2 tiles for 50 HP.', color: '#10b981', icon: '+' },
+        { name: 'Restore Energy', type: 'ACTIVE', costLabel: '25 EN', description: 'Restore 50 Energy to a friendly unit within 2 tiles.', color: '#8b5cf6', icon: 'EN' }
+    ],
+    [UnitType.HACKER]: [
+        { name: 'System Purge', type: 'ACTIVE', costLabel: '25 EN', description: 'Remove all negative effects from a friendly creature or machine within 5 tiles.', color: '#38bdf8', icon: 'P' },
+        { name: 'Mind Control', type: 'ACTIVE', costLabel: '50 EN', description: 'Take control of an enemy unit until it moves or takes damage.', color: '#22c55e', icon: 'MC' }
+    ],
+    [UnitType.CONE]: [
+        { name: 'Double Strike', type: 'PASSIVE', costLabel: 'PASSIVE', description: 'Can attack twice each turn.', color: '#f472b6', icon: '2X' },
+        { name: 'Summon Drones', type: 'ACTIVE', costLabel: '50 EN', description: 'Deploy 2 Scout Drones nearby.', color: '#3b82f6', icon: 'S' }
+    ],
+    [UnitType.SUICIDE_DRONE]: [
+        { name: 'Detonate', type: 'ACTIVE', costLabel: 'FREE', description: 'Trigger an 80-damage area explosion and consume the drone.', color: '#f97316', icon: 'X' }
+    ],
+    [UnitType.HEAVY_TANK]: [
+        { name: 'Double Strike', type: 'PASSIVE', costLabel: 'PASSIVE', description: 'Can attack twice each turn.', color: '#f472b6', icon: '2X' }
+    ],
+    [UnitType.SNIPER]: [
+        { name: 'Deadeye', type: 'PASSIVE', costLabel: 'PASSIVE', description: 'Deals double damage at 7-8 range, but cannot attack targets at range 1.', color: '#f97316', icon: '100' }
+    ],
+    [UnitType.REPAIR_BOT]: [
+        { name: 'Structural Repair', type: 'ACTIVE', costLabel: '25 EN', description: 'Repair a friendly building or machine within 2 tiles for 50 HP.', color: '#14b8a6', icon: 'R' }
+    ],
+    [UnitType.TITAN]: [
+        { name: 'Splash Rounds', type: 'PASSIVE', costLabel: 'PASSIVE', description: 'Basic attacks splash 25 damage onto adjacent tiles.', color: '#facc15', icon: 'AOE' }
+    ],
+    [UnitType.TOWER]: [
+        { name: 'Flux Overcharge', type: 'ACTIVE', costLabel: '$25', description: 'Spend credits to permanently gain +25 attack when a stored upgrade is available.', color: '#f59e0b', icon: 'UP' }
+    ],
+    [UnitType.CHARGING_STATION]: [
+        { name: 'Inductive Field', type: 'PASSIVE', costLabel: 'PASSIVE', description: 'Restore 25 Energy to adjacent allies at the end of turn.', color: '#22d3ee', icon: 'EN' }
+    ]
+};
 
 const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
     const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -221,6 +274,7 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
     const selectedTalent = selectedId && TALENT_POOL.find(t => t.id === selectedId);
     const selectedCollectible = selectedId && COLLECTIBLES.find(c => c.id === selectedId);
     const selectedIsDevOnly = selectedConfig ? DEV_ONLY_UNITS.includes(selectedId as UnitType) : false;
+    const selectedUnitAbilities = selectedId ? (UNIT_ABILITY_DETAILS[selectedId as UnitType] || []) : [];
     const selectedConfigDescription = selectedConfig && selectedId === UnitType.HACKER
         ? 'Tech specialist. Can disrupt hostile systems and purge allied status locks. Abilities: Mind Control, System Purge.'
         : selectedConfig && selectedId === UnitType.HEAVY_TANK
@@ -367,12 +421,20 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
 
                                 {/* Attributes Grid (Only for Units) */}
                                 {selectedConfig.baseStats && (
-                                    <div className="grid grid-cols-2 gap-2 mb-6">
+                                    <div className="grid grid-cols-3 gap-2 mb-6">
+                                        <div className="bg-white/5 p-2 rounded border border-white/10 flex flex-col items-center">
+                                            <span className="text-[9px] text-gray-500 font-bold uppercase">Cost</span>
+                                            <span className="text-sm font-mono font-bold text-white">${selectedConfig.cost}</span>
+                                        </div>
                                         <div className="bg-white/5 p-2 rounded border border-white/10 flex flex-col items-center">
                                             <span className="text-[9px] text-gray-500 font-bold uppercase">Integrity</span>
                                             <span className="text-sm font-mono font-bold text-white">
                                                 {selectedConfig.baseStats.hp >= 10000 ? 'INF' : selectedConfig.baseStats.hp}
                                             </span>
+                                        </div>
+                                        <div className="bg-white/5 p-2 rounded border border-white/10 flex flex-col items-center">
+                                            <span className="text-[9px] text-gray-500 font-bold uppercase">Max Energy</span>
+                                            <span className="text-sm font-mono font-bold text-white">{selectedConfig.baseStats.maxEnergy ?? 0}</span>
                                         </div>
                                         <div className="bg-white/5 p-2 rounded border border-white/10 flex flex-col items-center">
                                             <span className="text-[9px] text-gray-500 font-bold uppercase">Attack</span>
@@ -389,6 +451,54 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                                     </div>
                                 )}
 
+                                {selectedConfig.category === CardCategory.UNIT && (
+                                    <div className="mb-6">
+                                        <div className="text-[10px] font-mono mb-3 text-cyan-400 uppercase tracking-[0.24em]">
+                                            Unit Abilities
+                                        </div>
+
+                                        {selectedUnitAbilities.length > 0 ? (
+                                            <div className="space-y-2">
+                                                {selectedUnitAbilities.map(ability => (
+                                                    <div
+                                                        key={`${selectedId}-${ability.name}`}
+                                                        className="bg-white/5 border border-white/10 rounded-lg p-3"
+                                                    >
+                                                        <div className="flex items-start justify-between gap-3 mb-2">
+                                                            <div className="flex items-center gap-3">
+                                                                <div
+                                                                    className="w-8 h-8 rounded border bg-black/60 flex items-center justify-center text-[10px] font-black"
+                                                                    style={{ borderColor: `${ability.color}80`, color: ability.color }}
+                                                                >
+                                                                    {ability.icon}
+                                                                </div>
+                                                                <div>
+                                                                    <div className="text-[11px] font-bold text-white uppercase tracking-wide">{ability.name}</div>
+                                                                    <div className="text-[9px] font-mono text-gray-500 uppercase tracking-[0.18em]">{ability.type}</div>
+                                                                </div>
+                                                            </div>
+                                                            <div className={`px-2 py-1 rounded border text-[9px] font-mono font-bold ${
+                                                                ability.type === 'PASSIVE'
+                                                                    ? 'border-yellow-500/30 bg-yellow-900/20 text-yellow-300'
+                                                                    : 'border-purple-500/30 bg-purple-900/20 text-purple-300'
+                                                            }`}>
+                                                                {ability.costLabel}
+                                                            </div>
+                                                        </div>
+                                                        <p className="text-[11px] text-gray-400 leading-relaxed">
+                                                            {ability.description}
+                                                        </p>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <div className="text-[10px] text-gray-500 text-center py-4 border border-dashed border-gray-800 rounded bg-black/30 font-mono uppercase tracking-[0.18em]">
+                                                No active or passive unit abilities
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+
                                 {selectedConfig.category === CardCategory.ACTION && (
                                     <div className="mb-6 p-3 border border-dashed border-purple-500/30 rounded bg-purple-900/10 text-center">
                                         <span className="text-[10px] text-purple-300 font-mono">
@@ -397,9 +507,11 @@ const CardCatalogue: React.FC<CardCatalogueProps> = ({ onClose }) => {
                                     </div>
                                 )}
 
-                                <div className="mt-auto border-t border-gray-800 pt-3 text-center">
-                                    <span className="text-[10px] text-gray-500 font-mono">BASE COST: <span className="text-white font-bold">${selectedConfig.cost}</span></span>
-                                </div>
+                                {selectedConfig.category === CardCategory.ACTION && (
+                                    <div className="mt-auto border-t border-gray-800 pt-3 text-center">
+                                        <span className="text-[10px] text-gray-500 font-mono">BASE COST: <span className="text-white font-bold">${selectedConfig.cost}</span></span>
+                                    </div>
+                                )}
                             </div>
                         </>
                     )}

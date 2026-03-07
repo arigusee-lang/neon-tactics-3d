@@ -163,63 +163,63 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     name: 'Cyber Marine',
     description: 'Standard infantry. Ranged attack. Ability: Teleport.',
     cost: 50,
-    baseStats: { hp: 100, maxEnergy: 50, attack: 25, range: 3, movement: 4, size: 1, blocksLos: false }
+    baseStats: { hp: 100, maxEnergy: 50, attack: 25, range: 3, movement: 5, size: 1, blocksLos: false }
   },
   [UnitType.HEAVY]: {
     category: CardCategory.UNIT,
     name: 'Dreadnought',
     description: 'Heavy infantry. Area damage. High HP. Ability: Suicide Detonation.',
-    cost: 150,
-    baseStats: { hp: 300, maxEnergy: 0, attack: 40, range: 2, movement: 2, size: 1, blocksLos: true }
+    cost: 100,
+    baseStats: { hp: 250, maxEnergy: 0, attack: 40, range: 2, movement: 2, size: 1, blocksLos: true }
   },
   [UnitType.MEDIC]: {
     category: CardCategory.UNIT,
     name: 'Field Medic',
     description: 'Support unit. Heals adjacent allies. Ability: Heal Beam.',
-    cost: 75,
-    baseStats: { hp: 80, maxEnergy: 50, attack: 0, range: 3, movement: 4, size: 1, blocksLos: false }
+    cost: 60,
+    baseStats: { hp: 80, maxEnergy: 75, attack: 0, range: 3, movement: 4, size: 1, blocksLos: false }
   },
   [UnitType.HACKER]: {
     category: CardCategory.UNIT,
     name: 'Netrunner',
     description: 'Tech specialist. Can Hack敌 units. Ability: Mind Control.',
-    cost: 120,
+    cost: 110,
     baseStats: { hp: 60, maxEnergy: 100, attack: 10, range: 3, movement: 5, size: 1, blocksLos: false }
   },
   [UnitType.BOX]: {
     category: CardCategory.UNIT,
     name: 'Scout Drone',
     description: 'Fast scout. Low combat capability.',
-    cost: 30,
-    baseStats: { hp: 40, maxEnergy: 0, attack: 5, range: 1, movement: 8, size: 1, blocksLos: false }
+    cost: 25,
+    baseStats: { hp: 40, maxEnergy: 0, attack: 10, range: 1, movement: 7, size: 1, blocksLos: false }
   },
   [UnitType.SUICIDE_DRONE]: {
     category: CardCategory.UNIT,
     name: 'Tick',
     description: 'Explosive drone. Can detonate on command. Fast.',
     cost: 40,
-    baseStats: { hp: 20, maxEnergy: 0, attack: 0, range: 1, movement: 7, size: 1, blocksLos: false }
+    baseStats: { hp: 30, maxEnergy: 0, attack: 0, range: 1, movement: 7, size: 1, blocksLos: false }
   },
   [UnitType.LIGHT_TANK]: {
     category: CardCategory.UNIT,
     name: 'Raptor Tank',
     description: 'Light vehicle. Fast attack. Good against infantry.',
-    cost: 200,
-    baseStats: { hp: 300, maxEnergy: 0, attack: 35, range: 4, movement: 6, size: 1, blocksLos: true }
+    cost: 150,
+    baseStats: { hp: 300, maxEnergy: 0, attack: 35, range: 4, movement: 4, size: 1, blocksLos: true }
   },
   [UnitType.HEAVY_TANK]: {
     category: CardCategory.UNIT,
     name: 'Mammoth Tank',
     description: 'Heavy vehicle. Massive armor and firepower. Passive: Double Strike. Slow. 2x2.',
-    cost: 450,
-    baseStats: { hp: 800, maxEnergy: 0, attack: 80, range: 5, movement: 3, size: 2, blocksLos: true, maxAttacks: 2 }
+    cost: 250,
+    baseStats: { hp: 450, maxEnergy: 0, attack: 50, range: 5, movement: 3, size: 2, blocksLos: true, maxAttacks: 2 }
   },
   [UnitType.SNIPER]: {
     category: CardCategory.UNIT,
     name: 'Ghost Sniper',
-    description: 'Elite sniper. Extreme range. Low HP. Ambush tactics.',
+    description: 'Elite sniper. Deals double damage at 7-8 range, but cannot attack adjacent targets.',
     cost: 120,
-    baseStats: { hp: 60, maxEnergy: 25, attack: 150, range: 8, movement: 3, size: 1, blocksLos: false }
+    baseStats: { hp: 100, maxEnergy: 25, attack: 50, range: 8, movement: 3, size: 1, blocksLos: false }
   },
 
   // Missing entry for CONE? Adding it based on previous glimpses
@@ -227,14 +227,14 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     category: CardCategory.UNIT,
     name: 'Apex Blade',
     description: 'Melee assassin. Passive: Double Strike (Attacks twice). Ability: Summon Drones.',
-    cost: 100,
-    baseStats: { hp: 80, maxEnergy: 50, attack: 50, range: 1, movement: 5, size: 1, blocksLos: false, maxAttacks: 2 }
+    cost: 125,
+    baseStats: { hp: 80, maxEnergy: 50, attack: 40, range: 1, movement: 5, size: 1, blocksLos: false, maxAttacks: 2 }
   },
   [UnitType.REPAIR_BOT]: {
     category: CardCategory.UNIT,
     name: 'Repair Bot',
     description: 'Mobile repair unit. Structural repair ability only works on friendly buildings and machines.',
-    cost: 100,
+    cost: 80,
     baseStats: { hp: 120, maxEnergy: 50, attack: 10, range: 1, movement: 4, size: 1, blocksLos: false }
   },
 
@@ -242,8 +242,8 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     category: CardCategory.UNIT,
     name: 'Titan Turret',
     description: 'Stationary defense. Passive: Splash Damage.',
-    cost: 400,
-    baseStats: { hp: 500, maxEnergy: 0, attack: 70, range: 4, movement: 0, size: 2, blocksLos: true }
+    cost: 200,
+    baseStats: { hp: 300, maxEnergy: 0, attack: 70, range: 4, movement: 0, size: 2, blocksLos: true }
   },
 
   [UnitType.SPIKE]: {
@@ -251,7 +251,7 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     name: 'Neural Spike',
     description: 'Crystalline data anchor.',
     cost: 250,
-    baseStats: { hp: 450, maxEnergy: 0, attack: 40, range: 5, movement: 0, size: 2, blocksLos: true }
+    baseStats: { hp: 200, maxEnergy: 0, attack: 40, range: 20, movement: 0, size: 2, blocksLos: true }
   },
   [UnitType.WALL]: {
     category: CardCategory.UNIT,
@@ -264,8 +264,8 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     category: CardCategory.UNIT,
     name: 'Flux Tower',
     description: '3-story laser defense. High range.',
-    cost: 300,
-    baseStats: { hp: 350, maxEnergy: 0, attack: 55, range: 5, movement: 0, size: 1, blocksLos: true }
+    cost: 150,
+    baseStats: { hp: 200, maxEnergy: 0, attack: 45, range: 5, movement: 0, size: 1, blocksLos: true }
   },
   [UnitType.CHARGING_STATION]: {
     category: CardCategory.UNIT,
@@ -292,43 +292,43 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     category: CardCategory.ACTION,
     name: 'Immortality Shield',
     description: 'Apply temporary invulnerability to a friendly creature or machine for 2 turns.',
-    cost: 150
+    cost: 40
   },
   [UnitType.SYSTEM_FREEZE]: {
     category: CardCategory.ACTION,
     name: 'System Freeze',
     description: 'Immobilize all enemy units for 1 turn.',
-    cost: 150
+    cost: 50
   },
   [UnitType.ION_CANNON]: {
     category: CardCategory.ACTION,
     name: 'Ion Cannon',
     description: 'Orbital Strike: Deals 50 damage to all units in a 3x3 area.',
-    cost: 300
+    cost: 60
   },
   [UnitType.MOBILITY_SABOTAGE]: {
     category: CardCategory.ACTION,
     name: 'Mobility Sabotage',
     description: 'Reduce all hostile battlefield units by 2 Mobility for 3 turns.',
-    cost: 150
+    cost: 20
   },
   [UnitType.MOBILITY_SURGE]: {
     category: CardCategory.ACTION,
     name: 'Mobility Surge',
     description: 'Give all of your mobile battlefield units +3 Mobility until end of turn.',
-    cost: 150
+    cost: 20
   },
   [UnitType.BLEED]: {
     category: CardCategory.ACTION,
     name: 'Bleed',
     description: 'Apply Bleed to all enemy mobile units for 3 turns. Bleeding units suffer 3 damage after each tile moved.',
-    cost: 150
+    cost: 50
   },
   [UnitType.SILENCE]: {
     category: CardCategory.ACTION,
     name: 'Silence',
     description: 'Opponents cannot summon units or use action cards during their next turn.',
-    cost: 150
+    cost: 40
   },
   [UnitType.FORWARD_BASE]: {
     category: CardCategory.ACTION,
@@ -340,24 +340,24 @@ export const CARD_CONFIG: Record<string, { category: CardCategory, name: string,
     category: CardCategory.ACTION,
     name: 'Tactical Retreat',
     description: 'Teleport a friendly unit to the nearest empty deployment zone.',
-    cost: 75
+    cost: 20
   },
   [UnitType.MASS_RETREAT]: {
     category: CardCategory.ACTION,
     name: 'Mass Retreat',
     description: 'Select a 2x2 to 4x4 area and teleport all friendly units inside it to available deployment zones.',
-    cost: 150
+    cost: 40
   },
   [UnitType.LANDING_SABOTAGE]: {
     category: CardCategory.ACTION,
     name: 'Landing Sabotage',
     description: 'Disable a single enemy landing zone tile so units can no longer deploy there.',
-    cost: 100
+    cost: 15
   },
   [UnitType.LOGISTICS_DELAY]: {
     category: CardCategory.ACTION,
     name: 'Logistics Delay',
     description: 'Add 3 turns to every item currently in transit from the shop.',
-    cost: 100
+    cost: 20
   }
 };
