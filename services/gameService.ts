@@ -651,6 +651,7 @@ class GameService {
         this.state.lobbyPlayerCount = 0;
         this.state.lobbyMaxPlayers = 0;
         this.state.hostAdminEnabled = false;
+        this.state.fogOfWarDisabled = false;
         this.state.isInGameAdmin = false;
         this.state.isMultiplayer = false;
         this.state.myPlayerId = null;
@@ -847,13 +848,14 @@ class GameService {
             console.log('Connected to server:', this.socket?.id);
         });
 
-        this.socket.on('lobby_state', (payload: { roomId: string; mapId?: string; mapData?: MapJsonShape | null; players: string[]; playerIds?: PlayerId[]; maxPlayers: number; started: boolean; authoritySocketId?: string; hostAdminEnabled?: boolean }) => {
+        this.socket.on('lobby_state', (payload: { roomId: string; mapId?: string; mapData?: MapJsonShape | null; players: string[]; playerIds?: PlayerId[]; maxPlayers: number; started: boolean; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean }) => {
             this.syncLobbyMap(payload.mapId, payload.mapData);
             this.state.roomId = payload.roomId;
             this.state.lobbyMapId = payload.mapId || null;
             this.state.lobbyPlayerCount = Array.isArray(payload.players) ? payload.players.length : 0;
             this.state.lobbyMaxPlayers = payload.maxPlayers || 0;
             this.state.hostAdminEnabled = !!payload.hostAdminEnabled;
+            this.state.fogOfWarDisabled = !!payload.fogOfWarDisabled;
             this.state.isMultiplayer = true;
             this.authoritySocketId = payload.authoritySocketId || this.authoritySocketId;
             this.updateInGameAdminState();
@@ -876,18 +878,20 @@ class GameService {
             this.notify();
         });
 
-        this.socket.on('lobby_created', (payload: string | { roomId: string; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean }) => {
+        this.socket.on('lobby_created', (payload: string | { roomId: string; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean }) => {
             const roomId = typeof payload === 'string' ? payload : payload.roomId;
             const mapId = typeof payload === 'string' ? null : (payload.mapId || null);
             const mapData = typeof payload === 'string' ? null : (payload.mapData || null);
             const authoritySocketId = typeof payload === 'string' ? null : (payload.authoritySocketId || null);
             const hostAdminEnabled = typeof payload === 'string' ? false : !!payload.hostAdminEnabled;
+            const fogOfWarDisabled = typeof payload === 'string' ? false : !!payload.fogOfWarDisabled;
             this.syncLobbyMap(mapId, mapData);
             console.log('Lobby Created:', roomId, mapId ? `map=${mapId}` : '');
             this.state.roomId = roomId;
             this.state.isMultiplayer = true;
             this.state.lobbyMapId = mapId;
             this.state.hostAdminEnabled = hostAdminEnabled;
+            this.state.fogOfWarDisabled = fogOfWarDisabled;
             this.state.myPlayerId = PlayerId.ONE;
             this.authoritySocketId = authoritySocketId || this.socket?.id || null;
             this.updateInGameAdminState();
@@ -895,7 +899,7 @@ class GameService {
             this.notify();
         });
 
-        this.socket.on('game_start', (data: { roomId: string; players: string[]; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean; turnOrder?: PlayerId[] }) => {
+        this.socket.on('game_start', (data: { roomId: string; players: string[]; mapId?: string; mapData?: MapJsonShape | null; authoritySocketId?: string; hostAdminEnabled?: boolean; fogOfWarDisabled?: boolean; turnOrder?: PlayerId[] }) => {
             console.log('Game Start:', data);
             this.syncLobbyMap(data.mapId, data.mapData);
             this.state.roomId = data.roomId;
@@ -904,6 +908,7 @@ class GameService {
             this.state.lobbyPlayerCount = data.players.length;
             this.state.lobbyMaxPlayers = data.turnOrder?.length || data.players.length;
             this.state.hostAdminEnabled = !!data.hostAdminEnabled;
+            this.state.fogOfWarDisabled = !!data.fogOfWarDisabled;
             this.authoritySocketId = data.authoritySocketId || data.players[0] || null;
             this.updateInGameAdminState();
 
@@ -985,11 +990,12 @@ class GameService {
         });
     }
 
-    public createLobby(mapId: string = 'MAP_1', hostAdminEnabled: boolean = false) {
+    public createLobby(mapId: string = 'MAP_1', hostAdminEnabled: boolean = false, fogOfWarDisabled: boolean = false) {
         if (this.socket) {
             this.socket.emit('create_lobby', {
                 mapId,
                 hostAdminEnabled,
+                fogOfWarDisabled,
                 mapData: this.getImportedMapData(mapId)
             });
         }
@@ -1005,6 +1011,7 @@ class GameService {
             this.state.lobbyPlayerCount = 0;
             this.state.lobbyMaxPlayers = 0;
             this.state.hostAdminEnabled = false;
+            this.state.fogOfWarDisabled = false;
             this.state.isInGameAdmin = false;
             this.socket.emit('join_lobby', roomId);
         }
@@ -1085,6 +1092,7 @@ class GameService {
             ),
             interactionState: { ...this.state.interactionState },
             tilePulse: this.state.tilePulse ? { ...this.state.tilePulse } : null,
+            fogOfWarDisabled: this.state.fogOfWarDisabled,
             winner: this.state.winner
         };
     }
@@ -1344,6 +1352,9 @@ class GameService {
                     this.state.playerEffects = data.playerEffects;
                 }
                 this.state.tilePulse = data.tilePulse ? { ...data.tilePulse } : null;
+                if (typeof data.fogOfWarDisabled === 'boolean') {
+                    this.state.fogOfWarDisabled = data.fogOfWarDisabled;
+                }
                 if (typeof data.winner !== 'undefined') {
                     this.state.winner = data.winner;
                 }
@@ -1478,8 +1489,8 @@ class GameService {
             lobbyPlayerCount: 0,
             lobbyMaxPlayers: 0,
             hostAdminEnabled: false,
+            fogOfWarDisabled: false,
             isInGameAdmin: false,
-            isAdminFogDisabled: false,
             myPlayerId: null,
             availableMaps: getAvailableMaps()
         };
@@ -1839,14 +1850,6 @@ class GameService {
     public toggleUnitNameLabels() {
         this.state.showUnitNameLabels = !this.state.showUnitNameLabels;
         this.log(`> VISUAL PROTOCOL: UNIT NAME LABELS ${this.state.showUnitNameLabels ? 'VISIBLE' : 'HIDDEN'}`);
-        this.notify();
-    }
-
-    public toggleAdminFogOfWar() {
-        if (!this.state.isInGameAdmin) return;
-
-        this.state.isAdminFogDisabled = !this.state.isAdminFogDisabled;
-        this.log(`> ADMIN OVERRIDE: FOG OF WAR ${this.state.isAdminFogDisabled ? 'DISABLED' : 'ENABLED'}`);
         this.notify();
     }
 
@@ -2666,11 +2669,11 @@ class GameService {
             recentlyDeliveredCardIds: this.createPerPlayerRecord(() => []),
 
             isDevMode: isDevMode,
-            isAdminFogDisabled: false,
             debugClickTrace: [],
             debugLastDecision: null,
             debugLastHoverTile: null
         };
+        this.updateFogOfWar();
 
         this.generateShopStock(10);
         this.awardTurnStartIncome(this.state.currentTurn, this.state.roundNumber);
@@ -2801,7 +2804,7 @@ class GameService {
     private updateFogOfWar() {
         this.discovered.clear();
 
-        if (this.state.isDevMode) {
+        if (this.state.isDevMode || this.state.fogOfWarDisabled) {
             Object.keys(this.state.terrain).forEach((key) => this.discovered.add(key));
             this.state.revealedTiles = Array.from(this.discovered);
             return;
@@ -6354,11 +6357,14 @@ class GameService {
         }
 
         const remainingSteps = this.getEffectiveMovement(unit) - unit.status.stepsTaken;
+        const traversableTiles = this.state.fogOfWarDisabled
+            ? new Set(Object.keys(this.state.terrain))
+            : new Set(revealedTiles);
         const path = findPath(
             unit.position,
             { x: targetX, z: targetZ },
             occupied,
-            new Set(revealedTiles),
+            traversableTiles,
             this.state.terrain,
             size,
             this.state.mapBounds
@@ -6860,9 +6866,10 @@ class GameService {
             const completeRoundTransition = () => {
                 const turnOrder = this.state.turnOrder.length > 0 ? this.state.turnOrder : [...this.state.activePlayerIds];
                 const nextTurn = this.getNextTurnInOrder(this.state.currentTurn, turnOrder);
+                const didAdvanceRound = this.isLastTurnInOrder(this.state.currentTurn, turnOrder);
                 let nextRound = this.state.roundNumber;
 
-                if (this.isLastTurnInOrder(this.state.currentTurn, turnOrder)) {
+                if (didAdvanceRound) {
                     nextRound++;
                     this.log(`> SIMULATION LEVEL ${nextRound}`);
                     this.state.units = this.state.units.map(u => ({ ...u, level: (u.level || 1) + 1 }));
@@ -6897,7 +6904,7 @@ class GameService {
                     this.log(`> SILENCE ACTIVE: ${nextTurn} CANNOT DEPLOY OR CAST THIS TURN`, nextTurn);
                 }
 
-                if (nextRound > 0 && nextRound % TALENT_SELECTION_LEVEL_STEP === 0) {
+                if (didAdvanceRound && nextRound > 0 && nextRound % TALENT_SELECTION_LEVEL_STEP === 0) {
                     const talentQueue = turnOrder.filter((playerId) => this.state.activePlayerIds.includes(playerId));
                     const [firstPlayer, ...remainingPlayers] = talentQueue;
 

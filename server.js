@@ -253,7 +253,8 @@ function emitLobbyState(roomId, lobby) {
     maxPlayers: lobby.maxPlayers || 2,
     started: !!lobby.started,
     authoritySocketId: lobby.authoritySocketId || null,
-    hostAdminEnabled: !!lobby.hostAdminEnabled
+    hostAdminEnabled: !!lobby.hostAdminEnabled,
+    fogOfWarDisabled: !!lobby.fogOfWarDisabled
   });
 }
 
@@ -296,6 +297,7 @@ io.on('connection', (socket) => {
     const mapId = typeof payload?.mapId === 'string' ? payload.mapId : 'MAP_1';
     const mapData = payload?.mapData && typeof payload.mapData === 'object' ? payload.mapData : null;
     const hostAdminEnabled = !!payload?.hostAdminEnabled;
+    const fogOfWarDisabled = !!payload?.fogOfWarDisabled;
     const maxPlayers = getLobbyCapacityFromMapPayload(mapId, mapData);
     const turnOrder = PLAYER_IDS.slice(0, maxPlayers);
     const roomId = Math.random().toString(36).substring(2, 6).toUpperCase();
@@ -303,6 +305,7 @@ io.on('connection', (socket) => {
       players: [socket.id],
       authoritySocketId: socket.id,
       hostAdminEnabled,
+      fogOfWarDisabled,
       gameState: null,
       selectedCharacters: createEmptyCharacterSelections(),
       mapId,
@@ -314,8 +317,15 @@ io.on('connection', (socket) => {
     };
     socket.join(roomId);
     emitLobbyState(roomId, lobbies[roomId]);
-    socket.emit('lobby_created', { roomId, mapId, mapData, authoritySocketId: socket.id, hostAdminEnabled });
-    console.log(`Lobby created: ${roomId} by ${socket.id} | map=${mapId} | hostAdmin=${hostAdminEnabled}`);
+    socket.emit('lobby_created', {
+      roomId,
+      mapId,
+      mapData,
+      authoritySocketId: socket.id,
+      hostAdminEnabled,
+      fogOfWarDisabled
+    });
+    console.log(`Lobby created: ${roomId} by ${socket.id} | map=${mapId} | hostAdmin=${hostAdminEnabled} | fogOff=${fogOfWarDisabled}`);
   });
 
   // 2. Join Lobby
@@ -338,6 +348,7 @@ io.on('connection', (socket) => {
           mapData: lobby.mapData || null,
           authoritySocketId: lobby.authoritySocketId,
           hostAdminEnabled: !!lobby.hostAdminEnabled,
+          fogOfWarDisabled: !!lobby.fogOfWarDisabled,
           turnOrder: lobby.turnOrder
         });
         console.log(`Player ${socket.id} joined lobby ${roomId} (${lobby.players.length}/${lobby.maxPlayers})`);

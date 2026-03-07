@@ -353,8 +353,8 @@ export interface GameState {
   lobbyPlayerCount: number;
   lobbyMaxPlayers: number;
   hostAdminEnabled: boolean;
+  fogOfWarDisabled: boolean;
   isInGameAdmin: boolean;
-  isAdminFogDisabled: boolean;
   myPlayerId: PlayerId | null; // The player ID that THIS client controls
 
   // Developer Mode Flag
